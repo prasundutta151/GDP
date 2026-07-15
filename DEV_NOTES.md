@@ -819,3 +819,16 @@ Changes Made
   dedicated step-by-step section.
 - Added an update-policy section stating that the guide should be maintained as
   GDP commands, products, plots, and release steps evolve.
+
+## 2026-07-15 17:33:16 IST
+
+Prompt / Request
+- In each individual product format page, add a box section with Python
+  commands that read the format and explain what is obtained after reading.
+
+Changes Made
+- Added `Read This Product In Python` sections to gains, stats, KS,
+  self-corr, and cross-corr product format pages.
+- Each section includes a NumPy loading example, header parsing, key axis/data
+  arrays, and a short explanation of what the arrays represent.
+- Added shared styling for format-reader blocks.

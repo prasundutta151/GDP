@@ -55,6 +55,30 @@
       <p>If all samples for an antenna/stokes/component are flagged or non-finite, GDP keeps the expected lag-bin rows with <code>s2</code> and <code>err</code> set to NaN and <code>count</code> set to zero. Plotting code renders those bins as blank or white cells.</p>
     </section>
 
+    <section class="format-reader">
+      <h2>Read This Product In Python</h2>
+      <pre><code>from pathlib import Path
+import json
+import numpy as np
+
+path = Path("rundir/data-product/self-corr/npz/gdp-self-corr-gain-scan2.npz")
+with np.load(path, allow_pickle=True) as z:
+    header = json.loads(str(z["header_json"]))
+    scan = z["scan"].astype(int)
+    antenna = z["antenna"].astype(int)
+    stokes = z["stokes"].astype(int)
+    component = z["component"].astype(str)
+    tau = z["tau"].astype(float)
+    s2 = z["s2"].astype(float)
+    err = z["err"].astype(float)
+    count = z["count"].astype(int)
+
+mask = (antenna == 0) & (stokes == 0) & (component == "real")
+print("antenna 0 real tau:", tau[mask])
+print("antenna 0 real S2:", s2[mask])</code></pre>
+      <p>Reading this product gives a long table of structure-function lag bins. Each row belongs to one scan, antenna, Stokes, component, and lag <code>tau</code>. Use <code>s2</code> for the normalized structure-function value, <code>err</code> for jackknife uncertainty, and <code>count</code> to see how many pairs contributed to the bin.</p>
+    </section>
+
     <section class="sample-plots" aria-labelledby="sample-plots">
       <h2 id="sample-plots">Sample Plots</h2>
       <table>

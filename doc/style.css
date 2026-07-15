@@ -30,7 +30,8 @@ a {
 }
 .doc-tree,
 .product-formats,
-.sample-plots {
+.sample-plots,
+.format-reader {
   margin: 0 0 28px;
   padding: 16px 18px;
   border: 1px solid #d8dee6;
@@ -42,7 +43,8 @@ a {
 }
 .doc-tree h2,
 .product-formats h2,
-.sample-plots h2 {
+.sample-plots h2,
+.format-reader h2 {
   margin-top: 0;
 }
 .doc-tree ul,

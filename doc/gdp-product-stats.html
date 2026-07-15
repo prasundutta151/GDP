@@ -56,6 +56,31 @@
       <p>The statistics follow the AntStat plot convention: real samples are <code>real(gain) - 1</code>, imaginary samples are <code>imag(gain)</code>, mean/std/median/MAD/min/max are saved in percent, and skew/kurtosis are dimensionless.</p>
     </section>
 
+    <section class="format-reader">
+      <h2>Read This Product In Python</h2>
+      <pre><code>from pathlib import Path
+import json
+import numpy as np
+
+path = Path("rundir/data-product/stats/npz/gdp-stats-gain-scan2.npz")
+with np.load(path, allow_pickle=True) as z:
+    header = json.loads(str(z["header_json"]))
+    scans = z["scan_numbers"].astype(int)
+    antennas = z["antennas"].astype(int)
+    stokes = z["stokes"].astype(int)
+    components = z["components"].astype(str)
+    metrics = z["metrics"].astype(str)
+    stats = z["stats"].astype(float)
+    valid_count = z["valid_count"].astype(int)
+
+mean_i = list(metrics).index("mean")
+real_i = list(components).index("real")
+mean_real = stats[:, :, :, real_i, mean_i]
+print("shape:", stats.shape)
+print("mean real percent by scan/antenna/stokes:", mean_real.shape)</code></pre>
+      <p>Reading this product gives a dense array with axes <code>(scan, antenna, stokes, component, metric)</code>. The axis-label arrays tell you which scan, antenna, Stokes, component, and metric each index represents. Use <code>valid_count</code>, <code>total_count</code>, and <code>flagged_count</code> to check how much data contributed to each statistic.</p>
+    </section>
+
     <section class="sample-plots" aria-labelledby="sample-plots">
       <h2 id="sample-plots">Sample Plots</h2>
       <table>

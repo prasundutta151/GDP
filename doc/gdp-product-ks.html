@@ -54,6 +54,31 @@
       <p>The KS product follows the AntStat plot convention: gain mode uses finite raw real and imaginary samples; bandpass mode uses finite channel means over time; each component is tested against a fitted normal distribution.</p>
     </section>
 
+    <section class="format-reader">
+      <h2>Read This Product In Python</h2>
+      <pre><code>from pathlib import Path
+import json
+import numpy as np
+
+path = Path("rundir/data-product/ks/npz/gdp-ks-gain-scan2.npz")
+with np.load(path, allow_pickle=True) as z:
+    header = json.loads(str(z["header_json"]))
+    scans = z["scan_numbers"].astype(int)
+    antennas = z["antennas"].astype(int)
+    stokes = z["stokes"].astype(int)
+    components = z["components"].astype(str)
+    metrics = z["metrics"].astype(str)
+    ks = z["ks"].astype(float)
+    sample_count = z["sample_count"].astype(int)
+
+d_i = list(metrics).index("d_statistic")
+real_i = list(components).index("real")
+d_real = ks[:, :, :, real_i, d_i]
+print("KS D percent shape:", d_real.shape)
+print("finite samples shape:", sample_count.shape)</code></pre>
+      <p>Reading this product gives fitted-normal KS metrics with axes <code>(scan, antenna, stokes, component, metric)</code>. The <code>d_statistic</code> metric is in percent, while <code>n_sample</code>, <code>mean</code>, and <code>std</code> describe the finite samples used in the test.</p>
+    </section>
+
     <section class="sample-plots" aria-labelledby="sample-plots">
       <h2 id="sample-plots">Sample Plots</h2>
       <table>

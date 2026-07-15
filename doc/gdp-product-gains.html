@@ -56,6 +56,29 @@
       </table>
     </section>
 
+    <section class="format-reader">
+      <h2>Read This Product In Python</h2>
+      <pre><code>from pathlib import Path
+import json
+import numpy as np
+
+path = Path("rundir/data-product/gains/npz/gdp-gains-gain-scan2.npz")
+with np.load(path, allow_pickle=True) as z:
+    header = json.loads(str(z["header_json"]))
+    scan = z["scan"].astype(int)
+    antenna = z["antenna"].astype(int)
+    stokes = z["stokes"].astype(int)
+    channel = z["channel"].astype(int)
+    time = z["time"].astype(float)
+    interval = z["interval"].astype(float)
+    real = z["real"].astype(float)
+    imag = z["imag"].astype(float)
+    flagged = z["flagged"].astype(bool)
+
+print(header["mode"], np.unique(antenna), real.shape)</code></pre>
+      <p>Reading this product gives one long table of gain or bandpass samples. Each row is identified by scan, antenna, Stokes, channel, original CASA row, and time. Use <code>real</code>, <code>imag</code>, and <code>flagged</code> to build antenna plots, colormaps, and histograms.</p>
+    </section>
+
     <section class="sample-plots" aria-labelledby="sample-plots">
       <h2 id="sample-plots">Sample Plots</h2>
       <table>

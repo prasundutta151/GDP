@@ -74,6 +74,31 @@
       </table>
     </section>
 
+    <section class="format-reader">
+      <h2>Read This Product In Python</h2>
+      <pre><code>from pathlib import Path
+import json
+import numpy as np
+
+path = Path("rundir/data-product/cross-corr/npz/gdp-cross-corr-gain-scan2.npz")
+with np.load(path, allow_pickle=True) as z:
+    header = json.loads(str(z["header_json"]))
+    scan = z["scan"].astype(int)
+    ant1 = z["ant1"].astype(int)
+    ant2 = z["ant2"].astype(int)
+    stokes = z["stokes"].astype(str)
+    components = z["components"].astype(str)
+    threshold = z["threshold"].astype(float)
+    tcorr = z["tcorr"].astype(float)
+    nbin_valid = z["nbin_valid"].astype(int)
+    npair = z["npair"].astype(int)
+
+finite = np.isfinite(tcorr)
+print("finite tcorr rows:", np.count_nonzero(finite))
+print("first finite tcorr:", tcorr[finite][0] if np.any(finite) else "none")</code></pre>
+      <p>Reading this product gives one row per antenna pair, Stokes pairing, and component pairing. Use <code>tcorr</code> as the extracted correlation time, <code>threshold</code> as the S2 crossing level used, and <code>nbin_valid</code>/<code>npair</code> to judge whether the estimate is well supported.</p>
+    </section>
+
     <section class="sample-plots" aria-labelledby="sample-plots">
       <h2 id="sample-plots">Sample Plots</h2>
       <table>
