@@ -1,0 +1,459 @@
+#!/usr/bin/env python3
+"""Plot GDP products, creating missing NPZ products with gdp-stats when needed."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import subprocess
+import sys
+import time
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+
+import numpy as np
+
+try:
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+except Exception as exc:
+    raise RuntimeError("gdp-plot requires matplotlib. See REQUIREMENTS.md.") from exc
+
+
+CONFIG_NAME = ".gdp-config.json"
+PRODUCTS = {
+    "gain_colormap": ("gains", "gains_npz_dir", "gains"),
+    "stats": ("stats", "stats_npz_dir", "stats"),
+    "ks": ("ks", "ks_npz_dir", "ks"),
+    "self_corr_colormap": ("self_corr", "self_corr_npz_dir", "self-corr"),
+    "cross_corr_colormap": ("cross_corr", "cross_corr_npz_dir", "cross-corr"),
+}
+
+
+def project_root() -> Path:
+    return Path(__file__).resolve().parents[1]
+
+
+def script_dir() -> Path:
+    return project_root() / "script"
+
+
+def load_config() -> Dict[str, Any]:
+    path = project_root() / CONFIG_NAME
+    if not path.exists():
+        return {}
+    with path.open("r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def config_path(key: str) -> Optional[Path]:
+    cfg = load_config()
+    value = cfg.get(key)
+    if value is None and isinstance(cfg.get("paths"), dict):
+        value = cfg["paths"].get(key)
+    return Path(str(value)).expanduser().resolve() if value else None
+
+
+def parse_int_list(text: Optional[str]) -> Optional[List[int]]:
+    if text is None or str(text).strip() == "":
+        return None
+    return sorted({int(part.strip()) for part in str(text).split(",") if part.strip()})
+
+
+def scan_text(scans: Optional[List[int]]) -> str:
+    return "allscans" if scans is None else "scan" + "-".join(str(s) for s in scans)
+
+
+def default_product_dir(product: str) -> Path:
+    _, config_key, folder = PRODUCTS[product]
+    configured = config_path(config_key)
+    if configured is not None:
+        return configured
+    return project_root() / "rundir" / "data-product" / folder / "npz"
+
+
+def default_product_path(product: str, mode: str, scan_label: str) -> Path:
+    product_name, _, _ = PRODUCTS[product]
+    return default_product_dir(product) / f"gdp-{product_name.replace('_', '-')}-{mode}-{scan_label}.npz"
+
+
+def discover_scan_products(product: str, mode: str) -> List[Tuple[str, Path]]:
+    product_name, _, _ = PRODUCTS[product]
+    pattern = f"gdp-{product_name.replace('_', '-')}-{mode}-scan*.npz"
+    found = []
+    for path in sorted(default_product_dir(product).glob(pattern)):
+        label = path.stem.split(f"gdp-{product_name.replace('_', '-')}-{mode}-", 1)[-1]
+        found.append((label, path))
+    return found
+
+
+def default_plot_dir(fmt: str) -> Path:
+    key = f"plots_{fmt}_dir"
+    configured = config_path(key)
+    if configured is not None:
+        return configured
+    return project_root() / "rundir" / "plots" / fmt
+
+
+def output_path(plot_dir: Path, task: str, mode: str, scan_label: str, fmt: str) -> Path:
+    return plot_dir / f"gdp-plot-{task.replace('_', '-')}-{mode}-{scan_label}.{fmt}"
+
+
+def ensure_npz(product: str, mode: str, args: argparse.Namespace, scans: Optional[List[int]], scan_label: str) -> Path:
+    path = default_product_path(product, mode, scan_label)
+    if path.exists() and not args.recompute:
+        print(f"Using existing {product} NPZ: {path}")
+        return path
+
+    task_flag = {
+        "gain_colormap": "--gains",
+        "stats": "--stats",
+        "ks": "--ks",
+        "self_corr_colormap": "--self-corr",
+        "cross_corr_colormap": "--cross-corr",
+    }[product]
+    output_flag = {
+        "gain_colormap": "--output-gains-npz",
+        "stats": "--output-npz",
+        "ks": "--output-ks-npz",
+        "self_corr_colormap": "--output-self-corr-npz",
+        "cross_corr_colormap": "--output-cross-corr-npz",
+    }[product]
+
+    cmd = [str(script_dir() / "gdp-stats"), "--mode", mode, "--combine-scans", task_flag, output_flag, str(path)]
+    if args.input_table:
+        cmd.extend(["--input-table", args.input_table])
+    if args.gain_dir:
+        cmd.extend(["--gain-dir", args.gain_dir])
+    if scans is not None:
+        cmd.extend(["--scan", ",".join(str(s) for s in scans)])
+    if args.antenna:
+        cmd.extend(["--antennas", args.antenna])
+    if args.bchan is not None:
+        cmd.extend(["--bchan", str(args.bchan)])
+    if args.echan is not None:
+        cmd.extend(["--echan", str(args.echan)])
+    if args.no_use_flags:
+        cmd.append("--no-use-flags")
+
+    print("Creating missing NPZ with gdp-stats:")
+    print("$ " + " ".join(cmd))
+    if args.dry_run:
+        return path
+    subprocess.run(cmd, cwd=str(project_root()), check=True)
+    if not path.exists():
+        raise FileNotFoundError(f"gdp-stats completed but expected product is missing: {path}")
+    return path
+
+
+def ensure_npzs(product: str, mode: str, args: argparse.Namespace, scans: Optional[List[int]]) -> List[Tuple[str, Path]]:
+    if args.combine_scans:
+        label = scan_text(scans)
+        return [(label, ensure_npz(product, mode, args, scans, label))]
+
+    if scans is not None:
+        labels = [f"scan{int(scan)}" for scan in scans]
+    else:
+        labels = [label for label, _ in discover_scan_products(product, mode)]
+
+    existing = [(label, default_product_path(product, mode, label)) for label in labels]
+    if existing and not args.recompute and all(path.exists() for _, path in existing):
+        for _, path in existing:
+            print(f"Using existing {product} NPZ: {path}")
+        return existing
+
+    task_flag = {
+        "gain_colormap": "--gains",
+        "stats": "--stats",
+        "ks": "--ks",
+        "self_corr_colormap": "--self-corr",
+        "cross_corr_colormap": "--cross-corr",
+    }[product]
+    cmd = [str(script_dir() / "gdp-stats"), "--mode", mode, task_flag]
+    if args.input_table:
+        cmd.extend(["--input-table", args.input_table])
+    if args.gain_dir:
+        cmd.extend(["--gain-dir", args.gain_dir])
+    if scans is not None:
+        cmd.extend(["--scan", ",".join(str(s) for s in scans)])
+    if args.antenna:
+        cmd.extend(["--antennas", args.antenna])
+    if args.bchan is not None:
+        cmd.extend(["--bchan", str(args.bchan)])
+    if args.echan is not None:
+        cmd.extend(["--echan", str(args.echan)])
+    if args.no_use_flags:
+        cmd.append("--no-use-flags")
+
+    print("Creating missing per-scan NPZ products with gdp-stats:")
+    print("$ " + " ".join(cmd))
+    if args.dry_run:
+        return existing
+    subprocess.run(cmd, cwd=str(project_root()), check=True)
+
+    if scans is not None:
+        result = [(label, default_product_path(product, mode, label)) for label in labels]
+    else:
+        result = discover_scan_products(product, mode)
+    missing = [str(path) for _, path in result if not path.exists()]
+    if missing:
+        raise FileNotFoundError(f"Missing expected per-scan products: {missing}")
+    if not result:
+        raise FileNotFoundError(f"No per-scan {product} products found after running gdp-stats.")
+    return result
+
+
+def load_npz(path: Path) -> Dict[str, np.ndarray]:
+    with np.load(path, allow_pickle=True) as data:
+        return {key: data[key] for key in data.files}
+
+
+def filter_antennas(values: np.ndarray, antennas: Optional[List[int]]) -> np.ndarray:
+    if antennas is None:
+        return np.asarray(values)
+    values = np.asarray(values)
+    return values[np.isin(values, np.asarray(antennas, dtype=values.dtype))]
+
+
+def apply_style(ax: Any, title: str, xlabel: str = "", ylabel: str = "") -> None:
+    ax.set_title(title)
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
+    ax.grid(False)
+
+
+def save_figure(fig: Any, path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fig.tight_layout()
+    fig.savefig(path, dpi=160, bbox_inches="tight")
+    plt.close(fig)
+    print(f"Wrote plot: {path}")
+
+
+def plot_gain_colormap(npz_path: Path, out: Path, antennas: Optional[List[int]], mode: str) -> None:
+    z = load_npz(npz_path)
+    required = {"scan", "antenna", "stokes", "channel", "real", "imag"}
+    missing = required - set(z)
+    if missing:
+        raise ValueError(f"{npz_path} missing arrays: {sorted(missing)}")
+
+    ant_all = filter_antennas(np.unique(z["antenna"]).astype(int), antennas)
+    stokes_all = np.unique(z["stokes"]).astype(int)
+    if ant_all.size == 0 or stokes_all.size == 0:
+        raise ValueError("No antennas/stokes available for gain colormap.")
+
+    x_values = np.unique(z["channel"] if mode == "bandpass" else z["scan"]).astype(int)
+    x_label = "Channel" if mode == "bandpass" else "Scan"
+    if x_values.size == 0:
+        raise ValueError("No x-axis values available for gain colormap.")
+
+    n = len(stokes_all)
+    fig, axes = plt.subplots(1, n, figsize=(5.2 * n, max(4.0, 0.22 * len(ant_all) + 2.4)), squeeze=False)
+    amplitude = np.hypot(z["real"].astype(float), z["imag"].astype(float))
+    for idx, stokes in enumerate(stokes_all):
+        mat = np.full((len(ant_all), len(x_values)), np.nan, dtype=float)
+        for ai, ant in enumerate(ant_all):
+            for xi, xv in enumerate(x_values):
+                selector = (z["antenna"] == ant) & (z["stokes"] == stokes)
+                selector &= (z["channel"] == xv) if mode == "bandpass" else (z["scan"] == xv)
+                vals = amplitude[selector]
+                if vals.size:
+                    mat[ai, xi] = float(np.nanmedian(vals))
+        ax = axes[0, idx]
+        im = ax.imshow(mat, aspect="auto", origin="lower", interpolation="nearest", cmap="viridis")
+        ax.set_xticks(np.arange(len(x_values)))
+        ax.set_xticklabels([str(x) for x in x_values], rotation=90 if len(x_values) > 12 else 0)
+        ax.set_yticks(np.arange(len(ant_all)))
+        ax.set_yticklabels([str(a) for a in ant_all])
+        apply_style(ax, f"{mode} amplitude | stokes {stokes}", x_label, "Antenna")
+        fig.colorbar(im, ax=ax, label="median amplitude")
+    save_figure(fig, out)
+
+
+def metric_index(metrics: Sequence[Any], name: str) -> Optional[int]:
+    labels = [str(x) for x in metrics]
+    return labels.index(name) if name in labels else None
+
+
+def plot_metric_product(npz_path: Path, out: Path, product_key: str, antennas: Optional[List[int]]) -> None:
+    z = load_npz(npz_path)
+    data_key = "stats" if product_key == "stats" else "ks"
+    if data_key not in z:
+        raise ValueError(f"{npz_path} missing {data_key} array.")
+    values = z[data_key].astype(float)
+    scan_numbers = z["scan_numbers"].astype(int)
+    ant_axis = z["antennas"].astype(int)
+    metrics = [str(x) for x in z["metrics"]]
+    ant_mask = np.ones(len(ant_axis), dtype=bool) if antennas is None else np.isin(ant_axis, antennas)
+    if not np.any(ant_mask):
+        raise ValueError("No selected antennas found in product.")
+
+    wanted = ["mean", "std", "skew", "kurtosis"] if product_key == "stats" else metrics
+    fig, ax = plt.subplots(figsize=(10, 5.2))
+    for name in wanted:
+        mi = metric_index(metrics, name)
+        if mi is None:
+            continue
+        vals = values[..., mi][:, ant_mask, :, :]
+        y = np.nanmedian(vals, axis=(1, 2, 3))
+        ax.plot(scan_numbers, y, marker="o", linewidth=1.8, label=name)
+    apply_style(ax, f"{product_key.upper()} median by scan", "Scan", "median value")
+    ax.legend(loc="best")
+    save_figure(fig, out)
+
+
+def plot_self_corr_colormap(npz_path: Path, out: Path, antennas: Optional[List[int]]) -> None:
+    z = load_npz(npz_path)
+    required = {"antenna", "stokes", "component", "tau", "s2"}
+    missing = required - set(z)
+    if missing:
+        raise ValueError(f"{npz_path} missing arrays: {sorted(missing)}")
+    ant_all = filter_antennas(np.unique(z["antenna"]).astype(int), antennas)
+    stokes_all = np.unique(z["stokes"]).astype(int)
+    comps = np.unique(z["component"].astype(str))
+    tau = np.unique(z["tau"].astype(float))
+    panels = [(s, c) for s in stokes_all for c in comps]
+    if not panels:
+        raise ValueError("No self-correlation panels available.")
+    ncols = 2
+    nrows = int(np.ceil(len(panels) / ncols))
+    fig, axes = plt.subplots(nrows, ncols, figsize=(6.0 * ncols, max(3.8, 3.0 * nrows)), squeeze=False)
+    for pi, (stokes, comp) in enumerate(panels):
+        ax = axes.ravel()[pi]
+        mat = np.full((len(ant_all), len(tau)), np.nan, dtype=float)
+        for ai, ant in enumerate(ant_all):
+            for ti, tv in enumerate(tau):
+                selector = (z["antenna"] == ant) & (z["stokes"] == stokes) & (z["component"].astype(str) == comp) & (z["tau"] == tv)
+                vals = z["s2"].astype(float)[selector]
+                if vals.size:
+                    mat[ai, ti] = float(np.nanmedian(vals))
+        im = ax.imshow(mat, aspect="auto", origin="lower", interpolation="nearest", cmap="magma")
+        ax.set_yticks(np.arange(len(ant_all)))
+        ax.set_yticklabels([str(a) for a in ant_all])
+        ax.set_xticks(np.linspace(0, max(len(tau) - 1, 0), min(len(tau), 6), dtype=int))
+        ax.set_xticklabels([f"{tau[i]:.3g}" for i in ax.get_xticks().astype(int)])
+        apply_style(ax, f"self corr S2 | S{stokes} {comp}", "tau", "Antenna")
+        fig.colorbar(im, ax=ax, label="S2")
+    for ax in axes.ravel()[len(panels):]:
+        ax.axis("off")
+    save_figure(fig, out)
+
+
+def plot_cross_corr_colormap(npz_path: Path, out: Path, antennas: Optional[List[int]]) -> None:
+    z = load_npz(npz_path)
+    required = {"ant1", "ant2", "stokes", "components", "tcorr"}
+    missing = required - set(z)
+    if missing:
+        raise ValueError(f"{npz_path} missing arrays: {sorted(missing)}")
+    ant_values = np.unique(np.concatenate([z["ant1"].astype(int), z["ant2"].astype(int)]))
+    ant_all = filter_antennas(ant_values, antennas)
+    combos = sorted({(str(s), str(c)) for s, c in zip(z["stokes"].astype(str), z["components"].astype(str))})
+    if ant_all.size == 0 or not combos:
+        raise ValueError("No cross-correlation values available.")
+    ncols = 2
+    nrows = int(np.ceil(len(combos) / ncols))
+    fig, axes = plt.subplots(nrows, ncols, figsize=(5.4 * ncols, max(4.4, 4.2 * nrows)), squeeze=False)
+    ant_index = {int(a): i for i, a in enumerate(ant_all)}
+    for pi, (stokes, comp) in enumerate(combos):
+        ax = axes.ravel()[pi]
+        mat = np.full((len(ant_all), len(ant_all)), np.nan, dtype=float)
+        selector = (z["stokes"].astype(str) == stokes) & (z["components"].astype(str) == comp)
+        for a1, a2, val in zip(z["ant1"][selector].astype(int), z["ant2"][selector].astype(int), z["tcorr"][selector].astype(float)):
+            if a1 not in ant_index or a2 not in ant_index or not np.isfinite(val):
+                continue
+            i, j = ant_index[a1], ant_index[a2]
+            mat[i, j] = val
+            mat[j, i] = val
+        im = ax.imshow(mat, origin="lower", interpolation="nearest", cmap="viridis")
+        ax.set_xticks(np.arange(len(ant_all)))
+        ax.set_xticklabels([str(a) for a in ant_all], rotation=90)
+        ax.set_yticks(np.arange(len(ant_all)))
+        ax.set_yticklabels([str(a) for a in ant_all])
+        apply_style(ax, f"cross tcorr | S{stokes} {comp}", "Antenna", "Antenna")
+        fig.colorbar(im, ax=ax, label="tcorr")
+    for ax in axes.ravel()[len(combos):]:
+        ax.axis("off")
+    save_figure(fig, out)
+
+
+def selected_tasks(args: argparse.Namespace) -> List[str]:
+    tasks: List[str] = []
+    if args.all:
+        tasks.extend(["gain_colormap", "stats", "ks"])
+    for flag, task in [
+        (args.gain_colormap, "gain_colormap"),
+        (args.stats, "stats"),
+        (args.ks, "ks"),
+        (args.self_corr_colormap, "self_corr_colormap"),
+        (args.cross_corr_colormap, "cross_corr_colormap"),
+    ]:
+        if flag and task not in tasks:
+            tasks.append(task)
+    if not tasks:
+        tasks.append("stats")
+    return tasks
+
+
+def modes_from_arg(mode: str) -> List[str]:
+    return ["gain", "bandpass"] if mode == "both" else [mode]
+
+
+def parse_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser(description="Plot GDP NPZ products, creating missing products with gdp-stats.")
+    p.add_argument("--mode", choices=["gain", "bandpass", "both"], default="gain", help="Product mode to plot.")
+    p.add_argument("--input-table", default=None, help="Input CASA table passed to gdp-stats when products are missing.")
+    p.add_argument("--gain-dir", default=None, help="Gain/bandpass table passed to gdp-stats when products are missing.")
+    p.add_argument("--scan", default=None, help="Comma-separated scans. Must match or create the corresponding GDP products.")
+    p.add_argument("--combine-scans", action="store_true", help="Plot one combined allscans-style product. Default: false, make one plot per scan.")
+    p.add_argument("--antenna", default=None, help="Comma-separated antenna numbers to plot and to pass to gdp-stats for missing products.")
+    p.add_argument("--bchan", type=int, default=None, help="Bandpass start channel passed to gdp-stats when needed.")
+    p.add_argument("--echan", type=int, default=None, help="Bandpass end channel passed to gdp-stats when needed.")
+    p.add_argument("--gain-colormap", action="store_true", help="Plot gain/bandpass amplitude colormap from gains NPZ.")
+    p.add_argument("--stats", action="store_true", help="Plot statistics summary from stats NPZ.")
+    p.add_argument("--ks", action="store_true", help="Plot KS diagnostic summary from KS NPZ.")
+    p.add_argument("--self-corr-colormap", action="store_true", help="Plot self-correlation S2 colormaps from self-corr NPZ.")
+    p.add_argument("--cross-corr-colormap", action="store_true", help="Plot cross-correlation tcorr colormaps from cross-corr NPZ.")
+    p.add_argument("--all", action="store_true", help="Run gain colormap, stats, and KS plots.")
+    p.add_argument("--plot-dir", default=None, help="Output plot directory. Default: configured plots/<format> directory.")
+    p.add_argument("--format", choices=["png", "pdf", "eps"], default="png", help="Plot format. Default: png.")
+    p.add_argument("--recompute", action="store_true", help="Run gdp-stats even if the matching NPZ product already exists.")
+    p.add_argument("--dry-run", action="store_true", help="Print gdp-stats commands for missing products without plotting.")
+    p.add_argument("--no-use-flags", action="store_true", help="Pass --no-use-flags to gdp-stats when creating missing products.")
+    return p.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+    scans = parse_int_list(args.scan)
+    ants = parse_int_list(args.antenna)
+    scan_label = scan_text(scans)
+    plot_dir = Path(args.plot_dir).expanduser().resolve() if args.plot_dir else default_plot_dir(args.format)
+    tasks = selected_tasks(args)
+
+    for mode in modes_from_arg(args.mode):
+        for task in tasks:
+            products = ensure_npzs(task, mode, args, scans)
+            if args.dry_run:
+                continue
+            for label, npz in products:
+                t0 = time.perf_counter()
+                out = output_path(plot_dir, task, mode, label, args.format)
+                print(f"START plot {task} mode={mode} scan={label}")
+                if task == "gain_colormap":
+                    plot_gain_colormap(npz, out, ants, mode)
+                elif task == "stats":
+                    plot_metric_product(npz, out, "stats", ants)
+                elif task == "ks":
+                    plot_metric_product(npz, out, "ks", ants)
+                elif task == "self_corr_colormap":
+                    plot_self_corr_colormap(npz, out, ants)
+                elif task == "cross_corr_colormap":
+                    plot_cross_corr_colormap(npz, out, ants)
+                print(f"DONE  plot {task} elapsed_sec={time.perf_counter() - t0:.3f}")
+
+
+if __name__ == "__main__":
+    main()

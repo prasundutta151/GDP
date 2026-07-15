@@ -1,0 +1,381 @@
+#!/usr/bin/env python3
+"""Utilities for reading metadata from CASA gain/bandpass/MS tables."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import subprocess
+import tarfile
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Any, Dict, Iterable, List, Optional
+
+import numpy as np
+
+
+CONFIG_NAME = ".gdp-config.json"
+IST = timezone(timedelta(hours=5, minutes=30))
+MJD0_UTC = datetime(1858, 11, 17, 0, 0, 0, tzinfo=timezone.utc)
+
+
+def project_root() -> Path:
+    return Path(__file__).resolve().parents[1]
+
+
+def load_config() -> Dict[str, Any]:
+    path = project_root() / CONFIG_NAME
+    if not path.exists():
+        return {}
+    with path.open("r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def version_text() -> str:
+    version_path = project_root() / "VERSION"
+    if not version_path.exists():
+        return "0.0.0"
+    return version_path.read_text(encoding="utf-8").strip()
+
+
+def run_git(args: List[str], check: bool = True) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["git", *args],
+        cwd=str(project_root()),
+        text=True,
+        check=check,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+
+
+def should_archive(path: Path) -> bool:
+    root = project_root()
+    rel = path.relative_to(root)
+    parts = rel.parts
+    if not parts:
+        return True
+    if parts[0] == ".git":
+        return False
+    if path.name == ".DS_Store":
+        return False
+    if "__pycache__" in parts:
+        return False
+    if path.name == ".gdp-config.json":
+        return False
+    if parts[0] == "rundir" and path.name != ".gitkeep":
+        return False
+    if path.suffix in {".tgz", ".tar"}:
+        return False
+    return True
+
+
+def make_version_archive() -> Path:
+    root = project_root()
+    version = version_text()
+    archive = root / f"gdp-{version}.tgz"
+    if archive.exists():
+        archive.unlink()
+    with tarfile.open(archive, "w:gz") as tf:
+        for path in sorted(root.rglob("*")):
+            if not should_archive(path):
+                continue
+            arcname = Path(f"GDP-{version}") / path.relative_to(root)
+            tf.add(path, arcname=str(arcname), recursive=False)
+    return archive
+
+
+def git_push_release(message: str, no_push: bool = False) -> None:
+    root = project_root()
+    try:
+        inside = run_git(["rev-parse", "--is-inside-work-tree"]).stdout.strip()
+    except subprocess.CalledProcessError as exc:
+        raise RuntimeError(f"Not inside a git repository: {root}") from exc
+    if inside != "true":
+        raise RuntimeError(f"Not inside a git repository: {root}")
+
+    branch = run_git(["branch", "--show-current"]).stdout.strip()
+    if not branch:
+        raise RuntimeError("Cannot push from detached HEAD.")
+
+    archive = make_version_archive()
+
+    normal_paths = [
+        ".gitignore",
+        "DEV_NOTES.md",
+        "DEV_PLAN.md",
+        "REQUIREMENTS.md",
+        "VERSION",
+        "doc",
+        "script",
+        "pipelines",
+        "rundir",
+        "arx",
+        "push_to_git.sh",
+    ]
+    existing = [p for p in normal_paths if (root / p).exists()]
+    run_git(["add", *existing])
+    run_git(["add", "-f", str(archive.relative_to(root))])
+
+    status = run_git(["status", "--short"]).stdout
+    print("Staged/current status:")
+    print(status.rstrip() or "  clean")
+
+    cached = run_git(["diff", "--cached", "--quiet"], check=False)
+    if cached.returncode == 0:
+        print("No staged changes to commit.")
+    else:
+        run_git(["commit", "-m", message])
+        print(f"Committed changes on {branch}.")
+
+    if no_push:
+        print("Skipping git push because --no-push was supplied.")
+    else:
+        run_git(["push", "origin", branch])
+        print(f"Pushed {branch} to origin.")
+    print(f"Version archive: {archive}")
+
+
+def casatable_factory():
+    try:
+        from casatools import table as casatable
+    except Exception as exc:
+        raise RuntimeError(
+            "Could not import casatools.table. Run inside CASA/casa6 or a "
+            "CASA-enabled Python environment."
+        ) from exc
+    return casatable
+
+
+def as_jsonable(value: Any) -> Any:
+    if isinstance(value, np.ndarray):
+        if value.size > 20:
+            return {
+                "shape": list(value.shape),
+                "dtype": str(value.dtype),
+                "sample": value.ravel()[:20].tolist(),
+            }
+        return value.tolist()
+    if isinstance(value, (np.integer,)):
+        return int(value)
+    if isinstance(value, (np.floating,)):
+        return float(value)
+    if isinstance(value, (np.bool_,)):
+        return bool(value)
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    if isinstance(value, dict):
+        return {str(k): as_jsonable(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [as_jsonable(v) for v in value]
+    return repr(value)
+
+
+def unique_ints(values: np.ndarray) -> List[int]:
+    arr = np.asarray(values).ravel()
+    arr = arr[np.isfinite(arr)] if np.issubdtype(arr.dtype, np.number) else arr
+    return [int(x) for x in np.unique(arr)]
+
+
+def table_header(path: Path, include_keywords: bool = False) -> Dict[str, Any]:
+    casatable = casatable_factory()
+    tb = casatable()
+    tb.open(str(path))
+    try:
+        colnames = list(tb.colnames())
+        info: Dict[str, Any] = {
+            "path": str(path),
+            "nrows": int(tb.nrows()),
+            "columns": colnames,
+            "data_columns": [c for c in ("GAIN", "CPARAM", "FPARAM", "DATA", "CORRECTED_DATA", "MODEL_DATA") if c in colnames],
+        }
+        column_descriptions: Dict[str, Any] = {}
+        for name in colnames:
+            try:
+                desc = tb.getcoldesc(name)
+            except Exception:
+                continue
+            column_descriptions[name] = as_jsonable(desc)
+        info["column_descriptions"] = column_descriptions
+
+        if "SCAN_NUMBER" in colnames:
+            info["scans"] = unique_ints(tb.getcol("SCAN_NUMBER"))
+        if "ANTENNA1" in colnames:
+            info["antennas"] = unique_ints(tb.getcol("ANTENNA1"))
+        if "FIELD_ID" in colnames:
+            info["field_ids"] = unique_ints(tb.getcol("FIELD_ID"))
+        if "TIME" in colnames and tb.nrows() > 0:
+            t = np.asarray(tb.getcol("TIME"), dtype=float).ravel()
+            info["time_mjd_seconds_min"] = float(np.nanmin(t))
+            info["time_mjd_seconds_max"] = float(np.nanmax(t))
+
+        if include_keywords:
+            try:
+                info["keywords"] = as_jsonable(tb.getkeywords())
+            except Exception as exc:
+                info["keywords_error"] = str(exc)
+        return info
+    finally:
+        tb.close()
+
+
+def mjdsec_to_utc(mjd_seconds: float) -> datetime:
+    return MJD0_UTC + timedelta(seconds=float(mjd_seconds))
+
+
+def table_dates(path: Path) -> Dict[str, Any]:
+    casatable = casatable_factory()
+    tb = casatable()
+    tb.open(str(path))
+    try:
+        if "TIME" not in tb.colnames():
+            raise KeyError("TIME column not found.")
+        times = np.asarray(tb.getcol("TIME"), dtype=float).ravel()
+    finally:
+        tb.close()
+
+    if times.size == 0:
+        raise ValueError("TIME column is empty.")
+
+    tmin = mjdsec_to_utc(float(np.nanmin(times))).astimezone(IST)
+    tmax = mjdsec_to_utc(float(np.nanmax(times))).astimezone(IST)
+    dates = sorted({mjdsec_to_utc(float(t)).astimezone(IST).date().isoformat() for t in times})
+
+    def fmt(dt: datetime) -> str:
+        return dt.strftime("%Y-%m-%d %H:%M:%S.") + f"{int(dt.microsecond / 1000):03d}"
+
+    return {
+        "path": str(path),
+        "ist_dates": dates,
+        "ist_time_start": fmt(tmin),
+        "ist_time_end": fmt(tmax),
+    }
+
+
+def open_table_for_spw(path: Path) -> Path:
+    spw = path / "SPECTRAL_WINDOW"
+    return spw if spw.is_dir() else path
+
+
+def channel_width(path: Path) -> Dict[str, Any]:
+    casatable = casatable_factory()
+    table_path = open_table_for_spw(path)
+    tb = casatable()
+    tb.open(str(table_path))
+    try:
+        cols = tb.colnames()
+        if "CHANNEL_WIDTH" in cols:
+            widths = np.asarray(tb.getcol("CHANNEL_WIDTH"), dtype=float)
+        elif "CHAN_WIDTH" in cols:
+            widths = np.asarray(tb.getcol("CHAN_WIDTH"), dtype=float)
+        elif "CHAN_FREQ" in cols:
+            freq = np.asarray(tb.getcol("CHAN_FREQ"), dtype=float)
+            freq = freq.reshape((-1, freq.shape[-1])) if freq.ndim > 1 else freq.reshape((-1, 1))
+            widths = np.diff(freq, axis=0)
+        else:
+            raise RuntimeError(f"No CHANNEL_WIDTH/CHAN_WIDTH/CHAN_FREQ column in {table_path}")
+    finally:
+        tb.close()
+
+    widths_hz = np.abs(widths).ravel()
+    widths_hz = widths_hz[np.isfinite(widths_hz) & (widths_hz > 0)]
+    if widths_hz.size == 0:
+        raise RuntimeError(f"No valid positive channel widths found in {table_path}")
+    widths_mhz = widths_hz / 1e6
+    return {
+        "path": str(path),
+        "table_used": str(table_path),
+        "n_width": int(widths_mhz.size),
+        "channel_width_mhz_mean": float(np.mean(widths_mhz)),
+        "channel_width_mhz_min": float(np.min(widths_mhz)),
+        "channel_width_mhz_max": float(np.max(widths_mhz)),
+    }
+
+
+def resolve_input(value: Optional[str]) -> Path:
+    if value:
+        return Path(value).expanduser().resolve()
+    cfg = load_config()
+    source = cfg.get("source_data")
+    if not source:
+        raise SystemExit("No input table supplied and no source_data is saved. Run gdp-setup first or pass --input-table.")
+    return Path(str(source)).expanduser().resolve()
+
+
+def print_human(title: str, data: Dict[str, Any]) -> None:
+    print(title)
+    print("=" * len(title))
+    for key, value in data.items():
+        if isinstance(value, (dict, list)):
+            print(f"{key}: {json.dumps(value, indent=2, sort_keys=True)}")
+        else:
+            print(f"{key}: {value}")
+
+
+def parse_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser(
+        description="Read useful metadata from CASA gain, bandpass, or MeasurementSet tables."
+    )
+    p.add_argument("input_table", nargs="?", default=None, help="Input CASA table/MS path.")
+    p.add_argument("--input-table", dest="input_table_opt", default=None, help="Input CASA table/MS path.")
+    p.add_argument("--header", action="store_true", help="Print table header, columns, row count, and common IDs.")
+    p.add_argument("--keywords", action="store_true", help="Include table keywords in --header output.")
+    p.add_argument("--date", action="store_true", help="Print IST observing date/time span from TIME column.")
+    p.add_argument("--channel-width", action="store_true", help="Print channel-width statistics in MHz.")
+    p.add_argument("--config", action="store_true", help="Print saved GDP setup configuration.")
+    p.add_argument(
+        "--git-push",
+        action="store_true",
+        help="Create the version tgz, stage GDP files, commit, and push the current git branch.",
+    )
+    p.add_argument(
+        "-m",
+        "--message",
+        default=None,
+        help="Commit message for --git-push. Default: GDP update <version>.",
+    )
+    p.add_argument("--no-push", action="store_true", help="With --git-push, commit but do not push.")
+    p.add_argument("--json", action="store_true", help="Write machine-readable JSON output.")
+    return p.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+    if args.git_push:
+        message = args.message or f"GDP update {version_text()}"
+        git_push_release(message=message, no_push=args.no_push)
+        return
+
+    actions = [args.header, args.date, args.channel_width, args.config]
+    if not any(actions):
+        args.header = True
+
+    results: Dict[str, Any] = {}
+    if args.config:
+        results["config"] = load_config()
+
+    if args.header or args.date or args.channel_width:
+        table = resolve_input(args.input_table_opt or args.input_table)
+        if not table.exists():
+            raise FileNotFoundError(f"Input table not found: {table}")
+        if args.header:
+            results["header"] = table_header(table, include_keywords=args.keywords)
+        if args.date:
+            results["date"] = table_dates(table)
+        if args.channel_width:
+            results["channel_width"] = channel_width(table)
+
+    if args.json:
+        print(json.dumps(results, indent=2, sort_keys=True))
+        return
+
+    for name, data in results.items():
+        print_human(name, data)
+        print()
+
+
+if __name__ == "__main__":
+    main()

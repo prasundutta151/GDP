@@ -1,0 +1,922 @@
+#!/usr/bin/env python3
+"""Compute GDP gain/bandpass products from CASA calibration tables."""
+
+from __future__ import annotations
+
+import argparse
+import csv
+import json
+import math
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Sequence, Tuple
+
+import numpy as np
+
+
+CONFIG_NAME = ".gdp-config.json"
+COMPONENTS = np.array(["real", "imag"], dtype=object)
+METRICS = np.array(["mean", "std", "skew", "kurtosis", "median", "mad", "min", "max"], dtype=object)
+KS_METRICS = np.array(["d_statistic", "n_sample", "mean", "std"], dtype=object)
+CORR_COMPONENTS = ("real", "imag")
+
+
+def project_root() -> Path:
+    return Path(__file__).resolve().parents[1]
+
+
+def load_config() -> Dict[str, Any]:
+    path = project_root() / CONFIG_NAME
+    if not path.exists():
+        return {}
+    with path.open("r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def casatable_factory():
+    try:
+        from casatools import table as casatable
+    except Exception as exc:
+        raise RuntimeError(
+            "Could not import casatools.table. Run inside CASA/casa6 or a "
+            "CASA-enabled Python environment."
+        ) from exc
+    return casatable
+
+
+def parse_int_list(text: Optional[str]) -> Optional[List[int]]:
+    if text is None or str(text).strip() == "":
+        return None
+    return sorted({int(part.strip()) for part in str(text).split(",") if part.strip()})
+
+
+def config_path(key: str) -> Optional[Path]:
+    cfg = load_config()
+    value = cfg.get(key)
+    if value is None and isinstance(cfg.get("paths"), dict):
+        value = cfg["paths"].get(key)
+    return Path(str(value)).expanduser().resolve() if value else None
+
+
+def default_output_dir(product: str, kind: str) -> Path:
+    key = f"{product}_{kind}_dir"
+    configured = config_path(key)
+    if configured is not None:
+        return configured
+    folder = product.replace("_", "-")
+    return project_root() / "rundir" / "data-product" / folder / kind
+
+
+def build_default_output(input_table: Path, scan_text: str, mode: str, product: str, kind: str) -> Path:
+    suffix = "npz" if kind == "npz" else "csv"
+    product_name = product.replace("_", "-")
+    return default_output_dir(product, kind) / f"gdp-{product_name}-{mode}-{scan_text}.{suffix}"
+
+
+def default_plot_dir(fmt: str) -> Path:
+    configured = config_path(f"plots_{fmt}_dir")
+    if configured is not None:
+        return configured
+    return project_root() / "rundir" / "plots" / fmt
+
+
+def build_default_plot(scan_text: str, mode: str, plot_name: str, fmt: str) -> Path:
+    return default_plot_dir(fmt) / f"gdp-plot-{plot_name}-{mode}-{scan_text}.{fmt}"
+
+
+def default_log_path(input_table: Path) -> Path:
+    logs_dir = config_path("logs_dir") or (project_root() / "rundir" / "logs")
+    return logs_dir / f"{input_table.name.rstrip('/')}_gdp-stats_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+
+
+class TaskLogger:
+    def __init__(self, path: Path):
+        self.path = path
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+
+    def write(self, message: str) -> None:
+        line = f"{datetime.now().isoformat(timespec='seconds')} {message}"
+        print(line)
+        with self.path.open("a", encoding="utf-8") as f:
+            f.write(line + "\n")
+
+    def start(self, name: str) -> float:
+        self.write(f"START {name}")
+        return time.perf_counter()
+
+    def done(self, name: str, start: float) -> None:
+        self.write(f"DONE  {name} elapsed_sec={time.perf_counter() - start:.3f}")
+
+    def skip(self, name: str, reason: str) -> None:
+        self.write(f"SKIP  {name} reason={reason}")
+
+
+def choose_data_column(columns: Sequence[str], mode: str) -> str:
+    prefs = ("CPARAM", "FPARAM", "GAIN") if mode == "bandpass" else ("GAIN", "CPARAM", "FPARAM")
+    for name in prefs:
+        if name in columns:
+            return name
+    raise RuntimeError(f"No supported gain/bandpass data column found. Columns: {list(columns)}")
+
+
+def normalize_flag(flag: np.ndarray, data_shape: Sequence[int]) -> np.ndarray:
+    flag = np.asarray(flag, dtype=bool)
+    if flag.shape == tuple(data_shape):
+        return flag
+    if flag.ndim == 2 and len(data_shape) == 3:
+        npol, nchan, nrow = data_shape
+        if flag.shape == (npol, nrow):
+            return np.broadcast_to(flag[:, None, :], (npol, nchan, nrow)).copy()
+    raise ValueError(f"Unexpected FLAG shape {flag.shape}; expected compatible with data shape {tuple(data_shape)}")
+
+
+def open_context(
+    input_table: Path,
+    mode: str,
+    scans: Optional[List[int]],
+    antennas: Optional[List[int]],
+    bchan: Optional[int],
+    echan: Optional[int],
+) -> Tuple[Any, List[str], str, np.ndarray, np.ndarray, List[int], List[int], int, int]:
+    casatable = casatable_factory()
+    tb = casatable()
+    tb.open(str(input_table))
+    cols = list(tb.colnames())
+    data_col = choose_data_column(cols, mode)
+    if "ANTENNA1" not in cols:
+        tb.close()
+        raise KeyError("ANTENNA1 column not found.")
+    all_ant = np.asarray(tb.getcol("ANTENNA1"), dtype=int)
+    all_scan = np.asarray(tb.getcol("SCAN_NUMBER"), dtype=int) if "SCAN_NUMBER" in cols else np.zeros(tb.nrows(), dtype=int)
+    selected_scans = scans if scans is not None else sorted(int(x) for x in np.unique(all_scan))
+    selected_antennas = antennas if antennas is not None else sorted(int(x) for x in np.unique(all_ant))
+    sample = np.asarray(tb.getcol(data_col, startrow=0, nrow=1))
+    if sample.ndim == 2:
+        sample = sample[:, None, :]
+    nchan = sample.shape[1]
+    ch0 = 0 if bchan is None else max(0, int(bchan))
+    ch1 = nchan if echan is None else min(nchan, int(echan))
+    if ch1 <= ch0:
+        tb.close()
+        raise ValueError(f"Invalid channel range bchan={bchan}, echan={echan} for nchan={nchan}")
+    return tb, cols, data_col, all_ant, all_scan, selected_scans, selected_antennas, ch0, ch1
+
+
+def available_scans(input_table: Path) -> List[int]:
+    casatable = casatable_factory()
+    tb = casatable()
+    tb.open(str(input_table))
+    try:
+        cols = list(tb.colnames())
+        if "SCAN_NUMBER" not in cols:
+            return [0]
+        return sorted(int(x) for x in np.unique(np.asarray(tb.getcol("SCAN_NUMBER"), dtype=int)))
+    finally:
+        tb.close()
+
+
+def nan_skew(values: np.ndarray) -> float:
+    x = values[np.isfinite(values)]
+    if x.size < 3:
+        return np.nan
+    mu = float(np.mean(x))
+    sigma = float(np.std(x))
+    return np.nan if sigma <= 0 else float(np.mean(((x - mu) / sigma) ** 3))
+
+
+def nan_kurtosis(values: np.ndarray) -> float:
+    x = values[np.isfinite(values)]
+    if x.size < 4:
+        return np.nan
+    mu = float(np.mean(x))
+    sigma = float(np.std(x))
+    return np.nan if sigma <= 0 else float(np.mean(((x - mu) / sigma) ** 4) - 3.0)
+
+
+def metric_values(values: np.ndarray) -> np.ndarray:
+    x = values[np.isfinite(values)]
+    if x.size == 0:
+        return np.full(len(METRICS), np.nan, dtype=float)
+    med = float(np.median(x))
+    return np.array(
+        [float(np.mean(x)), float(np.std(x)), nan_skew(x), nan_kurtosis(x), med,
+         float(np.median(np.abs(x - med))), float(np.min(x)), float(np.max(x))],
+        dtype=float,
+    )
+
+
+def compute_stats(
+    input_table: Path,
+    mode: str,
+    scans: Optional[List[int]],
+    antennas: Optional[List[int]],
+    use_flags: bool,
+    subtract_mean: bool,
+    bchan: Optional[int],
+    echan: Optional[int],
+) -> Dict[str, Any]:
+    tb, cols, data_col, all_ant, all_scan, selected_scans, selected_antennas, ch0, ch1 = open_context(
+        input_table, mode, scans, antennas, bchan, echan
+    )
+    try:
+        stokes_count: Optional[int] = None
+        stats = valid_count = total_count = flagged_count = None
+        for s_idx, scan in enumerate(selected_scans):
+            row_ids = np.where(all_scan == int(scan))[0]
+            if row_ids.size == 0:
+                continue
+            data_full = np.asarray(tb.getcol(data_col))
+            if data_full.ndim == 2:
+                data_full = data_full[:, None, :]
+            data = data_full[:, :, row_ids]
+            flag_raw = np.asarray(tb.getcol("FLAG")) if "FLAG" in cols else np.zeros(data.shape, dtype=bool)
+            flag_raw = flag_raw[:, :, row_ids] if flag_raw.ndim == 3 else flag_raw[:, row_ids]
+            ant = all_ant[row_ids]
+            if data.ndim == 2:
+                data = data[:, None, :]
+            flag = normalize_flag(flag_raw, data.shape)
+            data = data[:, ch0:ch1, :]
+            flag = flag[:, ch0:ch1, :]
+            npol = data.shape[0]
+            if stokes_count is None:
+                stokes_count = npol
+                stats = np.full((len(selected_scans), len(selected_antennas), npol, len(COMPONENTS), len(METRICS)), np.nan)
+                count_shape = (len(selected_scans), len(selected_antennas), npol, len(COMPONENTS))
+                valid_count = np.zeros(count_shape, dtype=np.int64)
+                total_count = np.zeros(count_shape, dtype=np.int64)
+                flagged_count = np.zeros(count_shape, dtype=np.int64)
+            for a_idx, antenna in enumerate(selected_antennas):
+                a_rows = ant == int(antenna)
+                if not np.any(a_rows):
+                    continue
+                arr = data[:, :, a_rows].astype(np.complex128, copy=True)
+                flg = flag[:, :, a_rows]
+                if use_flags:
+                    arr[flg] = np.nan + 1j * np.nan
+                for p_idx in range(npol):
+                    z = arr[p_idx].ravel()
+                    flagged = int(np.count_nonzero(flg[p_idx].ravel())) if use_flags else 0
+                    r = np.real(z)
+                    i = np.imag(z)
+                    if subtract_mean:
+                        with np.errstate(invalid="ignore"):
+                            r = r - np.nanmean(r)
+                            i = i - np.nanmean(i)
+                    for c_idx, vals in enumerate((r, i)):
+                        vals = np.asarray(vals, dtype=float)
+                        stats[s_idx, a_idx, p_idx, c_idx, :] = metric_values(vals)
+                        valid_count[s_idx, a_idx, p_idx, c_idx] = int(np.count_nonzero(np.isfinite(vals)))
+                        total_count[s_idx, a_idx, p_idx, c_idx] = int(z.size)
+                        flagged_count[s_idx, a_idx, p_idx, c_idx] = flagged
+        if stokes_count is None or stats is None:
+            raise RuntimeError("No matching scans/rows found.")
+        return {
+            "header": {
+                "format": "GDP_STATS_NPZ",
+                "format_version": "0.2",
+                "created_utc": datetime.now(timezone.utc).isoformat(),
+                "input_table": str(input_table),
+                "mode": mode,
+                "data_column": data_col,
+                "use_flags": bool(use_flags),
+                "subtract_mean": bool(subtract_mean),
+                "bchan": bchan,
+                "echan": echan,
+                "axes": {"stats": ["scan", "antenna", "stokes", "component", "metric"]},
+            },
+            "scan_numbers": np.asarray(selected_scans, dtype=int),
+            "antennas": np.asarray(selected_antennas, dtype=int),
+            "stokes": np.arange(stokes_count, dtype=int),
+            "components": COMPONENTS,
+            "metrics": METRICS,
+            "stats": stats,
+            "valid_count": valid_count,
+            "total_count": total_count,
+            "flagged_count": flagged_count,
+        }
+    finally:
+        tb.close()
+
+
+def compute_gains(input_table: Path, mode: str, scans: Optional[List[int]], antennas: Optional[List[int]], use_flags: bool, bchan: Optional[int], echan: Optional[int]) -> Dict[str, Any]:
+    tb, cols, data_col, all_ant, all_scan, selected_scans, selected_antennas, ch0, ch1 = open_context(input_table, mode, scans, antennas, bchan, echan)
+    try:
+        rows: Dict[str, List[Any]] = {k: [] for k in ["scan", "antenna", "stokes", "channel", "row", "real", "imag", "flagged"]}
+        for rid in range(tb.nrows()):
+            scan = int(all_scan[rid])
+            ant = int(all_ant[rid])
+            if scan not in selected_scans or ant not in selected_antennas:
+                continue
+            data = np.asarray(tb.getcol(data_col, startrow=rid, nrow=1))
+            if data.ndim == 2:
+                data = data[:, None, :]
+            data = data[:, ch0:ch1, 0].astype(np.complex128, copy=True)
+            if "FLAG" in cols:
+                raw_flag = np.asarray(tb.getcol("FLAG", startrow=rid, nrow=1))
+                flag = normalize_flag(raw_flag, (data.shape[0], data.shape[1], 1))[:, :, 0]
+            else:
+                flag = np.zeros(data.shape, dtype=bool)
+            if use_flags:
+                data[flag] = np.nan + 1j * np.nan
+            for pol in range(data.shape[0]):
+                for chan in range(data.shape[1]):
+                    rows["scan"].append(scan)
+                    rows["antenna"].append(ant)
+                    rows["stokes"].append(pol)
+                    rows["channel"].append(ch0 + chan)
+                    rows["row"].append(rid)
+                    rows["real"].append(float(np.real(data[pol, chan])))
+                    rows["imag"].append(float(np.imag(data[pol, chan])))
+                    rows["flagged"].append(bool(flag[pol, chan]))
+        return {
+            "header": {
+                "format": "GDP_GAINS_NPZ",
+                "format_version": "0.1",
+                "created_utc": datetime.now(timezone.utc).isoformat(),
+                "input_table": str(input_table),
+                "mode": mode,
+                "data_column": data_col,
+                "use_flags": bool(use_flags),
+                "bchan": bchan,
+                "echan": echan,
+                "columns": list(rows.keys()),
+            },
+            **{k: np.asarray(v, dtype=bool if k == "flagged" else float if k in {"real", "imag"} else int) for k, v in rows.items()},
+        }
+    finally:
+        tb.close()
+
+
+def compute_ks_from_stats(stats_result: Dict[str, Any]) -> Dict[str, Any]:
+    shape = stats_result["stats"].shape[:-1] + (len(KS_METRICS),)
+    ks = np.full(shape, np.nan, dtype=float)
+    return {
+        "header": {
+            "format": "GDP_KS_NPZ",
+            "format_version": "0.1",
+            "created_utc": datetime.now(timezone.utc).isoformat(),
+            "note": "Schema placeholder; full sample KS will be computed from gains samples in a later implementation pass.",
+            "axes": {"ks": ["scan", "antenna", "stokes", "component", "metric"]},
+        },
+        "scan_numbers": stats_result["scan_numbers"],
+        "antennas": stats_result["antennas"],
+        "stokes": stats_result["stokes"],
+        "components": stats_result["components"],
+        "metrics": KS_METRICS,
+        "ks": ks,
+    }
+
+
+def compute_structure_function(
+    data1: Tuple[np.ndarray, np.ndarray],
+    data2: Optional[Tuple[np.ndarray, np.ndarray]] = None,
+    nbin: int = 32,
+    bintype: str = "log",
+    njack: int = 32,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    t1, x1 = np.asarray(data1[0], dtype=float), np.asarray(data1[1], dtype=float)
+    if data2 is None:
+        t2, x2 = t1, x1
+    else:
+        t2, x2 = np.asarray(data2[0], dtype=float), np.asarray(data2[1], dtype=float)
+    m1 = np.isfinite(t1) & np.isfinite(x1)
+    m2 = np.isfinite(t2) & np.isfinite(x2)
+    t1, x1 = t1[m1], x1[m1]
+    t2, x2 = t2[m2], x2[m2]
+    if t1.size < 2 or t2.size < 2:
+        empty = np.array([], dtype=float)
+        return empty, empty, empty, empty.astype(int)
+    o1, o2 = np.argsort(t1), np.argsort(t2)
+    t1, x1 = t1[o1], x1[o1]
+    t2, x2 = t2[o2], x2[o2]
+    dt = np.concatenate([np.diff(t1), np.diff(t2)])
+    dt = np.abs(dt[dt != 0])
+    tmin = float(np.min(dt)) if dt.size else 1.0
+    span = max(float(np.max(t1) - np.min(t1)), float(np.max(t2) - np.min(t2)))
+    tmax = float(span / 10.0) if span > 0 else max(2.0 * tmin, 2.0)
+    if tmax <= tmin:
+        tmax = 2.0 * tmin
+    if bintype == "lin":
+        edges = np.linspace(tmin, tmax, int(nbin) + 1)
+    else:
+        edges = np.logspace(np.log10(max(tmin, 1e-6)), np.log10(tmax), int(nbin) + 1)
+    tau = 0.5 * (edges[:-1] + edges[1:])
+    sigma2 = 0.5 * (np.nanvar(x1) + np.nanvar(x2))
+    norm = 2.0 * sigma2 if sigma2 > 0 else 1.0
+
+    def accumulate(tx: np.ndarray, xx: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        sums = np.zeros(int(nbin), dtype=float)
+        counts = np.zeros(int(nbin), dtype=int)
+        for i in range(tx.size):
+            lag = np.abs(tx[i] - t2)
+            mask = (lag >= edges[0]) & (lag <= edges[-1])
+            if not np.any(mask):
+                continue
+            vals = (xx[i] - x2[mask]) ** 2
+            bins = np.searchsorted(edges, lag[mask], side="right") - 1
+            ok = (bins >= 0) & (bins < int(nbin))
+            if np.any(ok):
+                np.add.at(sums, bins[ok], vals[ok])
+                np.add.at(counts, bins[ok], 1)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            s2 = (sums / counts) / norm
+        return s2, counts
+
+    s2, counts = accumulate(t1, x1)
+    if njack is None or int(njack) < 2:
+        err = np.full_like(s2, np.nan, dtype=float)
+    else:
+        samples = []
+        for fold in np.array_split(np.arange(t1.size), int(njack)):
+            keep = np.ones(t1.size, dtype=bool)
+            keep[fold] = False
+            if np.count_nonzero(keep) < 2:
+                continue
+            samples.append(accumulate(t1[keep], x1[keep])[0])
+        err = np.sqrt((len(samples) - 1) * np.nanvar(np.asarray(samples), axis=0)) if len(samples) > 1 else np.full_like(s2, np.nan)
+    return tau, s2, err, counts
+
+
+def tcorr_from_s2(tau: np.ndarray, s2: np.ndarray, threshold: float) -> float:
+    valid = np.isfinite(tau) & np.isfinite(s2)
+    if np.count_nonzero(valid) < 2:
+        return np.nan
+    t = tau[valid]
+    y = s2[valid]
+    order = np.argsort(t)
+    t, y = t[order], y[order]
+    if y[0] >= threshold:
+        return float(t[0])
+    above = np.where(y >= threshold)[0]
+    if above.size == 0:
+        return float(t[-1])
+    i = int(above[0])
+    if i == 0:
+        return float(t[0])
+    y0, y1 = y[i - 1], y[i]
+    if y1 == y0:
+        return float(t[i])
+    return float(t[i - 1] + (threshold - y0) * (t[i] - t[i - 1]) / (y1 - y0))
+
+
+def read_series(
+    input_table: Path,
+    mode: str,
+    scans: Optional[List[int]],
+    antennas: Optional[List[int]],
+    use_flags: bool,
+    bchan: Optional[int],
+    echan: Optional[int],
+) -> Tuple[Dict[int, Dict[int, Dict[int, Dict[str, Tuple[np.ndarray, np.ndarray]]]]], Dict[str, Any]]:
+    tb, cols, data_col, all_ant, all_scan, selected_scans, selected_antennas, ch0, ch1 = open_context(
+        input_table, mode, scans, antennas, bchan, echan
+    )
+    try:
+        times = np.asarray(tb.getcol("TIME"), dtype=float) if "TIME" in cols else np.arange(tb.nrows(), dtype=float)
+        out: Dict[int, Dict[int, Dict[int, Dict[str, Tuple[np.ndarray, np.ndarray]]]]] = {}
+        stokes_count = 0
+        for scan in selected_scans:
+            out[int(scan)] = {}
+            for antenna in selected_antennas:
+                row_ids = np.where((all_scan == int(scan)) & (all_ant == int(antenna)))[0]
+                if row_ids.size == 0:
+                    continue
+                data_full = np.asarray(tb.getcol(data_col))
+                if data_full.ndim == 2:
+                    data_full = data_full[:, None, :]
+                data = data_full[:, ch0:ch1, :][:, :, row_ids].astype(np.complex128, copy=True)
+                if "FLAG" in cols:
+                    flag_full = np.asarray(tb.getcol("FLAG"))
+                    flag_full = flag_full[:, None, :] if flag_full.ndim == 2 else flag_full
+                    flag = normalize_flag(flag_full[:, ch0:ch1, :][:, :, row_ids], data.shape)
+                else:
+                    flag = np.zeros(data.shape, dtype=bool)
+                if use_flags:
+                    data[flag] = np.nan + 1j * np.nan
+                stokes_count = max(stokes_count, data.shape[0])
+                out[int(scan)][int(antenna)] = {}
+                for pol in range(data.shape[0]):
+                    if mode == "bandpass":
+                        axis = np.arange(ch0, ch1, dtype=float)
+                        real = np.nanmean((data[pol].real - 1.0) * 100.0, axis=1)
+                        imag = np.nanmean(data[pol].imag * 100.0, axis=1)
+                    else:
+                        axis = times[row_ids]
+                        real = np.nanmean((data[pol].real - 1.0) * 100.0, axis=0)
+                        imag = np.nanmean(data[pol].imag * 100.0, axis=0)
+                    out[int(scan)][int(antenna)][pol] = {"real": (axis, real), "imag": (axis, imag)}
+        meta = {
+            "input_table": str(input_table),
+            "mode": mode,
+            "data_column": data_col,
+            "scan_numbers": np.asarray(selected_scans, dtype=int),
+            "antennas": np.asarray(selected_antennas, dtype=int),
+            "stokes": np.arange(stokes_count, dtype=int),
+            "bchan": bchan,
+            "echan": echan,
+            "use_flags": bool(use_flags),
+        }
+        return out, meta
+    finally:
+        tb.close()
+
+
+def compute_self_corr(
+    input_table: Path,
+    mode: str,
+    scans: Optional[List[int]],
+    antennas: Optional[List[int]],
+    use_flags: bool,
+    bchan: Optional[int],
+    echan: Optional[int],
+    nbin: int,
+    bintype: str,
+    njack: int,
+) -> Dict[str, Any]:
+    series, meta = read_series(input_table, mode, scans, antennas, use_flags, bchan, echan)
+    rows = {k: [] for k in ["scan", "antenna", "stokes", "component", "tau", "s2", "err", "count"]}
+    for scan, by_ant in series.items():
+        for ant, by_pol in by_ant.items():
+            for pol, by_comp in by_pol.items():
+                for comp, data in by_comp.items():
+                    tau, s2, err, count = compute_structure_function(data, None, nbin=nbin, bintype=bintype, njack=njack)
+                    for i in range(tau.size):
+                        rows["scan"].append(scan)
+                        rows["antenna"].append(ant)
+                        rows["stokes"].append(pol)
+                        rows["component"].append(comp)
+                        rows["tau"].append(float(tau[i]))
+                        rows["s2"].append(float(s2[i]) if np.isfinite(s2[i]) else np.nan)
+                        rows["err"].append(float(err[i]) if np.isfinite(err[i]) else np.nan)
+                        rows["count"].append(int(count[i]))
+    return {
+        "header": {
+            "format": "GDP_SELF_CORR_NPZ",
+            "format_version": "0.1",
+            "created_utc": datetime.now(timezone.utc).isoformat(),
+            **meta,
+            "nbin": int(nbin),
+            "bintype": bintype,
+            "njack": int(njack),
+            "columns": list(rows.keys()),
+        },
+        **{k: np.asarray(v, dtype=object if k == "component" else float if k in {"tau", "s2", "err"} else int) for k, v in rows.items()},
+    }
+
+
+def compute_cross_corr(
+    input_table: Path,
+    mode: str,
+    scans: Optional[List[int]],
+    antennas: Optional[List[int]],
+    use_flags: bool,
+    bchan: Optional[int],
+    echan: Optional[int],
+    nbin: int,
+    bintype: str,
+    njack: int,
+    threshold: float,
+) -> List[Dict[str, Any]]:
+    series, _meta = read_series(input_table, mode, scans, antennas, use_flags, bchan, echan)
+    rows: List[Dict[str, Any]] = []
+    for scan, by_ant in series.items():
+        ant_list = sorted(by_ant)
+        for i, ant1 in enumerate(ant_list):
+            for ant2 in ant_list[i:]:
+                for pol1, comp_map1 in by_ant[ant1].items():
+                    for pol2, comp_map2 in by_ant[ant2].items():
+                        for comp1 in CORR_COMPONENTS:
+                            for comp2 in CORR_COMPONENTS:
+                                if comp1 not in comp_map1 or comp2 not in comp_map2:
+                                    continue
+                                tau, s2, err, count = compute_structure_function(
+                                    comp_map1[comp1],
+                                    comp_map2[comp2],
+                                    nbin=nbin,
+                                    bintype=bintype,
+                                    njack=njack,
+                                )
+                                rows.append(
+                                    {
+                                        "scan": scan,
+                                        "ant1": ant1,
+                                        "ant2": ant2,
+                                        "stokes": f"{pol1}-{pol2}",
+                                        "components": f"{comp1}-{comp2}",
+                                        "threshold": float(threshold),
+                                        "tcorr": tcorr_from_s2(tau, s2, threshold),
+                                        "nbin_valid": int(np.count_nonzero(np.isfinite(s2))),
+                                        "npair": int(np.nansum(count)) if count.size else 0,
+                                    }
+                                )
+    return rows
+
+
+def write_npz(path: Path, result: Dict[str, Any], array_name: str = "stats") -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {k: v for k, v in result.items() if k != "header"}
+    np.savez_compressed(path, header_json=json.dumps(result["header"], indent=2, sort_keys=True), **payload)
+
+
+def plot_gain_colormap(path: Path, gains: Dict[str, Any], mode: str, antennas: Optional[List[int]]) -> None:
+    try:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except Exception as exc:
+        raise RuntimeError("gdp-stats --gain-colormap requires matplotlib. See REQUIREMENTS.md.") from exc
+
+    required = {"scan", "antenna", "stokes", "channel", "real", "imag"}
+    missing = required - set(gains)
+    if missing:
+        raise ValueError(f"Gain product missing arrays needed for colormap: {sorted(missing)}")
+
+    ant_all = np.unique(np.asarray(gains["antenna"], dtype=int))
+    if antennas is not None:
+        ant_all = ant_all[np.isin(ant_all, np.asarray(antennas, dtype=int))]
+    stokes_all = np.unique(np.asarray(gains["stokes"], dtype=int))
+    if ant_all.size == 0 or stokes_all.size == 0:
+        raise ValueError("No selected antennas/stokes available for gain colormap.")
+
+    x_values = np.unique(np.asarray(gains["channel" if mode == "bandpass" else "scan"], dtype=int))
+    x_label = "Channel" if mode == "bandpass" else "Scan"
+    if x_values.size == 0:
+        raise ValueError("No x-axis values available for gain colormap.")
+
+    amp = np.hypot(np.asarray(gains["real"], dtype=float), np.asarray(gains["imag"], dtype=float))
+    ncol = len(stokes_all)
+    fig, axes = plt.subplots(1, ncol, figsize=(5.2 * ncol, max(4.0, 0.22 * len(ant_all) + 2.4)), squeeze=False)
+    for idx, stokes in enumerate(stokes_all):
+        mat = np.full((len(ant_all), len(x_values)), np.nan, dtype=float)
+        for ai, ant in enumerate(ant_all):
+            for xi, xv in enumerate(x_values):
+                selector = (gains["antenna"] == ant) & (gains["stokes"] == stokes)
+                selector &= (gains["channel"] == xv) if mode == "bandpass" else (gains["scan"] == xv)
+                vals = amp[selector]
+                if vals.size:
+                    mat[ai, xi] = float(np.nanmedian(vals))
+
+        ax = axes[0, idx]
+        im = ax.imshow(mat, aspect="auto", origin="lower", interpolation="nearest", cmap="viridis")
+        ax.set_title(f"{mode} amplitude | stokes {stokes}")
+        ax.set_xlabel(x_label)
+        ax.set_ylabel("Antenna")
+        ax.set_xticks(np.arange(len(x_values)))
+        ax.set_xticklabels([str(x) for x in x_values], rotation=90 if len(x_values) > 12 else 0)
+        ax.set_yticks(np.arange(len(ant_all)))
+        ax.set_yticklabels([str(a) for a in ant_all])
+        fig.colorbar(im, ax=ax, label="median amplitude")
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fig.tight_layout()
+    fig.savefig(path, dpi=160, bbox_inches="tight")
+    plt.close(fig)
+
+
+def write_stats_csv(path: Path, result: Dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        metrics = list(result["metrics"])
+        writer.writerow(["scan", "antenna", "stokes", "component", "valid_count", "total_count", "flagged_count", *metrics])
+        for si, scan in enumerate(result["scan_numbers"]):
+            for ai, ant in enumerate(result["antennas"]):
+                for pi, pol in enumerate(result["stokes"]):
+                    for ci, comp in enumerate(result["components"]):
+                        vals = result["stats"][si, ai, pi, ci, :]
+                        writer.writerow([int(scan), int(ant), int(pol), str(comp), int(result["valid_count"][si, ai, pi, ci]), int(result["total_count"][si, ai, pi, ci]), int(result["flagged_count"][si, ai, pi, ci]), *[float(x) if np.isfinite(x) else "nan" for x in vals]])
+
+
+def write_cross_corr_csv(path: Path, rows: List[Dict[str, Any]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fieldnames = ["scan", "ant1", "ant2", "stokes", "components", "threshold", "tcorr", "nbin_valid", "npair"]
+    with path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            out = dict(row)
+            out["tcorr"] = "nan" if not np.isfinite(out["tcorr"]) else f"{float(out['tcorr']):.8g}"
+            writer.writerow(out)
+
+
+def cross_corr_npz_result(rows: List[Dict[str, Any]], mode: str, scan_text: str, args: argparse.Namespace) -> Dict[str, Any]:
+    return {
+        "header": {
+            "product": "cross_corr",
+            "format": "GDP cross-correlation NPZ",
+            "mode": mode,
+            "scan_selection": scan_text,
+            "columns": ["scan", "ant1", "ant2", "stokes", "components", "threshold", "tcorr", "nbin_valid", "npair"],
+            "corr_threshold": float(args.corr_threshold),
+            "corr_nbin": int(args.corr_nbin),
+            "corr_bintype": str(args.corr_bintype),
+            "corr_njack": int(args.corr_njack),
+        },
+        "scan": np.asarray([row["scan"] for row in rows], dtype=int),
+        "ant1": np.asarray([row["ant1"] for row in rows], dtype=int),
+        "ant2": np.asarray([row["ant2"] for row in rows], dtype=int),
+        "stokes": np.asarray([row["stokes"] for row in rows], dtype=str),
+        "components": np.asarray([row["components"] for row in rows], dtype=str),
+        "threshold": np.asarray([row["threshold"] for row in rows], dtype=float),
+        "tcorr": np.asarray([row["tcorr"] for row in rows], dtype=float),
+        "nbin_valid": np.asarray([row["nbin_valid"] for row in rows], dtype=int),
+        "npair": np.asarray([row["npair"] for row in rows], dtype=int),
+    }
+
+
+def parse_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser(description="Compute GDP gain/bandpass products.")
+    p.add_argument("input_table", nargs="?", default=None, help="Input CASA gain/bandpass table path.")
+    p.add_argument("--input-table", dest="input_table_opt", default=None, help="Input CASA gain/bandpass table path.")
+    p.add_argument("--gain-dir", default=None, help="Input gain/bandpass table or directory. Defaults to saved gdp-setup gain_dir/source_data.")
+    p.add_argument("--mode", choices=["auto", "gain", "bandpass"], default="auto", help="Statistics mode. Default: auto.")
+    p.add_argument("--scan", default=None, help="Comma-separated scans to process. Default: all scans.")
+    p.add_argument("--combine-scans", action="store_true", help="Combine selected scans into one allscans-style product. Default: false, write one product per scan.")
+    p.add_argument("--antennas", default=None, help="Comma-separated antennas to process. Default: all antennas.")
+    p.add_argument("--bchan", type=int, default=None, help="Start channel, inclusive.")
+    p.add_argument("--echan", type=int, default=None, help="End channel, exclusive.")
+    p.add_argument("--use-flags", action=argparse.BooleanOptionalAction, default=True, help="Apply FLAG mask. Default: true.")
+    p.add_argument("--subtract-mean", action=argparse.BooleanOptionalAction, default=True, help="Subtract real/imag means before statistics. Default: true.")
+    p.add_argument("--gains", action="store_true", help="Save selected gain/bandpass samples in NPZ.")
+    p.add_argument("--gain-colormap", action="store_true", help="Also plot a gain/bandpass amplitude colormap from the gains NPZ. Default: off.")
+    p.add_argument("--stats", action="store_true", help="Compute mean/std/skew/kurtosis-style statistics.")
+    p.add_argument("--ks", action="store_true", help="Create KS-stat product placeholder.")
+    p.add_argument("--self-corr", action="store_true", help="Request self structure-function correlation product.")
+    p.add_argument("--cross-corr", action="store_true", help="Request cross structure-function correlation product.")
+    p.add_argument("--all", action="store_true", help="Run all GDP stats subtasks.")
+    p.add_argument("--output-npz", default=None, help="Stats NPZ path.")
+    p.add_argument("--output-gains-npz", default=None, help="Gains NPZ path.")
+    p.add_argument("--output-ks-npz", default=None, help="KS NPZ path.")
+    p.add_argument("--output-self-corr-npz", default=None, help="Self-correlation NPZ path.")
+    p.add_argument("--output-cross-corr-npz", default=None, help="Cross-correlation NPZ path.")
+    p.add_argument("--output-cross-corr-csv", default=None, help="Optional cross-correlation CSV path; implies CSV output for cross-corr.")
+    p.add_argument("--output-gain-colormap", default=None, help="Gain colormap plot path. Default: configured plots/<format> runtime directory.")
+    p.add_argument("--plot-format", choices=["png", "pdf", "eps"], default="png", help="Plot format for --gain-colormap. Default: png.")
+    p.add_argument("--corr-threshold", type=float, default=0.7, help="S2 threshold for correlation-time extraction.")
+    p.add_argument("--corr-nbin", type=int, default=32, help="Structure-function lag bin count.")
+    p.add_argument("--corr-bintype", choices=["log", "lin"], default="log", help="Structure-function lag binning.")
+    p.add_argument("--corr-njack", type=int, default=32, help="Jackknife folds for structure-function errors.")
+    p.add_argument("--csv", action="store_true", help="Also write optional CSV products for selected subtasks that support CSV.")
+    p.add_argument("--output-csv", default=None, help="Stats CSV path; implies --csv.")
+    return p.parse_args()
+
+
+def resolve_input(value: Optional[str]) -> Path:
+    if value:
+        return Path(value).expanduser().resolve()
+    cfg = load_config()
+    source = cfg.get("gain_dir") or cfg.get("source_data")
+    if source:
+        return Path(str(source)).expanduser().resolve()
+    raise SystemExit("Input table is required. Pass input_table/--input-table/--gain-dir or run gdp-setup first.")
+
+
+def explicit_outputs(args: argparse.Namespace) -> List[str]:
+    names = [
+        "output_npz",
+        "output_gains_npz",
+        "output_ks_npz",
+        "output_self_corr_npz",
+        "output_cross_corr_npz",
+        "output_cross_corr_csv",
+        "output_gain_colormap",
+        "output_csv",
+    ]
+    return [name for name in names if getattr(args, name, None)]
+
+
+def scan_batches(input_table: Path, scans: Optional[List[int]], combine_scans: bool) -> List[Tuple[Optional[List[int]], str]]:
+    if combine_scans:
+        return [(scans, "allscans" if scans is None else "scan" + "-".join(str(s) for s in scans))]
+    selected = scans if scans is not None else available_scans(input_table)
+    return [([int(scan)], f"scan{int(scan)}") for scan in selected]
+
+
+def run_batch(
+    args: argparse.Namespace,
+    input_table: Path,
+    mode: str,
+    scans: Optional[List[int]],
+    antennas: Optional[List[int]],
+    scan_label: str,
+    logger: TaskLogger,
+) -> None:
+    logger.write(f"gdp-stats batch={scan_label}")
+    stats_result: Optional[Dict[str, Any]] = None
+
+    if args.gains:
+        t0 = logger.start(f"gains {scan_label}")
+        gains = compute_gains(input_table, mode, scans, antennas, args.use_flags, args.bchan, args.echan)
+        out = Path(args.output_gains_npz).expanduser().resolve() if args.output_gains_npz else build_default_output(input_table, scan_label, mode, "gains", "npz")
+        write_npz(out, gains)
+        logger.write(f"Wrote gains NPZ: {out}")
+        if args.gain_colormap:
+            plot_out = Path(args.output_gain_colormap).expanduser().resolve() if args.output_gain_colormap else build_default_plot(scan_label, mode, "gain-colormap", args.plot_format)
+            plot_gain_colormap(plot_out, gains, mode, antennas)
+            logger.write(f"Wrote gain colormap plot: {plot_out}")
+        logger.done(f"gains {scan_label}", t0)
+
+    if args.stats or args.ks:
+        t0 = logger.start(f"stats {scan_label}")
+        stats_result = compute_stats(input_table, mode, scans, antennas, args.use_flags, args.subtract_mean, args.bchan, args.echan)
+        if args.stats:
+            out = Path(args.output_npz).expanduser().resolve() if args.output_npz else build_default_output(input_table, scan_label, mode, "stats", "npz")
+            write_npz(out, stats_result)
+            logger.write(f"Wrote stats NPZ: {out}")
+            if args.csv or args.output_csv:
+                csv_out = Path(args.output_csv).expanduser().resolve() if args.output_csv else build_default_output(input_table, scan_label, mode, "stats", "csv")
+                write_stats_csv(csv_out, stats_result)
+                logger.write(f"Wrote stats CSV: {csv_out}")
+        else:
+            logger.write("Computed stats internally for KS.")
+        logger.done(f"stats {scan_label}", t0)
+
+    if args.ks:
+        if stats_result is None:
+            raise RuntimeError("Internal error: KS requested without stats result.")
+        t0 = logger.start(f"ks {scan_label}")
+        ks = compute_ks_from_stats(stats_result)
+        out = Path(args.output_ks_npz).expanduser().resolve() if args.output_ks_npz else build_default_output(input_table, scan_label, mode, "ks", "npz")
+        write_npz(out, ks)
+        logger.write(f"Wrote KS NPZ: {out}")
+        logger.done(f"ks {scan_label}", t0)
+
+    if args.self_corr:
+        t0 = logger.start(f"self-corr {scan_label}")
+        self_corr = compute_self_corr(
+            input_table,
+            mode,
+            scans,
+            antennas,
+            args.use_flags,
+            args.bchan,
+            args.echan,
+            args.corr_nbin,
+            args.corr_bintype,
+            args.corr_njack,
+        )
+        out = Path(args.output_self_corr_npz).expanduser().resolve() if args.output_self_corr_npz else build_default_output(input_table, scan_label, mode, "self_corr", "npz")
+        write_npz(out, self_corr)
+        logger.write(f"Wrote self-corr NPZ: {out}")
+        logger.done(f"self-corr {scan_label}", t0)
+
+    if args.cross_corr:
+        t0 = logger.start(f"cross-corr {scan_label}")
+        cross_rows = compute_cross_corr(
+            input_table,
+            mode,
+            scans,
+            antennas,
+            args.use_flags,
+            args.bchan,
+            args.echan,
+            args.corr_nbin,
+            args.corr_bintype,
+            args.corr_njack,
+            args.corr_threshold,
+        )
+        cross_result = cross_corr_npz_result(cross_rows, mode, scan_label, args)
+        out = Path(args.output_cross_corr_npz).expanduser().resolve() if args.output_cross_corr_npz else build_default_output(input_table, scan_label, mode, "cross_corr", "npz")
+        write_npz(out, cross_result)
+        logger.write(f"Wrote cross-corr NPZ: {out}")
+        if args.csv or args.output_cross_corr_csv:
+            csv_out = Path(args.output_cross_corr_csv).expanduser().resolve() if args.output_cross_corr_csv else build_default_output(input_table, scan_label, mode, "cross_corr", "csv")
+            write_cross_corr_csv(csv_out, cross_rows)
+            logger.write(f"Wrote cross-corr CSV: {csv_out}")
+        logger.done(f"cross-corr {scan_label}", t0)
+
+
+def main() -> None:
+    args = parse_args()
+    input_table = resolve_input(args.input_table_opt or args.input_table or args.gain_dir)
+    if not input_table.exists():
+        raise FileNotFoundError(f"Input table not found: {input_table}")
+    mode = args.mode
+    if mode == "auto":
+        mode = "bandpass" if args.bchan is not None or args.echan is not None else "gain"
+    scans = parse_int_list(args.scan)
+    antennas = parse_int_list(args.antennas)
+    if args.all:
+        args.gains = args.stats = args.ks = args.self_corr = args.cross_corr = True
+    if args.gain_colormap:
+        args.gains = True
+    if not any([args.gains, args.stats, args.ks, args.self_corr, args.cross_corr, args.gain_colormap]):
+        args.stats = True
+    logger = TaskLogger(default_log_path(input_table))
+    logger.write(f"gdp-stats input={input_table} mode={mode}")
+    batches = scan_batches(input_table, scans, args.combine_scans)
+    if len(batches) > 1 and explicit_outputs(args):
+        names = ", ".join("--" + name.replace("_", "-") for name in explicit_outputs(args))
+        raise SystemExit(
+            "Explicit output paths cannot be used when writing multiple per-scan products. "
+            f"Use --combine-scans or remove: {names}"
+        )
+    for batch_scans, batch_label in batches:
+        run_batch(args, input_table, mode, batch_scans, antennas, batch_label, logger)
+    logger.write(f"Log file: {logger.path}")
+
+
+if __name__ == "__main__":
+    main()

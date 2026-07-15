@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>gdp-plot</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>gdp-plot</h1>
+    <p>Plot GDP NPZ products, creating missing products with <code>gdp-stats</code> when needed.</p>
+  </header>
+  <main>
+    <section class="doc-tree" aria-labelledby="documentation-tree">
+      <h2 id="documentation-tree">Documentation Tree</h2>
+      <ul>
+        <li><a href="README.html">Main documentation</a></li>
+        <li><a href="gdp-setup.html">gdp-setup</a>: initialize and remember runtime and source-data locations.</li>
+        <li><a href="gdp-util.html">gdp-util</a>: read metadata from CASA gain, bandpass, or MeasurementSet tables.</li>
+        <li><a href="gdp-stats.html">gdp-stats</a>: compute antenna-wise gain and bandpass products.</li>
+        <li><a href="gdp-plot.html">gdp-plot</a>: plot GDP NPZ products and create missing products with gdp-stats.</li>
+        <li><a href="gdp-plan-run.html">gdp-plan-run</a>: run GDP command intents from a plan file.</li>
+      </ul>
+    </section>
+    <section class="product-formats" aria-labelledby="product-formats">
+      <h2 id="product-formats">Product Formats</h2>
+      <ul>
+        <li><a href="gdp-product-gains.html">gains NPZ</a></li>
+        <li><a href="gdp-product-stats.html">stats NPZ</a></li>
+        <li><a href="gdp-product-ks.html">KS NPZ</a></li>
+        <li><a href="gdp-product-self-corr.html">self-corr NPZ</a></li>
+        <li><a href="gdp-product-cross-corr.html">cross-corr NPZ</a></li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Purpose</h2>
+      <p><code>gdp-plot</code> reads the NPZ products created by <code>gdp-stats</code> and saves diagnostic plots under the configured runtime plot directory. If a requested NPZ product is missing, it first runs <code>gdp-stats</code> with the matching subtask and then plots the newly created file. For the gain/bandpass colormap only, <code>gdp-stats --gain-colormap</code> can also create the plot directly while producing the gains NPZ.</p>
+    </section>
+
+    <section>
+      <h2>Usage</h2>
+      <pre><code>script/gdp-plot --mode gain --stats  [plot the gain stats NPZ, creating it first if missing]
+script/gdp-plot --mode gain --stats --combine-scans  [plot one combined allscans stats product]
+script/gdp-plot --mode bandpass --gain-colormap --bchan 0 --echan 128  [plot bandpass amplitude colormap]
+script/gdp-plot --mode both --all  [make gain-colormap, stats, and KS plots for gain and bandpass]
+script/gdp-plot --cross-corr-colormap --antenna 0,1,2  [plot selected antennas from cross-corr NPZ]
+script/gdp-plot --self-corr-colormap --recompute  [rerun gdp-stats self-corr before plotting]</code></pre>
+    </section>
+
+    <section>
+      <h2>Options</h2>
+      <table>
+        <tr><th>Option</th><th>Description</th></tr>
+        <tr><td><code>--mode {gain,bandpass,both}</code></td><td>Select which mode to plot. <code>both</code> runs each selected plot task for gain and bandpass.</td></tr>
+        <tr><td><code>--combine-scans</code></td><td>Plot one combined <code>allscans</code>-style product. Default: false, so GDP makes one plot per scan.</td></tr>
+        <tr><td><code>--gain-colormap</code></td><td>Plot gain/bandpass amplitude colormap from <code>gdp-gains-&lt;mode&gt;-&lt;scan&gt;.npz</code>.</td></tr>
+        <tr><td><code>--antenna LIST</code></td><td>Comma-separated antenna numbers to plot. The same list is passed to <code>gdp-stats</code> if missing products must be created.</td></tr>
+        <tr><td><code>--stats</code></td><td>Plot summary curves from the stats NPZ product.</td></tr>
+        <tr><td><code>--ks</code></td><td>Plot summary curves from the KS NPZ product.</td></tr>
+        <tr><td><code>--self-corr-colormap</code></td><td>Plot antenna-by-lag S2 colormaps from the self-correlation NPZ product.</td></tr>
+        <tr><td><code>--cross-corr-colormap</code></td><td>Plot antenna-pair tcorr colormaps from the cross-correlation NPZ product.</td></tr>
+        <tr><td><code>--all</code></td><td>Run gain colormap, stats, and KS plots.</td></tr>
+        <tr><td><code>--scan LIST</code></td><td>Use the matching scan-specific product name, and pass the scan list to <code>gdp-stats</code> if products are missing.</td></tr>
+        <tr><td><code>--input-table PATH</code>, <code>--gain-dir PATH</code></td><td>Input table passed to <code>gdp-stats</code> when an NPZ product must be created.</td></tr>
+        <tr><td><code>--bchan INT</code>, <code>--echan INT</code></td><td>Bandpass channel selection passed to <code>gdp-stats</code> when needed.</td></tr>
+        <tr><td><code>--plot-dir PATH</code></td><td>Output plot directory. Default: configured <code>plots/&lt;format&gt;</code> runtime directory.</td></tr>
+        <tr><td><code>--format {png,pdf,eps}</code></td><td>Plot file format. Default: <code>png</code>.</td></tr>
+        <tr><td><code>--recompute</code></td><td>Run <code>gdp-stats</code> before plotting even when the NPZ file already exists.</td></tr>
+        <tr><td><code>--dry-run</code></td><td>Print the <code>gdp-stats</code> commands that would create missing products.</td></tr>
+      </table>
+    </section>
+
+    <section>
+      <h2>Default Plot Names</h2>
+      <p>Plots are saved as <code>gdp-plot-&lt;task&gt;-&lt;mode&gt;-&lt;scan&gt;.&lt;format&gt;</code>. By default the scan field is per scan, such as <code>scan1</code>. With <code>--combine-scans</code>, the scan field is <code>allscans</code> when no scan list is supplied.</p>
+    </section>
+  </main>
+</body>
+</html>

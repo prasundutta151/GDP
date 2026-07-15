@@ -1,0 +1,31 @@
+# Sample GDP plan.
+#
+# Plan syntax:
+# - Define reusable values in variables:
+# - Use ${name} to substitute a variable or a saved gdp-setup path.
+# - Each intent names a GDP command from script/.
+# - Intent keys become CLI flags, for example output-npz -> --output-npz.
+# - Boolean true values become flags; false/null values are omitted.
+
+variables:
+  stats_npz: ${project_root}/rundir/data-product/stats/npz/gdp-stats-gain-allscans.npz
+  stats_csv: ${project_root}/rundir/data-product/stats/csv/gdp-stats-gain-allscans.csv
+  plot_png_dir: ${project_root}/rundir/plots/png
+
+intent: gdp-stats
+  name: gain statistics with csv
+  mode: gain
+  combine-scans: true
+  stats: true
+  output-npz: ${stats_npz}
+  csv: true
+  output-csv: ${stats_csv}
+end
+
+intent: gdp-plot
+  name: plot gain statistics
+  mode: gain
+  combine-scans: true
+  stats: true
+  plot-dir: ${plot_png_dir}
+end

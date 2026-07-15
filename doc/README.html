@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GDP Documentation</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>GDP Documentation</h1>
+    <p>GDP (Gain Diagnostic Product) is a command-line toolkit for gain and bandpass diagnostics, data products, plotting, diagnosis, and flag products.</p>
+  </header>
+  <main>
+    <section class="doc-tree" aria-labelledby="documentation-tree">
+      <h2 id="documentation-tree">Documentation Tree</h2>
+      <ul>
+        <li><a href="README.html">Main documentation</a></li>
+        <li><a href="gdp-setup.html">gdp-setup</a>: initialize and remember runtime and source-data locations.</li>
+        <li><a href="gdp-util.html">gdp-util</a>: read metadata from CASA gain, bandpass, or MeasurementSet tables.</li>
+        <li><a href="gdp-stats.html">gdp-stats</a>: compute antenna-wise gain and bandpass products.</li>
+        <li><a href="gdp-plot.html">gdp-plot</a>: plot GDP NPZ products and create missing products with gdp-stats.</li>
+        <li><a href="gdp-plan-run.html">gdp-plan-run</a>: run GDP command intents from a plan file.</li>
+      </ul>
+    </section>
+    <section class="product-formats" aria-labelledby="product-formats">
+      <h2 id="product-formats">Product Formats</h2>
+      <ul>
+        <li><a href="gdp-product-gains.html">gains NPZ</a></li>
+        <li><a href="gdp-product-stats.html">stats NPZ</a></li>
+        <li><a href="gdp-product-ks.html">KS NPZ</a></li>
+        <li><a href="gdp-product-self-corr.html">self-corr NPZ</a></li>
+        <li><a href="gdp-product-cross-corr.html">cross-corr NPZ</a></li>
+      </ul>
+    </section>
+    <section>
+      <h2>Runtime Layout</h2>
+      <p>The default repository runtime directory is <code>rundir/</code>. A user may choose a different runtime directory with <code>gdp-setup</code>.</p>
+      <table>
+        <tr><th>Subfolder</th><th>Purpose</th></tr>
+        <tr><td><code>data-product/gains/npz</code></td><td>Raw selected gain/bandpass sample products.</td></tr>
+        <tr><td><code>data-product/gains/csv</code></td><td>Reserved for optional gains CSV products.</td></tr>
+        <tr><td><code>data-product/stats/npz</code></td><td>Statistics products in NPZ format.</td></tr>
+        <tr><td><code>data-product/stats/csv</code></td><td>Optional statistics CSV products.</td></tr>
+        <tr><td><code>data-product/ks/npz</code></td><td>KS diagnostic products.</td></tr>
+        <tr><td><code>data-product/ks/csv</code></td><td>Reserved for optional KS CSV products.</td></tr>
+        <tr><td><code>data-product/self-corr/npz</code></td><td>Self structure-function products.</td></tr>
+        <tr><td><code>data-product/cross-corr/npz</code></td><td>Cross structure-function tcorr products in NPZ format.</td></tr>
+        <tr><td><code>data-product/cross-corr/csv</code></td><td>Optional cross structure-function CSV products.</td></tr>
+        <tr><td><code>data-product/flag/npz</code></td><td>Antenna-based flag products in NPZ format.</td></tr>
+        <tr><td><code>data-product/flag/csv</code></td><td>Optional flag CSV summaries.</td></tr>
+        <tr><td><code>plots/png</code></td><td>Default PNG diagnostic plots.</td></tr>
+        <tr><td><code>plots/eps</code></td><td>Optional EPS diagnostic plots.</td></tr>
+        <tr><td><code>plots/pdf</code></td><td>Optional PDF diagnostic plots.</td></tr>
+      </table>
+    </section>
+
+    <section>
+      <h2>Quick Start</h2>
+      <pre><code>script/gdp-setup --gain-dir /path/to/gain/table.g --rundir /path/to/rundir  [save the default input table and runtime directory]
+script/gdp-setup --show  [print the saved GDP setup]
+script/gdp-util /path/to/table.g --header  [inspect table metadata]
+script/gdp-stats --stats --csv  [compute stats and optional CSV from the saved input]
+script/gdp-stats --stats --combine-scans  [write one combined allscans stats product]
+script/gdp-stats --mode gain --gain-colormap  [create gains NPZ and a gain colormap plot]
+script/gdp-plot --mode gain --stats  [plot stats, creating the stats NPZ first if needed]
+script/gdp-plan-run pipelines/sample_stats.plan --dry-run  [preview a pipeline plan without running it]</code></pre>
+    </section>
+  </main>
+</body>
+</html>

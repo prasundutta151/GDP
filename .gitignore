@@ -1,0 +1,70 @@
+# Runtime products
+rundir/*
+!rundir/.gitkeep
+!rundir/data-product/
+!rundir/data-product/.gitkeep
+!rundir/data-product/gains/
+!rundir/data-product/gains/.gitkeep
+!rundir/data-product/gains/npz/
+!rundir/data-product/gains/npz/.gitkeep
+!rundir/data-product/gains/csv/
+!rundir/data-product/gains/csv/.gitkeep
+!rundir/data-product/stats/
+!rundir/data-product/stats/.gitkeep
+!rundir/data-product/stats/npz/
+!rundir/data-product/stats/npz/.gitkeep
+!rundir/data-product/stats/csv/
+!rundir/data-product/stats/csv/.gitkeep
+!rundir/data-product/ks/
+!rundir/data-product/ks/.gitkeep
+!rundir/data-product/ks/npz/
+!rundir/data-product/ks/npz/.gitkeep
+!rundir/data-product/ks/csv/
+!rundir/data-product/ks/csv/.gitkeep
+!rundir/data-product/self-corr/
+!rundir/data-product/self-corr/.gitkeep
+!rundir/data-product/self-corr/npz/
+!rundir/data-product/self-corr/npz/.gitkeep
+!rundir/data-product/cross-corr/
+!rundir/data-product/cross-corr/.gitkeep
+!rundir/data-product/cross-corr/csv/
+!rundir/data-product/cross-corr/csv/.gitkeep
+!rundir/data-product/flag/
+!rundir/data-product/flag/.gitkeep
+!rundir/data-product/flag/npz/
+!rundir/data-product/flag/npz/.gitkeep
+!rundir/data-product/flag/csv/
+!rundir/data-product/flag/csv/.gitkeep
+!rundir/logs/
+!rundir/logs/.gitkeep
+!rundir/plots/
+!rundir/plots/.gitkeep
+!rundir/plots/png/
+!rundir/plots/png/.gitkeep
+!rundir/plots/eps/
+!rundir/plots/eps/.gitkeep
+!rundir/plots/pdf/
+!rundir/plots/pdf/.gitkeep
+
+# Local GDP setup state
+.gdp-config.json
+
+# Python cache files
+__pycache__/
+*.py[cod]
+
+# Local OS/editor files
+.DS_Store
+*.swp
+
+# Large local data products
+*.ms/
+*.g/
+*.b/
+*.tb/
+*.npz
+*.fits
+
+# Release archives are added intentionally when needed.
+*.tar
+*.tgz

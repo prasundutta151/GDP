@@ -1,0 +1,254 @@
+#!/usr/bin/env python3
+"""Run GDP command intents from a simple plan file."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+
+
+CONFIG_NAME = ".gdp-config.json"
+VAR_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
+
+
+def project_root() -> Path:
+    return Path(__file__).resolve().parents[1]
+
+
+def script_dir() -> Path:
+    return project_root() / "script"
+
+
+def load_config() -> Dict[str, Any]:
+    path = project_root() / CONFIG_NAME
+    if not path.exists():
+        return {}
+    with path.open("r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def strip_comment(line: str) -> str:
+    in_single = False
+    in_double = False
+    escaped = False
+    out = []
+    for ch in line:
+        if escaped:
+            out.append(ch)
+            escaped = False
+            continue
+        if ch == "\\":
+            out.append(ch)
+            escaped = True
+            continue
+        if ch == "'" and not in_double:
+            in_single = not in_single
+        elif ch == '"' and not in_single:
+            in_double = not in_double
+        if ch == "#" and not in_single and not in_double:
+            break
+        out.append(ch)
+    return "".join(out).strip()
+
+
+def parse_scalar(value: str) -> Any:
+    value = value.strip()
+    if value == "":
+        return ""
+    if (value.startswith('"') and value.endswith('"')) or (value.startswith("'") and value.endswith("'")):
+        return value[1:-1]
+    low = value.lower()
+    if low in {"true", "yes", "on"}:
+        return True
+    if low in {"false", "no", "off"}:
+        return False
+    if low in {"none", "null"}:
+        return None
+    return value
+
+
+def parse_key_value(line: str, lineno: int) -> Tuple[str, Any]:
+    if ":" not in line:
+        raise ValueError(f"Line {lineno}: expected key: value")
+    key, value = line.split(":", 1)
+    key = key.strip()
+    if not key:
+        raise ValueError(f"Line {lineno}: empty key")
+    return key, parse_scalar(value)
+
+
+def parse_plan(path: Path) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
+    variables: Dict[str, Any] = {}
+    intents: List[Dict[str, Any]] = []
+    section: Optional[str] = None
+    current: Optional[Dict[str, Any]] = None
+
+    for lineno, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        line = strip_comment(raw)
+        if not line:
+            continue
+
+        if line in {"---", "end"}:
+            if current is not None:
+                intents.append(current)
+                current = None
+            section = None
+            continue
+
+        if line == "variables:":
+            if current is not None:
+                intents.append(current)
+                current = None
+            section = "variables"
+            continue
+
+        if line.startswith("intent:"):
+            if current is not None:
+                intents.append(current)
+            _, command = parse_key_value(line, lineno)
+            current = {"command": str(command), "args": {}, "lineno": lineno}
+            section = "intent"
+            continue
+
+        # Compact block form: "gdp-stats:" starts a new intent.
+        if line.endswith(":") and line[:-1].strip().startswith("gdp-"):
+            if current is not None:
+                intents.append(current)
+            current = {"command": line[:-1].strip(), "args": {}, "lineno": lineno}
+            section = "intent"
+            continue
+
+        key, value = parse_key_value(line, lineno)
+        if section == "variables":
+            variables[key] = value
+        elif section == "intent" and current is not None:
+            current["args"][key] = value
+        else:
+            raise ValueError(
+                f"Line {lineno}: key/value line must be inside variables: or an intent block"
+            )
+
+    if current is not None:
+        intents.append(current)
+    if not intents:
+        raise ValueError(f"No intents found in plan: {path}")
+    return variables, intents
+
+
+def flatten_config(config: Dict[str, Any]) -> Dict[str, Any]:
+    out: Dict[str, Any] = {}
+    for key, value in config.items():
+        if key == "paths" and isinstance(value, dict):
+            for pkey, pval in value.items():
+                out[str(pkey)] = pval
+        elif isinstance(value, (str, int, float, bool)) or value is None:
+            out[str(key)] = value
+    return out
+
+
+def resolve_value(value: Any, variables: Dict[str, Any]) -> Any:
+    if not isinstance(value, str):
+        return value
+
+    def repl(match: re.Match[str]) -> str:
+        key = match.group(1)
+        if key not in variables:
+            raise KeyError(f"Unknown plan variable: {key}")
+        return str(variables[key])
+
+    previous = value
+    for _ in range(10):
+        resolved = VAR_RE.sub(repl, previous)
+        if resolved == previous:
+            return resolved
+        previous = resolved
+    raise ValueError(f"Variable expansion appears recursive: {value}")
+
+
+def command_path(command: str) -> Path:
+    if "/" in command:
+        path = Path(command).expanduser()
+        return path if path.is_absolute() else (project_root() / path)
+    path = script_dir() / command
+    if not path.exists():
+        raise FileNotFoundError(f"GDP command not found: {path}")
+    return path
+
+
+def args_to_cli(args: Dict[str, Any], variables: Dict[str, Any]) -> List[str]:
+    cli: List[str] = []
+    for key, raw_value in args.items():
+        if key in {"name", "description"}:
+            continue
+        value = resolve_value(raw_value, variables)
+        if key in {"arg", "args", "positional"}:
+            if isinstance(value, str):
+                cli.extend(value.split())
+            elif isinstance(value, list):
+                cli.extend(str(x) for x in value)
+            else:
+                cli.append(str(value))
+            continue
+        flag = "--" + key.replace("_", "-")
+        if value is True:
+            cli.append(flag)
+        elif value is False or value is None:
+            continue
+        else:
+            cli.extend([flag, str(value)])
+    return cli
+
+
+def run_plan(plan_path: Path, dry_run: bool = False, only: Optional[str] = None) -> None:
+    plan_vars, intents = parse_plan(plan_path)
+    variables = {
+        "project_root": str(project_root()),
+        "script_dir": str(script_dir()),
+        "plan_dir": str(plan_path.parent),
+    }
+    variables.update(flatten_config(load_config()))
+    for key, value in plan_vars.items():
+        variables[key] = resolve_value(value, variables)
+
+    for index, intent in enumerate(intents, start=1):
+        command = intent["command"]
+        label = str(intent["args"].get("name", command))
+        if only is not None and only not in {command, label, str(index)}:
+            continue
+        exe = command_path(command)
+        cli = args_to_cli(intent["args"], variables)
+        cmd = [str(exe), *cli]
+        print(f"[{index}] {label}")
+        print("$ " + " ".join(cmd))
+        if dry_run:
+            continue
+        subprocess.run(cmd, cwd=str(project_root()), check=True)
+
+
+def parse_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser(description="Run a GDP plan file composed of GDP command intents.")
+    p.add_argument("plan_file", help="GDP plan file path.")
+    p.add_argument("--dry-run", action="store_true", help="Print commands without running them.")
+    p.add_argument("--only", default=None, help="Run only the matching intent index, command, or name.")
+    return p.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+    plan = Path(args.plan_file).expanduser().resolve()
+    if not plan.exists():
+        raise FileNotFoundError(f"Plan file not found: {plan}")
+    try:
+        run_plan(plan, dry_run=args.dry_run, only=args.only)
+    except subprocess.CalledProcessError as exc:
+        raise SystemExit(exc.returncode) from exc
+
+
+if __name__ == "__main__":
+    main()

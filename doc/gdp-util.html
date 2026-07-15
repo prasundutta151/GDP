@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>gdp-util</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>gdp-util</h1>
+    <p>Read useful metadata from CASA gain, bandpass, or MeasurementSet tables.</p>
+  </header>
+  <main>
+    <section class="doc-tree" aria-labelledby="documentation-tree">
+      <h2 id="documentation-tree">Documentation Tree</h2>
+      <ul>
+        <li><a href="README.html">Main documentation</a></li>
+        <li><a href="gdp-setup.html">gdp-setup</a>: initialize and remember runtime and source-data locations.</li>
+        <li><a href="gdp-util.html">gdp-util</a>: read metadata from CASA gain, bandpass, or MeasurementSet tables.</li>
+        <li><a href="gdp-stats.html">gdp-stats</a>: compute antenna-wise gain and bandpass products.</li>
+        <li><a href="gdp-plot.html">gdp-plot</a>: plot GDP NPZ products and create missing products with gdp-stats.</li>
+        <li><a href="gdp-plan-run.html">gdp-plan-run</a>: run GDP command intents from a plan file.</li>
+      </ul>
+    </section>
+    <section class="product-formats" aria-labelledby="product-formats">
+      <h2 id="product-formats">Product Formats</h2>
+      <ul>
+        <li><a href="gdp-product-gains.html">gains NPZ</a></li>
+        <li><a href="gdp-product-stats.html">stats NPZ</a></li>
+        <li><a href="gdp-product-ks.html">KS NPZ</a></li>
+        <li><a href="gdp-product-self-corr.html">self-corr NPZ</a></li>
+        <li><a href="gdp-product-cross-corr.html">cross-corr NPZ</a></li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Purpose</h2>
+      <p><code>gdp-util</code> provides small metadata utilities behind one command. It can print table headers, observing dates, channel-width summaries, and the saved GDP setup configuration. It also provides <code>--git-push</code> for the GDP release/git workflow.</p>
+    </section>
+
+    <section>
+      <h2>Usage</h2>
+      <pre><code>script/gdp-util /path/to/table.g --header  [show table rows, columns, IDs, and data-column descriptions]
+script/gdp-util /path/to/table.g --header --keywords --json  [write header and keyword metadata as JSON]
+script/gdp-util /path/to/table.g --date  [show observing date and time span]
+script/gdp-util /path/to/table.ms --channel-width  [show channel-width statistics in MHz]
+script/gdp-util --config  [print the saved GDP setup configuration]
+script/gdp-util --git-push -m "Describe the change"  [build the version archive, commit, and push]</code></pre>
+    </section>
+
+    <section>
+      <h2>Options</h2>
+      <table>
+        <tr><th>Option</th><th>Description</th></tr>
+        <tr><td><code>input_table</code></td><td>Optional positional CASA table or MeasurementSet path.</td></tr>
+        <tr><td><code>--input-table PATH</code></td><td>Named input path. Overrides the positional path.</td></tr>
+        <tr><td><code>--header</code></td><td>Print row count, columns, common IDs, data columns, and column descriptions.</td></tr>
+        <tr><td><code>--keywords</code></td><td>Include CASA table keywords in header output.</td></tr>
+        <tr><td><code>--date</code></td><td>Print IST observing dates and time span from the <code>TIME</code> column.</td></tr>
+        <tr><td><code>--channel-width</code></td><td>Print channel-width statistics in MHz.</td></tr>
+        <tr><td><code>--config</code></td><td>Print the saved GDP setup configuration.</td></tr>
+        <tr><td><code>--git-push</code></td><td>Create <code>gdp-&lt;VERSION&gt;.tgz</code>, stage GDP source/docs/notes/archive files, commit, and push the current branch.</td></tr>
+        <tr><td><code>-m</code>, <code>--message TEXT</code></td><td>Commit message for <code>--git-push</code>. Defaults to <code>GDP update &lt;version&gt;</code>.</td></tr>
+        <tr><td><code>--no-push</code></td><td>With <code>--git-push</code>, create the archive and commit without pushing.</td></tr>
+        <tr><td><code>--json</code></td><td>Write machine-readable JSON output.</td></tr>
+      </table>
+    </section>
+
+    <section>
+      <h2>Git Workflow</h2>
+      <p>The <code>--git-push</code> mode builds a versioned archive from the GDP tree, excluding local runtime products, git internals, cache files, and local setup state. It stages project files such as <code>DEV_NOTES.md</code>, <code>DEV_PLAN.md</code>, <code>REQUIREMENTS.md</code>, <code>doc/</code>, <code>script/</code>, and the version archive before committing and pushing.</p>
+    </section>
+  </main>
+</body>
+</html>

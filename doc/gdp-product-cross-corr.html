@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GDP Cross-Correlation NPZ Format</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>GDP Cross-Correlation NPZ Format</h1>
+    <p>Cross structure-function correlation-time products saved by <code>gdp-stats --cross-corr</code>.</p>
+  </header>
+  <main>
+    <section class="doc-tree" aria-labelledby="documentation-tree">
+      <h2 id="documentation-tree">Documentation Tree</h2>
+      <ul>
+        <li><a href="README.html">Main documentation</a></li>
+        <li><a href="gdp-setup.html">gdp-setup</a>: initialize and remember runtime and source-data locations.</li>
+        <li><a href="gdp-util.html">gdp-util</a>: read metadata from CASA gain, bandpass, or MeasurementSet tables.</li>
+        <li><a href="gdp-stats.html">gdp-stats</a>: compute antenna-wise gain and bandpass products.</li>
+        <li><a href="gdp-plot.html">gdp-plot</a>: plot GDP NPZ products and create missing products with gdp-stats.</li>
+        <li><a href="gdp-plan-run.html">gdp-plan-run</a>: run GDP command intents from a plan file.</li>
+      </ul>
+    </section>
+    <section class="product-formats" aria-labelledby="product-formats">
+      <h2 id="product-formats">Product Formats</h2>
+      <ul>
+        <li><a href="gdp-product-gains.html">gains NPZ</a></li>
+        <li><a href="gdp-product-stats.html">stats NPZ</a></li>
+        <li><a href="gdp-product-ks.html">KS NPZ</a></li>
+        <li><a href="gdp-product-self-corr.html">self-corr NPZ</a></li>
+        <li><a href="gdp-product-cross-corr.html">cross-corr NPZ</a></li>
+      </ul>
+    </section>
+    <section>
+      <h2>Standard Name</h2>
+      <p><code>gdp-cross-corr-&lt;mode&gt;-&lt;scan&gt;.npz</code></p>
+      <p>Example: <code>gdp-cross-corr-gain-scan1.npz</code>. With <code>--combine-scans</code>: <code>gdp-cross-corr-gain-allscans.npz</code>.</p>
+    </section>
+    <section>
+      <h2>Output Location</h2>
+      <p>By default this product is written under <code>rundir/data-product/cross-corr/npz/</code>, or under the configured runtime directory from <code>gdp-setup</code>.</p>
+    </section>
+    <section>
+      <h2>Arrays</h2>
+      <table>
+        <tr><th>Array</th><th>Description</th></tr>
+        <tr><td><code>header_json</code></td><td>JSON metadata with product name, mode, scan selection, column order, and correlation settings.</td></tr>
+        <tr><td><code>scan</code></td><td>Scan number for the antenna-pair measurement.</td></tr>
+        <tr><td><code>ant1</code></td><td>First antenna ID in the baseline-like antenna pair.</td></tr>
+        <tr><td><code>ant2</code></td><td>Second antenna ID in the antenna pair.</td></tr>
+        <tr><td><code>stokes</code></td><td>Stokes/polarization index used for the comparison.</td></tr>
+        <tr><td><code>components</code></td><td>Gain components used in the comparison, such as <code>real-real</code>, <code>real-imag</code>, <code>imag-real</code>, or <code>imag-imag</code>.</td></tr>
+        <tr><td><code>threshold</code></td><td>Structure-function threshold used to extract the correlation time. Default: <code>0.7</code>.</td></tr>
+        <tr><td><code>tcorr</code></td><td>Estimated cross-correlation time from the first valid lag bin crossing the threshold. Written as <code>nan</code> when no valid crossing is found.</td></tr>
+        <tr><td><code>nbin_valid</code></td><td>Number of lag bins with finite structure-function values.</td></tr>
+        <tr><td><code>npair</code></td><td>Total sample-pair count contributing to the antenna-pair estimate.</td></tr>
+      </table>
+    </section>
+    <section>
+      <h2>Optional CSV</h2>
+      <p>Use <code>--csv</code> or <code>--output-cross-corr-csv PATH</code> to also write <code>gdp-cross-corr-&lt;mode&gt;-&lt;scan&gt;.csv</code>. The CSV columns match the NPZ arrays except for <code>header_json</code>.</p>
+    </section>
+    <section>
+      <h2>Related Options</h2>
+      <table>
+        <tr><th>Option</th><th>Use</th></tr>
+        <tr><td><code>--output-cross-corr-npz PATH</code></td><td>Write the default NPZ product to a specific path.</td></tr>
+        <tr><td><code>--output-cross-corr-csv PATH</code></td><td>Also write the optional CSV product to a specific path.</td></tr>
+        <tr><td><code>--corr-threshold FLOAT</code></td><td>Set the threshold used for <code>tcorr</code>.</td></tr>
+        <tr><td><code>--corr-nbin INT</code></td><td>Set the lag-bin count.</td></tr>
+        <tr><td><code>--corr-bintype {log,lin}</code></td><td>Choose logarithmic or linear lag bins.</td></tr>
+      </table>
+    </section>
+  </main>
+</body>
+</html>

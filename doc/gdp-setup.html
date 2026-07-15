@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>gdp-setup</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>gdp-setup</h1>
+    <p>Initialize and remember the GDP runtime environment.</p>
+  </header>
+  <main>
+    <section class="doc-tree" aria-labelledby="documentation-tree">
+      <h2 id="documentation-tree">Documentation Tree</h2>
+      <ul>
+        <li><a href="README.html">Main documentation</a></li>
+        <li><a href="gdp-setup.html">gdp-setup</a>: initialize and remember runtime and source-data locations.</li>
+        <li><a href="gdp-util.html">gdp-util</a>: read metadata from CASA gain, bandpass, or MeasurementSet tables.</li>
+        <li><a href="gdp-stats.html">gdp-stats</a>: compute antenna-wise gain and bandpass products.</li>
+        <li><a href="gdp-plot.html">gdp-plot</a>: plot GDP NPZ products and create missing products with gdp-stats.</li>
+        <li><a href="gdp-plan-run.html">gdp-plan-run</a>: run GDP command intents from a plan file.</li>
+      </ul>
+    </section>
+    <section class="product-formats" aria-labelledby="product-formats">
+      <h2 id="product-formats">Product Formats</h2>
+      <ul>
+        <li><a href="gdp-product-gains.html">gains NPZ</a></li>
+        <li><a href="gdp-product-stats.html">stats NPZ</a></li>
+        <li><a href="gdp-product-ks.html">KS NPZ</a></li>
+        <li><a href="gdp-product-self-corr.html">self-corr NPZ</a></li>
+        <li><a href="gdp-product-cross-corr.html">cross-corr NPZ</a></li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Purpose</h2>
+      <p><code>gdp-setup</code> creates the runtime directory structure and saves the gain/source-data location so later GDP commands can reuse those defaults.</p>
+    </section>
+
+    <section>
+      <h2>Usage</h2>
+      <pre><code>script/gdp-setup --gain-dir /path/to/gain/table.g --rundir /path/to/work/rundir  [save the default gain table and runtime directory]
+script/gdp-setup --source-data /path/to/source/data  [save a general source-data directory]
+script/gdp-setup --show  [print the saved GDP setup]</code></pre>
+    </section>
+
+    <section>
+      <h2>Options</h2>
+      <table>
+        <tr><th>Option</th><th>Description</th></tr>
+        <tr><td><code>--rundir PATH</code></td><td>Runtime directory to create or use. Defaults to the saved value, then <code>&lt;GDP&gt;/rundir</code>.</td></tr>
+        <tr><td><code>--source-data PATH</code></td><td>Source-data directory remembered for later GDP commands.</td></tr>
+        <tr><td><code>--gain-dir PATH</code></td><td>Gain/bandpass table or directory remembered for later GDP commands. Used as the default input by tools such as <code>gdp-stats</code>.</td></tr>
+        <tr><td><code>--config PATH</code></td><td>Configuration JSON path. Defaults to <code>&lt;GDP&gt;/.gdp-config.json</code>.</td></tr>
+        <tr><td><code>--show</code></td><td>Print the saved configuration and exit.</td></tr>
+        <tr><td><code>--dry-run</code></td><td>Show the directories and configuration that would be written.</td></tr>
+        <tr><td><code>--allow-missing-source</code></td><td>Allow the source-data directory to be recorded before it exists.</td></tr>
+      </table>
+    </section>
+  </main>
+</body>
+</html>

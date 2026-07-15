@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>gdp-stats</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>gdp-stats</h1>
+    <p>Compute antenna-wise gain and bandpass statistics products.</p>
+  </header>
+  <main>
+    <section class="doc-tree" aria-labelledby="documentation-tree">
+      <h2 id="documentation-tree">Documentation Tree</h2>
+      <ul>
+        <li><a href="README.html">Main documentation</a></li>
+        <li><a href="gdp-setup.html">gdp-setup</a>: initialize and remember runtime and source-data locations.</li>
+        <li><a href="gdp-util.html">gdp-util</a>: read metadata from CASA gain, bandpass, or MeasurementSet tables.</li>
+        <li><a href="gdp-stats.html">gdp-stats</a>: compute antenna-wise gain and bandpass products.</li>
+        <li><a href="gdp-plot.html">gdp-plot</a>: plot GDP NPZ products and create missing products with gdp-stats.</li>
+        <li><a href="gdp-plan-run.html">gdp-plan-run</a>: run GDP command intents from a plan file.</li>
+      </ul>
+    </section>
+    <section class="product-formats" aria-labelledby="product-formats">
+      <h2 id="product-formats">Product Formats</h2>
+      <ul>
+        <li><a href="gdp-product-gains.html">gains NPZ</a></li>
+        <li><a href="gdp-product-stats.html">stats NPZ</a></li>
+        <li><a href="gdp-product-ks.html">KS NPZ</a></li>
+        <li><a href="gdp-product-self-corr.html">self-corr NPZ</a></li>
+        <li><a href="gdp-product-cross-corr.html">cross-corr NPZ</a></li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Purpose</h2>
+      <p><code>gdp-stats</code> reads a CASA gain or bandpass table and creates GDP data products. If no input table is supplied, it uses the saved <code>gain_dir</code> from <code>gdp-setup</code>. Each requested subtask writes to the runtime product folders and records timing information in a log file.</p>
+    </section>
+
+    <section>
+      <h2>Usage</h2>
+      <pre><code>script/gdp-setup --gain-dir /path/to/table.g --rundir /path/to/rundir  [save the default input table and runtime directory]
+script/gdp-stats --stats --csv  [compute statistics from the saved input and also write CSV]
+script/gdp-stats --mode gain --gain-colormap  [create gains NPZ and save a gain amplitude colormap plot]
+script/gdp-stats --stats --combine-scans  [combine scans into one allscans stats product]
+script/gdp-stats /path/to/table.b --mode bandpass --bchan 0 --echan 128 --gains --stats  [process selected bandpass channels and save gains plus stats]
+script/gdp-stats --scan 1,2 --antennas 0,1,2 --all  [run every stats subtask for selected scans and antennas]</code></pre>
+    </section>
+
+    <section>
+      <h2>Options</h2>
+      <table>
+        <tr><th>Option</th><th>Description</th></tr>
+        <tr><td><code>input_table</code></td><td>Optional positional CASA gain/bandpass table path.</td></tr>
+        <tr><td><code>--input-table PATH</code></td><td>Named input table path. Overrides the positional path.</td></tr>
+        <tr><td><code>--gain-dir PATH</code></td><td>Named gain/bandpass table path. Defaults to the saved <code>gdp-setup</code> gain directory when omitted.</td></tr>
+        <tr><td><code>--mode {auto,gain,bandpass}</code></td><td>Statistics mode. Default: <code>auto</code>.</td></tr>
+        <tr><td><code>--scan LIST</code></td><td>Comma-separated scans. Default: all scans.</td></tr>
+        <tr><td><code>--combine-scans</code></td><td>Combine selected scans into one <code>allscans</code>-style product. Default: false, so GDP writes one product per scan.</td></tr>
+        <tr><td><code>--antennas LIST</code></td><td>Comma-separated antennas. Default: all antennas.</td></tr>
+        <tr><td><code>--bchan INT</code></td><td>Start channel, inclusive.</td></tr>
+        <tr><td><code>--echan INT</code></td><td>End channel, exclusive.</td></tr>
+        <tr><td><code>--use-flags</code>, <code>--no-use-flags</code></td><td>Apply or ignore the CASA <code>FLAG</code> mask. Default: apply flags.</td></tr>
+        <tr><td><code>--subtract-mean</code>, <code>--no-subtract-mean</code></td><td>Subtract real and imaginary means before computing statistics. Default: enabled.</td></tr>
+        <tr><td><code>--gains</code></td><td>Save selected gain/bandpass samples as a GDP gains NPZ product.</td></tr>
+        <tr><td><code>--gain-colormap</code></td><td>Also save a gain/bandpass amplitude colormap plot from the gains NPZ product. Default: off.</td></tr>
+        <tr><td><code>--stats</code></td><td>Compute mean, std, skew, kurtosis, median, MAD, min, and max statistics. This is the default when no subtask is selected.</td></tr>
+        <tr><td><code>--ks</code></td><td>Create the KS product schema. Full sample KS calculation is planned for a later implementation pass.</td></tr>
+        <tr><td><code>--self-corr</code></td><td>Compute self structure-function correlation curves and save a long-format NPZ product.</td></tr>
+        <tr><td><code>--cross-corr</code></td><td>Compute cross structure-function correlation times between antenna/stokes/component pairs and save NPZ output.</td></tr>
+        <tr><td><code>--all</code></td><td>Run all GDP stats subtasks.</td></tr>
+        <tr><td><code>--output-npz PATH</code></td><td>Output NPZ path. Default: configured <code>stats/npz</code> runtime directory.</td></tr>
+        <tr><td><code>--output-gains-npz PATH</code></td><td>Output gains NPZ path. Default: configured <code>gains/npz</code> runtime directory.</td></tr>
+        <tr><td><code>--output-ks-npz PATH</code></td><td>Output KS NPZ path. Default: configured <code>ks/npz</code> runtime directory.</td></tr>
+        <tr><td><code>--output-self-corr-npz PATH</code></td><td>Output self-correlation NPZ path. Default: configured <code>self-corr/npz</code> runtime directory.</td></tr>
+        <tr><td><code>--output-cross-corr-npz PATH</code></td><td>Output cross-correlation NPZ path. Default: configured <code>cross-corr/npz</code> runtime directory.</td></tr>
+        <tr><td><code>--output-cross-corr-csv PATH</code></td><td>Optional cross-correlation CSV path. Implies CSV output for <code>--cross-corr</code>.</td></tr>
+        <tr><td><code>--output-gain-colormap PATH</code></td><td>Output path for the optional gain colormap plot.</td></tr>
+        <tr><td><code>--plot-format {png,pdf,eps}</code></td><td>Plot format for <code>--gain-colormap</code>. Default: <code>png</code>.</td></tr>
+        <tr><td><code>--corr-threshold FLOAT</code></td><td>S2 threshold used for cross-correlation time extraction. Default: <code>0.7</code>.</td></tr>
+        <tr><td><code>--corr-nbin INT</code></td><td>Structure-function lag bin count. Default: <code>32</code>.</td></tr>
+        <tr><td><code>--corr-bintype {log,lin}</code></td><td>Structure-function lag binning. Default: <code>log</code>.</td></tr>
+        <tr><td><code>--corr-njack INT</code></td><td>Jackknife folds for structure-function errors. Default: <code>32</code>.</td></tr>
+        <tr><td><code>--csv</code></td><td>Also write optional CSV products for selected subtasks that support CSV, including stats and cross-correlation.</td></tr>
+        <tr><td><code>--output-csv PATH</code></td><td>Write CSV to a specific path; implies <code>--csv</code>.</td></tr>
+      </table>
+    </section>
+
+    <section>
+      <h2>Subtasks and Logs</h2>
+      <p>Each subtask prints a start/done message with elapsed time and writes the same messages to a timestamped log file under the configured <code>logs</code> runtime directory.</p>
+    </section>
+
+    <section>
+      <h2>Standard Product Names</h2>
+      <table>
+        <tr><th>Subtask</th><th>Default filename</th><th>Format page</th></tr>
+        <tr><td><code>--gains</code></td><td><code>gdp-gains-&lt;mode&gt;-&lt;scan&gt;.npz</code></td><td><a href="gdp-product-gains.html">gains NPZ</a></td></tr>
+        <tr><td><code>--stats</code></td><td><code>gdp-stats-&lt;mode&gt;-&lt;scan&gt;.npz</code></td><td><a href="gdp-product-stats.html">stats NPZ</a></td></tr>
+        <tr><td><code>--ks</code></td><td><code>gdp-ks-&lt;mode&gt;-&lt;scan&gt;.npz</code></td><td><a href="gdp-product-ks.html">KS NPZ</a></td></tr>
+        <tr><td><code>--self-corr</code></td><td><code>gdp-self-corr-&lt;mode&gt;-&lt;scan&gt;.npz</code></td><td><a href="gdp-product-self-corr.html">self-corr NPZ</a></td></tr>
+        <tr><td><code>--cross-corr</code></td><td><code>gdp-cross-corr-&lt;mode&gt;-&lt;scan&gt;.npz</code></td><td><a href="gdp-product-cross-corr.html">cross-corr NPZ</a></td></tr>
+        <tr><td><code>--gain-colormap</code></td><td><code>gdp-plot-gain-colormap-&lt;mode&gt;-&lt;scan&gt;.png</code></td><td>optional plot under <code>plots/png</code></td></tr>
+      </table>
+      <p>The <code>&lt;scan&gt;</code> field is <code>scan1</code>, <code>scan2</code>, etc. by default. With <code>--combine-scans</code>, the field is <code>allscans</code> when no scan list is supplied, or <code>scan1-2</code>/<code>scan5</code> style when <code>--scan</code> is supplied.</p>
+    </section>
+
+    <section>
+      <h2>Product Format Pages</h2>
+      <table>
+        <tr><th>Product</th><th>Format</th><th>Documentation</th></tr>
+        <tr><td>Gains samples</td><td>NPZ</td><td><a href="gdp-product-gains.html">gains NPZ format</a></td></tr>
+        <tr><td>Antenna statistics</td><td>NPZ</td><td><a href="gdp-product-stats.html">stats NPZ format</a></td></tr>
+        <tr><td>KS diagnostics</td><td>NPZ</td><td><a href="gdp-product-ks.html">KS NPZ format</a></td></tr>
+        <tr><td>Self correlation</td><td>NPZ</td><td><a href="gdp-product-self-corr.html">self-corr NPZ format</a></td></tr>
+        <tr><td>Cross correlation</td><td>NPZ</td><td><a href="gdp-product-cross-corr.html">cross-corr NPZ format</a></td></tr>
+      </table>
+      <p>Cross-correlation CSV can also be written as an optional secondary product with <code>--csv</code> or <code>--output-cross-corr-csv</code>.</p>
+    </section>
+  </main>
+</body>
+</html>
