@@ -792,3 +792,14 @@ Changes Made
 - `--version main` bumps the major number and resets minor/patch to zero.
 - `--version NUMBER` validates and writes the requested semantic version.
 - Updated `gdp-util` HTML documentation with usage examples and option details.
+
+## 2026-07-15 16:00:05 IST
+
+Prompt / Request
+- If `--version` and `--git-push` are used together, both actions should run.
+
+Changes Made
+- Changed `gdp-util` so `--version` updates `VERSION` first and then continues
+  into the `--git-push` workflow when requested.
+- Updated `gdp-util` documentation to describe combined version bump and git
+  push behavior.
