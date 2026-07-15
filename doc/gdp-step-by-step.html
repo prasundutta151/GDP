@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GDP Step-by-Step Guide</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>GDP Step-by-Step Guide</h1>
+    <p>A practical workflow for setting up GDP, generating data products, making plots, checking outputs, and preparing a release.</p>
+  </header>
+  <main>
+    <section class="doc-tree" aria-labelledby="documentation-tree">
+      <h2 id="documentation-tree">Documentation Tree</h2>
+      <ul>
+        <li><a href="README.html">Main documentation</a></li>
+        <li><a href="gdp-step-by-step.html">Step-by-step guide</a>: run GDP from setup through products, plots, and release steps.</li>
+        <li><a href="gdp-setup.html">gdp-setup</a>: initialize and remember runtime and source-data locations.</li>
+        <li><a href="gdp-util.html">gdp-util</a>: read metadata from CASA gain, bandpass, or MeasurementSet tables.</li>
+        <li><a href="gdp-stats.html">gdp-stats</a>: compute antenna-wise gain and bandpass products.</li>
+        <li><a href="gdp-plot.html">gdp-plot</a>: plot GDP NPZ products and create missing products with gdp-stats.</li>
+        <li><a href="gdp-plan-run.html">gdp-plan-run</a>: run GDP command intents from a plan file.</li>
+      </ul>
+    </section>
+    <section class="product-formats" aria-labelledby="product-formats">
+      <h2 id="product-formats">Product Formats</h2>
+      <ul>
+        <li><a href="gdp-product-gains.html">gains NPZ</a></li>
+        <li><a href="gdp-product-stats.html">stats NPZ</a></li>
+        <li><a href="gdp-product-ks.html">KS NPZ</a></li>
+        <li><a href="gdp-product-self-corr.html">self-corr NPZ</a></li>
+        <li><a href="gdp-product-cross-corr.html">cross-corr NPZ</a></li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Workflow Overview</h2>
+      <p>GDP is normally used in this order: set up the table and runtime paths, inspect the input table, generate NPZ products, make plots, review the outputs, then optionally update the version and push a release.</p>
+      <table>
+        <tr><th>Step</th><th>Goal</th><th>Main Command</th></tr>
+        <tr><td>1</td><td>Remember input and runtime paths.</td><td><code>script/gdp-setup</code></td></tr>
+        <tr><td>2</td><td>Check table metadata before processing.</td><td><code>script/gdp-util --header</code></td></tr>
+        <tr><td>3</td><td>Create stats and KS products.</td><td><code>script/gdp-stats --stats --ks</code></td></tr>
+        <tr><td>4</td><td>Create self-correlation products.</td><td><code>script/gdp-stats --self-corr</code></td></tr>
+        <tr><td>5</td><td>Make diagnostic plots.</td><td><code>script/gdp-plot -pmode ...</code></td></tr>
+        <tr><td>6</td><td>Run a pipeline plan when repeated operations are needed.</td><td><code>script/gdp-plan-run</code></td></tr>
+        <tr><td>7</td><td>Version and release the software.</td><td><code>script/gdp-util --version --git-push</code></td></tr>
+      </table>
+    </section>
+
+    <section>
+      <h2>1. Set Up GDP</h2>
+      <p>Run setup once for a project. GDP then remembers the gain table, optional bandpass table, and runtime directory for later commands.</p>
+      <pre><code>cd /Users/prasun/Documents/GDP
+script/gdp-setup --gain-table /path/to/gain/table.g --bandpass-table /path/to/bandpass/table.b --rundir /path/to/GDP_RUN</code></pre>
+      <p>Check the saved setup:</p>
+      <pre><code>script/gdp-setup --show</code></pre>
+      <p>Expected runtime output pattern:</p>
+      <pre><code>GDP setup
+gain_table: /path/to/gain/table.g
+bandpass_table: /path/to/bandpass/table.b
+rundir: /path/to/GDP_RUN
+data-product directories: created or already present
+plots directories: created or already present</code></pre>
+    </section>
+
+    <section>
+      <h2>2. Inspect The Table</h2>
+      <p>Use <code>gdp-util</code> to verify scans, antennas, columns, and observing time coverage before generating products.</p>
+      <pre><code>script/gdp-util --header
+script/gdp-util --date
+script/gdp-util --channel-width</code></pre>
+      <p>Expected runtime output pattern:</p>
+      <pre><code>header
+======
+path: /path/to/gain/table.g
+nrows: ...
+columns: [...]
+data_columns: [...]
+scans: [...]
+antennas: [...]</code></pre>
+    </section>
+
+    <section>
+      <h2>3. Generate Stats And KS Products</h2>
+      <p>Run these in a CASA-enabled shell because table reading uses <code>casatools</code>.</p>
+      <pre><code>casa --nogui --nologger --nologfile --log2term -c script/gdp-stats --mode gain --scan 2 --stats --ks</code></pre>
+      <p>Expected runtime output pattern:</p>
+      <pre><code>START stats scan2
+Wrote stats NPZ: .../data-product/stats/npz/gdp-stats-gain-scan2.npz
+DONE  stats scan2 elapsed_sec=...
+START ks scan2
+Wrote KS NPZ: .../data-product/ks/npz/gdp-ks-gain-scan2.npz
+DONE  ks scan2 elapsed_sec=...</code></pre>
+      <p>Product format details are in <a href="gdp-product-stats.html">stats NPZ</a> and <a href="gdp-product-ks.html">KS NPZ</a>.</p>
+    </section>
+
+    <section>
+      <h2>4. Generate Self-Correlation Products</h2>
+      <p>The self-correlation product should normally be generated for all antennas unless a focused antenna subset is required.</p>
+      <pre><code>casa --nogui --nologger --nologfile --log2term -c script/gdp-stats --mode gain --scan 2 --self-corr</code></pre>
+      <p>Expected runtime output pattern:</p>
+      <pre><code>START self-corr scan2
+SKIP self-corr scan=2 antenna=... reason=fewer than two finite unflagged samples
+Wrote self-corr NPZ: .../data-product/self-corr/npz/gdp-self-corr-gain-scan2.npz
+DONE  self-corr scan2 elapsed_sec=...</code></pre>
+      <p>Skipped antenna/stokes/component rows are kept as NaN lag bins so the corresponding colormap cells remain white.</p>
+    </section>
+
+    <section>
+      <h2>5. Make Plots</h2>
+      <p>Once products exist, plotting can run from the normal shell. Use <code>--recompute</code> only when the shell can also run <code>gdp-stats</code> with CASA access.</p>
+      <pre><code>script/gdp-plot --mode gain --scan 2 -pmode stats,ks
+script/gdp-plot --mode gain --scan 2 -pmode self-corr-colormap
+script/gdp-plot --mode gain --scan 2 -pmode gain-colormap,gain-hist
+script/gdp-plot --mode gain --scan 2 -pmode antenna 2</code></pre>
+      <p>Expected runtime output pattern:</p>
+      <pre><code>Using existing stats NPZ: .../gdp-stats-gain-scan2.npz
+START plot stats mode=gain scan=scan2
+Wrote plot: .../plots/png/gdp-plot-stats-gain-scan2.png
+DONE  plot stats elapsed_sec=...</code></pre>
+      <table>
+        <tr><th>Plot</th><th>Sample</th><th>What To Check</th></tr>
+        <tr><td>Stats</td><td><a href="sample_plots/sample-stats-gain-scan2.png">sample-stats-gain-scan2.png</a></td><td>All selected antennas appear on the x-axis.</td></tr>
+        <tr><td>KS</td><td><a href="sample_plots/sample-ks-gain-scan2.png">sample-ks-gain-scan2.png</a></td><td>D-statistic trends are shown per antenna and Stokes/component.</td></tr>
+        <tr><td>Self-corr colormap</td><td><a href="sample_plots/sample-self-corr-colormap-gain-scan2.png">sample-self-corr-colormap-gain-scan2.png</a></td><td>White columns or cells correspond to NaN/insufficient samples.</td></tr>
+        <tr><td>Gain colormap</td><td><a href="sample_plots/sample-gain-colormap-gain-scan2.png">sample-gain-colormap-gain-scan2.png</a></td><td>Real-1 and Imag panels show antenna/time gain structure.</td></tr>
+      </table>
+    </section>
+
+    <section>
+      <h2>6. Run A Plan</h2>
+      <p>Use plan files for repeatable processing. Start with a dry run, then run the plan after checking commands.</p>
+      <pre><code>script/gdp-plan-run pipelines/sample_stats.plan --dry-run
+script/gdp-plan-run pipelines/sample_stats.plan</code></pre>
+      <p>Expected runtime output pattern:</p>
+      <pre><code>PLAN variable ...
+DRY RUN gdp-stats ...
+DRY RUN gdp-plot ...
+DONE plan elapsed_sec=...</code></pre>
+    </section>
+
+    <section>
+      <h2>7. Version And Release</h2>
+      <p>Use <code>gdp-util</code> to bump the version and then push. When <code>--version</code> and <code>--git-push</code> are used together, the version update happens first.</p>
+      <pre><code>script/gdp-util --version --git-push -m "Release update"
+script/gdp-util --version main --git-push -m "Major release"
+script/gdp-util --version 1.2.0 --git-push -m "Release 1.2.0"</code></pre>
+      <p>Expected runtime output pattern:</p>
+      <pre><code>VERSION updated to ...
+Staged/current status:
+...
+Committed changes on main.
+Pushed main to origin.
+Version archive: .../gdp-...tgz</code></pre>
+    </section>
+
+    <section>
+      <h2>Update Policy</h2>
+      <p>This guide should be updated whenever GDP gains a new command, product format, plot mode, runtime convention, or release step. Add new steps here when a workflow becomes stable enough to recommend.</p>
+    </section>
+
+    <section class="sample-plots" aria-labelledby="sample-plots">
+      <h2 id="sample-plots">Sample Plots</h2>
+      <table>
+        <tr><th>Plot Type</th><th>Sample</th><th>Command</th><th>Description</th></tr>
+        <tr><td>Gain colormap</td><td><a href="sample_plots/sample-gain-colormap-gain-scan2.png">sample-gain-colormap-gain-scan2.png</a></td><td><code>script/gdp-plot --mode gain --scan 2 -pmode gain-colormap</code></td><td>Real-1 and Imag gain percent colormaps by antenna and elapsed time.</td></tr>
+        <tr><td>Gain histogram</td><td><a href="sample_plots/sample-gain-hist-gain-scan2.png">sample-gain-hist-gain-scan2.png</a></td><td><code>script/gdp-plot --mode gain --scan 2 -pmode gain-hist</code></td><td>AntStat-style per-antenna gain distribution panels with summary statistics.</td></tr>
+        <tr><td>Antenna time series</td><td><a href="sample_plots/sample-antenna-gain-scan2-ant2.png">sample-antenna-gain-scan2-ant2.png</a></td><td><code>script/gdp-plot --mode gain --scan 2 -pmode antenna 2</code></td><td>Single-antenna Real-1 and Imag gain traces with Stokes shown side by side.</td></tr>
+        <tr><td>Statistics grid</td><td><a href="sample_plots/sample-stats-gain-scan2.png">sample-stats-gain-scan2.png</a></td><td><code>script/gdp-plot --mode gain --scan 2 -pmode stats</code></td><td>Per-antenna mean, standard deviation, skewness, and kurtosis grid.</td></tr>
+        <tr><td>KS grid</td><td><a href="sample_plots/sample-ks-gain-scan2.png">sample-ks-gain-scan2.png</a></td><td><code>script/gdp-plot --mode gain --scan 2 -pmode ks</code></td><td>Per-antenna fitted-normal KS D-statistic plot.</td></tr>
+        <tr><td>Self-corr colormap</td><td><a href="sample_plots/sample-self-corr-colormap-gain-scan2.png">sample-self-corr-colormap-gain-scan2.png</a></td><td><code>script/gdp-plot --mode gain --scan 2 -pmode self-corr-colormap</code></td><td>Structure-function colormap with antenna on x-axis and lag on y-axis.</td></tr>
+        <tr><td>Self-corr antenna</td><td><a href="sample_plots/sample-self-corr-antenna-gain-scan2-ant0.png">sample-self-corr-antenna-gain-scan2-ant0.png</a></td><td><code>script/gdp-plot --mode gain --scan 2 -pmode self-corr-antenna --antenna 0</code></td><td>Single-antenna structure-function curves with reference threshold lines.</td></tr>
+      </table>
+    </section>
+  </main>
+</body>
+</html>

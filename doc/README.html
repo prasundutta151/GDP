@@ -21,6 +21,7 @@
         <li><a href="gdp-stats.html">gdp-stats</a>: compute antenna-wise gain and bandpass products.</li>
         <li><a href="gdp-plot.html">gdp-plot</a>: plot GDP NPZ products and create missing products with gdp-stats.</li>
         <li><a href="gdp-plan-run.html">gdp-plan-run</a>: run GDP command intents from a plan file.</li>
+        <li><a href="gdp-step-by-step.html">Step-by-step guide</a>: run GDP from setup through products, plots, and release steps.</li>
       </ul>
     </section>
     <section class="product-formats" aria-labelledby="product-formats">
@@ -67,6 +68,12 @@ script/gdp-plot --mode gain -pmode gain-hist  [plot AntStat-style gain histogram
 script/gdp-plot --mode gain -pmode antenna 0,1,2  [plot selected antennas with Stokes side by side]
 script/gdp-plot --mode gain -pmode stats  [plot stats, creating the stats NPZ first if needed]
 script/gdp-plan-run pipelines/sample_stats.plan --dry-run  [preview a pipeline plan without running it]</code></pre>
+    </section>
+
+    <section>
+      <h2>Step-by-Step Guide</h2>
+      <p>The main workflow guide is kept as a separate page so it can be updated as GDP development expands. It includes what to run, expected terminal output patterns, generated products, and links to representative plots.</p>
+      <p><a href="gdp-step-by-step.html">Open the GDP step-by-step guide</a></p>
     </section>
 
     <section class="sample-plots" aria-labelledby="sample-plots">

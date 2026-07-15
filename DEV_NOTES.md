@@ -803,3 +803,19 @@ Changes Made
   into the `--git-push` workflow when requested.
 - Updated `gdp-util` documentation to describe combined version bump and git
   push behavior.
+
+## 2026-07-15 16:41:58 IST
+
+Prompt / Request
+- Add a step-by-step software guide linked from `README.html`, including what
+  to do, command boxes, runtime output boxes, and plot links. Keep it as a
+  guide that should be updated as GDP develops.
+
+Changes Made
+- Added `doc/gdp-step-by-step.html` with setup, inspection, stats/KS,
+  self-correlation, plotting, plan-running, and release workflow steps.
+- Added command blocks, expected runtime-output blocks, and sample plot links.
+- Linked the guide from `doc/README.html` in the documentation tree and a
+  dedicated step-by-step section.
+- Added an update-policy section stating that the guide should be maintained as
+  GDP commands, products, plots, and release steps evolve.
