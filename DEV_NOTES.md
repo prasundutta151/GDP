@@ -764,3 +764,17 @@ Changes Made
   directly, so the plots use the full `antennas` axis in the stats/KS NPZ.
 - Updated `gdp-plot` documentation to describe stats and KS as product-based
   plots rather than gains-NPZ-derived plots.
+
+## 2026-07-15 15:50:50 IST
+
+Prompt / Request
+- Copy representative generated plots into `doc/sample_plots` and add a
+  `Sample Plots` block to every HTML documentation page with links,
+  descriptions, and the commands used to produce them.
+
+Changes Made
+- Copied representative gain colormap, gain histogram, antenna time-series,
+  stats, KS, self-correlation colormap, and self-correlation antenna plots into
+  `doc/sample_plots`.
+- Added a shared `Sample Plots` section to every HTML page.
+- Added CSS styling for the shared sample plot block and command column.

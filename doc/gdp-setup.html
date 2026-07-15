@@ -61,6 +61,20 @@ script/gdp-setup --show  [print the saved GDP setup]</code></pre>
         <tr><td><code>--allow-missing-source</code></td><td>Allow source, gain, or bandpass paths to be recorded before they exist.</td></tr>
       </table>
     </section>
+
+    <section class="sample-plots" aria-labelledby="sample-plots">
+      <h2 id="sample-plots">Sample Plots</h2>
+      <table>
+        <tr><th>Plot Type</th><th>Sample</th><th>Command</th><th>Description</th></tr>
+        <tr><td>Gain colormap</td><td><a href="sample_plots/sample-gain-colormap-gain-scan2.png">sample-gain-colormap-gain-scan2.png</a></td><td><code>script/gdp-plot --mode gain --scan 2 -pmode gain-colormap</code></td><td>Real-1 and Imag gain percent colormaps by antenna and elapsed time.</td></tr>
+        <tr><td>Gain histogram</td><td><a href="sample_plots/sample-gain-hist-gain-scan2.png">sample-gain-hist-gain-scan2.png</a></td><td><code>script/gdp-plot --mode gain --scan 2 -pmode gain-hist</code></td><td>AntStat-style per-antenna gain distribution panels with summary statistics.</td></tr>
+        <tr><td>Antenna time series</td><td><a href="sample_plots/sample-antenna-gain-scan2-ant2.png">sample-antenna-gain-scan2-ant2.png</a></td><td><code>script/gdp-plot --mode gain --scan 2 -pmode antenna 2</code></td><td>Single-antenna Real-1 and Imag gain traces with Stokes shown side by side.</td></tr>
+        <tr><td>Statistics grid</td><td><a href="sample_plots/sample-stats-gain-scan2.png">sample-stats-gain-scan2.png</a></td><td><code>script/gdp-plot --mode gain --scan 2 -pmode stats</code></td><td>Per-antenna mean, standard deviation, skewness, and kurtosis grid.</td></tr>
+        <tr><td>KS grid</td><td><a href="sample_plots/sample-ks-gain-scan2.png">sample-ks-gain-scan2.png</a></td><td><code>script/gdp-plot --mode gain --scan 2 -pmode ks</code></td><td>Per-antenna fitted-normal KS D-statistic plot.</td></tr>
+        <tr><td>Self-corr colormap</td><td><a href="sample_plots/sample-self-corr-colormap-gain-scan2.png">sample-self-corr-colormap-gain-scan2.png</a></td><td><code>script/gdp-plot --mode gain --scan 2 -pmode self-corr-colormap</code></td><td>Structure-function colormap with antenna on x-axis and lag on y-axis.</td></tr>
+        <tr><td>Self-corr antenna</td><td><a href="sample_plots/sample-self-corr-antenna-gain-scan2-ant0.png">sample-self-corr-antenna-gain-scan2-ant0.png</a></td><td><code>script/gdp-plot --mode gain --scan 2 -pmode self-corr-antenna --antenna 0</code></td><td>Single-antenna structure-function curves with reference threshold lines.</td></tr>
+      </table>
+    </section>
   </main>
 </body>
 </html>

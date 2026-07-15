@@ -29,7 +29,8 @@ a {
   color: #005f73;
 }
 .doc-tree,
-.product-formats {
+.product-formats,
+.sample-plots {
   margin: 0 0 28px;
   padding: 16px 18px;
   border: 1px solid #d8dee6;
@@ -40,13 +41,20 @@ a {
   margin-top: -12px;
 }
 .doc-tree h2,
-.product-formats h2 {
+.product-formats h2,
+.sample-plots h2 {
   margin-top: 0;
 }
 .doc-tree ul,
 .product-formats ul {
   margin: 0;
   padding-left: 20px;
+}
+.sample-plots table {
+  margin-bottom: 0;
+}
+.sample-plots td:nth-child(3) {
+  min-width: 240px;
 }
 code,
 pre {
