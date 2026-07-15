@@ -39,6 +39,44 @@ def version_text() -> str:
     return version_path.read_text(encoding="utf-8").strip()
 
 
+def parse_version_number(text: str) -> List[int]:
+    parts = str(text).strip().split(".")
+    if not parts or any(part == "" for part in parts):
+        raise ValueError(f"Invalid version number: {text}")
+    numbers: List[int] = []
+    for part in parts:
+        if not part.isdigit():
+            raise ValueError(f"Invalid version number: {text}")
+        numbers.append(int(part))
+    while len(numbers) < 3:
+        numbers.append(0)
+    if len(numbers) > 3:
+        raise ValueError("Version numbers must use MAJOR.MINOR.PATCH format.")
+    return numbers
+
+
+def format_version_number(numbers: List[int]) -> str:
+    return ".".join(str(int(value)) for value in numbers[:3])
+
+
+def set_version(version_arg: str) -> str:
+    current = parse_version_number(version_text())
+    value = str(version_arg).strip()
+    if value == "patch":
+        current[2] += 1
+        new_version = format_version_number(current)
+    elif value.lower() == "main":
+        current[0] += 1
+        current[1] = 0
+        current[2] = 0
+        new_version = format_version_number(current)
+    else:
+        new_version = format_version_number(parse_version_number(value))
+    version_path = project_root() / "VERSION"
+    version_path.write_text(new_version + "\n", encoding="utf-8")
+    return new_version
+
+
 def run_git(args: List[str], check: bool = True) -> subprocess.CompletedProcess:
     return subprocess.run(
         ["git", *args],
@@ -321,6 +359,14 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument("input_table", nargs="?", default=None, help="Input CASA table/MS path.")
     p.add_argument("--input-table", dest="input_table_opt", default=None, help="Input CASA table/MS path.")
+    p.add_argument(
+        "--version",
+        nargs="?",
+        const="patch",
+        default=None,
+        metavar="NUMBER|main",
+        help="Update VERSION. Bare --version bumps patch; --version main bumps major; --version NUMBER sets an exact version.",
+    )
     p.add_argument("--header", action="store_true", help="Print table header, columns, row count, and common IDs.")
     p.add_argument("--keywords", action="store_true", help="Include table keywords in --header output.")
     p.add_argument("--date", action="store_true", help="Print IST observing date/time span from TIME column.")
@@ -344,6 +390,10 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    if args.version is not None:
+        new_version = set_version(args.version)
+        print(f"VERSION updated to {new_version}")
+
     if args.git_push:
         message = args.message or f"GDP update {version_text()}"
         git_push_release(message=message, no_push=args.no_push)

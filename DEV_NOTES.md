@@ -778,3 +778,17 @@ Changes Made
   `doc/sample_plots`.
 - Added a shared `Sample Plots` section to every HTML page.
 - Added CSS styling for the shared sample plot block and command column.
+
+## 2026-07-15 15:58:23 IST
+
+Prompt / Request
+- Add a `gdp-util` option to change `VERSION`: bare `--version` should bump a
+  lower version number, `--version main` should bump/start a higher main version
+  number, and `--version <number>` should set a specific version.
+
+Changes Made
+- Added `script/gdp-util --version` with optional value handling.
+- Bare `--version` bumps the patch number.
+- `--version main` bumps the major number and resets minor/patch to zero.
+- `--version NUMBER` validates and writes the requested semantic version.
+- Updated `gdp-util` HTML documentation with usage examples and option details.

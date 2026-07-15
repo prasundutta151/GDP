@@ -36,7 +36,7 @@
 
     <section>
       <h2>Purpose</h2>
-      <p><code>gdp-util</code> provides small metadata utilities behind one command. It can print table headers, observing dates, channel-width summaries, and the saved GDP setup configuration. It also provides <code>--git-push</code> for the GDP release/git workflow.</p>
+      <p><code>gdp-util</code> provides small metadata utilities behind one command. It can print table headers, observing dates, channel-width summaries, and the saved GDP setup configuration. It also updates the GDP version file and provides <code>--git-push</code> for the GDP release/git workflow.</p>
     </section>
 
     <section>
@@ -46,6 +46,10 @@ script/gdp-util /path/to/table.g --header --keywords --json  [write header and k
 script/gdp-util /path/to/table.g --date  [show observing date and time span]
 script/gdp-util /path/to/table.ms --channel-width  [show channel-width statistics in MHz]
 script/gdp-util --config  [print the saved GDP setup configuration]
+script/gdp-util --version  [bump the lower/patch version number]
+script/gdp-util --version main  [bump the main/major version number and reset lower numbers]
+script/gdp-util --version 1.2.0  [set VERSION to an exact version number]
+script/gdp-util --version --git-push -m "Release update"  [bump VERSION, build archive, commit, and push]
 script/gdp-util --git-push -m "Describe the change"  [build the version archive, commit, and push]</code></pre>
     </section>
 
@@ -60,6 +64,7 @@ script/gdp-util --git-push -m "Describe the change"  [build the version archive,
         <tr><td><code>--date</code></td><td>Print IST observing dates and time span from the <code>TIME</code> column.</td></tr>
         <tr><td><code>--channel-width</code></td><td>Print channel-width statistics in MHz.</td></tr>
         <tr><td><code>--config</code></td><td>Print the saved GDP setup configuration.</td></tr>
+        <tr><td><code>--version [NUMBER|main]</code></td><td>Update <code>VERSION</code>. Bare <code>--version</code> bumps the patch/lower number, <code>--version main</code> bumps the major/main number, and <code>--version NUMBER</code> sets an exact version. If used with <code>--git-push</code>, the version update happens first and the archive/commit uses the new version.</td></tr>
         <tr><td><code>--git-push</code></td><td>Create <code>gdp-&lt;VERSION&gt;.tgz</code>, stage GDP source/docs/notes/archive files, commit, and push the current branch.</td></tr>
         <tr><td><code>-m</code>, <code>--message TEXT</code></td><td>Commit message for <code>--git-push</code>. Defaults to <code>GDP update &lt;version&gt;</code>.</td></tr>
         <tr><td><code>--no-push</code></td><td>With <code>--git-push</code>, create the archive and commit without pushing.</td></tr>
