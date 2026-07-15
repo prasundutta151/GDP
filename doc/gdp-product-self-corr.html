@@ -52,6 +52,7 @@
         <tr><td><code>err</code></td><td>Jackknife uncertainty when requested.</td></tr>
         <tr><td><code>count</code></td><td>Pair count contributing to the lag bin.</td></tr>
       </table>
+      <p>If all samples for an antenna/stokes/component are flagged or non-finite, GDP keeps the expected lag-bin rows with <code>s2</code> and <code>err</code> set to NaN and <code>count</code> set to zero. Plotting code renders those bins as blank or white cells.</p>
     </section>
   </main>
 </body>

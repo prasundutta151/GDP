@@ -42,14 +42,16 @@
       <h2>Arrays</h2>
       <table>
         <tr><th>Array</th><th>Description</th></tr>
-        <tr><td><code>header_json</code></td><td>JSON metadata. The current implementation records the product schema.</td></tr>
+        <tr><td><code>header_json</code></td><td>JSON metadata with format, version, input table, mode, data column, flag policy, channel selection, and KS convention.</td></tr>
         <tr><td><code>scan_numbers</code></td><td>Scan axis values.</td></tr>
         <tr><td><code>antennas</code></td><td>Antenna axis values.</td></tr>
         <tr><td><code>stokes</code></td><td>Stokes/polarization indices.</td></tr>
         <tr><td><code>components</code></td><td>Component axis: <code>real</code>, <code>imag</code>.</td></tr>
         <tr><td><code>metrics</code></td><td>Metric axis: <code>d_statistic</code>, <code>n_sample</code>, <code>mean</code>, <code>std</code>.</td></tr>
-        <tr><td><code>ks</code></td><td>KS array with shape <code>(scan, antenna, stokes, component, metric)</code>.</td></tr>
+        <tr><td><code>ks</code></td><td>KS array with shape <code>(scan, antenna, stokes, component, metric)</code>. The <code>d_statistic</code> metric is saved in percent.</td></tr>
+        <tr><td><code>sample_count</code></td><td>Finite sample count used for each antenna/stokes/component KS calculation.</td></tr>
       </table>
+      <p>The KS product follows the AntStat plot convention: gain mode uses finite raw real and imaginary samples; bandpass mode uses finite channel means over time; each component is tested against a fitted normal distribution.</p>
     </section>
   </main>
 </body>

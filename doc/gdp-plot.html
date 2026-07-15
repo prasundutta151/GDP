@@ -41,12 +41,14 @@
 
     <section>
       <h2>Usage</h2>
-      <pre><code>script/gdp-plot --mode gain --stats  [plot the gain stats NPZ, creating it first if missing]
-script/gdp-plot --mode gain --stats --combine-scans  [plot one combined allscans stats product]
-script/gdp-plot --mode bandpass --gain-colormap --bchan 0 --echan 128  [plot bandpass amplitude colormap]
-script/gdp-plot --mode both --all  [make gain-colormap, stats, and KS plots for gain and bandpass]
-script/gdp-plot --cross-corr-colormap --antenna 0,1,2  [plot selected antennas from cross-corr NPZ]
-script/gdp-plot --self-corr-colormap --recompute  [rerun gdp-stats self-corr before plotting]</code></pre>
+      <pre><code>script/gdp-plot --mode gain -pmode stats  [plot the gain stats NPZ, creating it first if missing]
+script/gdp-plot --mode gain -pmode stats --combine-scans  [plot one combined allscans stats product]
+script/gdp-plot --mode bandpass -pmode gain-colormap --bchan 0 --echan 128  [plot bandpass Real-1/Imag percent colormaps by channel]
+script/gdp-plot --mode gain -pmode gain-hist --hist-bins 64  [plot AntStat-style per-antenna Real-1/Imag histograms from gains NPZ]
+script/gdp-plot --mode gain -pmode antenna 0,1,2  [make one AntStat-style gain-time plot per antenna, with Stokes side by side]
+script/gdp-plot --mode gain -pmode self-corr-antenna --antenna 0,1,2  [make per-antenna self-correlation plots]
+script/gdp-plot --mode both -pmode gain-colormap,gain-hist,stats,ks  [make selected plot modes for gain and bandpass]
+script/gdp-plot -pmode cross-corr-colormap --antenna 0,1,2  [plot selected antennas from cross-corr NPZ]</code></pre>
     </section>
 
     <section>
@@ -54,17 +56,25 @@ script/gdp-plot --self-corr-colormap --recompute  [rerun gdp-stats self-corr bef
       <table>
         <tr><th>Option</th><th>Description</th></tr>
         <tr><td><code>--mode {gain,bandpass,both}</code></td><td>Select which mode to plot. <code>both</code> runs each selected plot task for gain and bandpass.</td></tr>
+        <tr class="pmode-option"><td><code>-pmode MODE[,MODE...]</code></td><td>Select plot products. Supported modes are <code>gain-colormap</code>, <code>gain-hist</code>, <code>antenna</code>, <code>stats</code>, <code>ks</code>, <code>self-corr-colormap</code>, <code>self-corr-antenna</code>, and <code>cross-corr-colormap</code>.</td></tr>
+        <tr class="pmode-option"><td><code>gain-colormap</code></td><td>Plot AntStat-style Real-1 and Imag percent colormaps from <code>gdp-gains-&lt;mode&gt;-&lt;scan&gt;.npz</code>. Gain-mode plots use elapsed seconds from the saved <code>time</code> and <code>interval</code> arrays; bandpass plots use channel.</td></tr>
+        <tr class="pmode-option"><td><code>gain-hist</code></td><td>Plot AntStat-style per-antenna histograms from the full gains NPZ samples. Panels are Stokes by Real-1/Imag, y-axis is gain value percent, and color is log10 percentage per antenna.</td></tr>
+        <tr class="pmode-option"><td><code>antenna</code></td><td>Make one AntStat-style plot per selected antenna, with Stokes side by side and Real-1/Imag stacked. Gain mode plots versus elapsed seconds; bandpass mode plots versus channel. Antennas may be supplied directly after the mode, for example <code>-pmode antenna 3,5</code>, or with <code>--antenna</code>.</td></tr>
+        <tr class="pmode-option"><td><code>stats</code></td><td>Plot AntStat-style 2x2 per-antenna statistics grids from the stats NPZ product: mean, std, skewness, and kurtosis.</td></tr>
+        <tr class="pmode-option"><td><code>ks</code></td><td>Plot AntStat-style per-antenna KS D-statistic lines from the KS NPZ product.</td></tr>
+        <tr class="pmode-option"><td><code>self-corr-colormap</code></td><td>Plot AntStat-style structure-function colormaps with Stokes rows, Real-1/Imag columns, antenna on x, tau on y, and log10(S2) color.</td></tr>
+        <tr class="pmode-option"><td><code>self-corr-antenna</code></td><td>Plot AntStat-style per-antenna structure-function curves with S2=1 and threshold reference lines.</td></tr>
+        <tr class="pmode-option"><td><code>cross-corr-colormap</code></td><td>Plot antenna-pair tcorr colormaps from the cross-correlation NPZ product.</td></tr>
         <tr><td><code>--combine-scans</code></td><td>Plot one combined <code>allscans</code>-style product. Default: false, so GDP makes one plot per scan.</td></tr>
-        <tr><td><code>--gain-colormap</code></td><td>Plot gain/bandpass amplitude colormap from <code>gdp-gains-&lt;mode&gt;-&lt;scan&gt;.npz</code>.</td></tr>
+        <tr><td><code>--hist-bins INT</code></td><td>Number of gain-value bins for <code>--gain-hist</code>. Default: <code>64</code>.</td></tr>
+        <tr><td><code>--hist-range MIN,MAX</code></td><td>Optional gain-value range in percent for <code>--gain-hist</code>. Default: symmetric range covering the plotted extrema.</td></tr>
         <tr><td><code>--antenna LIST</code></td><td>Comma-separated antenna numbers to plot. The same list is passed to <code>gdp-stats</code> if missing products must be created.</td></tr>
-        <tr><td><code>--stats</code></td><td>Plot summary curves from the stats NPZ product.</td></tr>
-        <tr><td><code>--ks</code></td><td>Plot summary curves from the KS NPZ product.</td></tr>
-        <tr><td><code>--self-corr-colormap</code></td><td>Plot antenna-by-lag S2 colormaps from the self-correlation NPZ product.</td></tr>
-        <tr><td><code>--cross-corr-colormap</code></td><td>Plot antenna-pair tcorr colormaps from the cross-correlation NPZ product.</td></tr>
-        <tr><td><code>--all</code></td><td>Run gain colormap, stats, and KS plots.</td></tr>
         <tr><td><code>--scan LIST</code></td><td>Use the matching scan-specific product name, and pass the scan list to <code>gdp-stats</code> if products are missing.</td></tr>
-        <tr><td><code>--input-table PATH</code>, <code>--gain-dir PATH</code></td><td>Input table passed to <code>gdp-stats</code> when an NPZ product must be created.</td></tr>
+        <tr><td><code>--input-table PATH</code></td><td>Explicit input table passed to <code>gdp-stats</code> when an NPZ product must be created.</td></tr>
+        <tr><td><code>--gain-table PATH</code>, <code>--bandpass-table PATH</code></td><td>Mode-specific tables passed to <code>gdp-stats</code> when missing gain or bandpass NPZ products must be created.</td></tr>
+        <tr><td><code>--gain-dir PATH</code></td><td>Backward-compatible alias for <code>--gain-table</code>.</td></tr>
         <tr><td><code>--bchan INT</code>, <code>--echan INT</code></td><td>Bandpass channel selection passed to <code>gdp-stats</code> when needed.</td></tr>
+        <tr><td><code>--s2-thr FLOAT</code></td><td>Threshold used for self-correlation reference lines and colormap markers. Default: <code>0.9</code>.</td></tr>
         <tr><td><code>--plot-dir PATH</code></td><td>Output plot directory. Default: configured <code>plots/&lt;format&gt;</code> runtime directory.</td></tr>
         <tr><td><code>--format {png,pdf,eps}</code></td><td>Plot file format. Default: <code>png</code>.</td></tr>
         <tr><td><code>--recompute</code></td><td>Run <code>gdp-stats</code> before plotting even when the NPZ file already exists.</td></tr>

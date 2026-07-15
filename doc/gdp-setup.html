@@ -36,12 +36,12 @@
 
     <section>
       <h2>Purpose</h2>
-      <p><code>gdp-setup</code> creates the runtime directory structure and saves the gain/source-data location so later GDP commands can reuse those defaults.</p>
+      <p><code>gdp-setup</code> creates the runtime directory structure and saves separate gain and bandpass table locations so later GDP commands can reuse the correct default for each mode.</p>
     </section>
 
     <section>
       <h2>Usage</h2>
-      <pre><code>script/gdp-setup --gain-dir /path/to/gain/table.g --rundir /path/to/work/rundir  [save the default gain table and runtime directory]
+      <pre><code>script/gdp-setup --gain-table /path/to/gain/table.g --bandpass-table /path/to/bandpass/table.b --rundir /path/to/work/rundir  [save separate gain and bandpass defaults plus runtime directory]
 script/gdp-setup --source-data /path/to/source/data  [save a general source-data directory]
 script/gdp-setup --show  [print the saved GDP setup]</code></pre>
     </section>
@@ -52,11 +52,13 @@ script/gdp-setup --show  [print the saved GDP setup]</code></pre>
         <tr><th>Option</th><th>Description</th></tr>
         <tr><td><code>--rundir PATH</code></td><td>Runtime directory to create or use. Defaults to the saved value, then <code>&lt;GDP&gt;/rundir</code>.</td></tr>
         <tr><td><code>--source-data PATH</code></td><td>Source-data directory remembered for later GDP commands.</td></tr>
-        <tr><td><code>--gain-dir PATH</code></td><td>Gain/bandpass table or directory remembered for later GDP commands. Used as the default input by tools such as <code>gdp-stats</code>.</td></tr>
+        <tr><td><code>--gain-table PATH</code></td><td>Gain calibration table remembered as the default for gain-mode GDP commands.</td></tr>
+        <tr><td><code>--bandpass-table PATH</code></td><td>Bandpass calibration table remembered as the default for bandpass-mode GDP commands.</td></tr>
+        <tr><td><code>--gain-dir PATH</code></td><td>Backward-compatible alias for <code>--gain-table</code>.</td></tr>
         <tr><td><code>--config PATH</code></td><td>Configuration JSON path. Defaults to <code>&lt;GDP&gt;/.gdp-config.json</code>.</td></tr>
         <tr><td><code>--show</code></td><td>Print the saved configuration and exit.</td></tr>
         <tr><td><code>--dry-run</code></td><td>Show the directories and configuration that would be written.</td></tr>
-        <tr><td><code>--allow-missing-source</code></td><td>Allow the source-data directory to be recorded before it exists.</td></tr>
+        <tr><td><code>--allow-missing-source</code></td><td>Allow source, gain, or bandpass paths to be recorded before they exist.</td></tr>
       </table>
     </section>
   </main>

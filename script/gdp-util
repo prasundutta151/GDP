@@ -299,9 +299,9 @@ def resolve_input(value: Optional[str]) -> Path:
     if value:
         return Path(value).expanduser().resolve()
     cfg = load_config()
-    source = cfg.get("source_data")
+    source = cfg.get("source_data") or cfg.get("gain_table") or cfg.get("gain_dir") or cfg.get("bandpass_table")
     if not source:
-        raise SystemExit("No input table supplied and no source_data is saved. Run gdp-setup first or pass --input-table.")
+        raise SystemExit("No input table supplied and no saved source/gain/bandpass table is available. Run gdp-setup first or pass --input-table.")
     return Path(str(source)).expanduser().resolve()
 
 

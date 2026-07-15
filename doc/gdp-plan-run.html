@@ -58,7 +58,7 @@ script/gdp-plan-run pipelines/sample_stats.plan --only gdp-stats  [run only inte
 
     <section>
       <h2>Plan Format</h2>
-      <p>A plan can define variables, then one or more intent blocks. Values may reference variables with <code>${name}</code>. Saved <code>gdp-setup</code> paths, such as <code>${gain_dir}</code>, <code>${source_data}</code>, <code>${stats_npz_dir}</code>, and <code>${stats_csv_dir}</code>, are available when configured.</p>
+      <p>A plan can define variables, then one or more intent blocks. Values may reference variables with <code>${name}</code>. Saved <code>gdp-setup</code> paths, such as <code>${gain_table}</code>, <code>${bandpass_table}</code>, <code>${source_data}</code>, <code>${stats_npz_dir}</code>, and <code>${stats_csv_dir}</code>, are available when configured.</p>
       <pre><code>variables:
   stats_npz: ${stats_npz_dir}/sample_gain_stats.npz
 

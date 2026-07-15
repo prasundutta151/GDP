@@ -509,3 +509,258 @@ Changes Made
   supplies explicit allscans output paths.
 - Updated command docs and product format examples to explain scan-specific and
   combined naming.
+
+## 2026-07-15 13:51:35 IST
+
+Prompt / Request
+- Correct the `gain-colormap` output in both `gdp-stats` and `gdp-plot`.
+- It should follow the `plot_gain_colormap` style from `arx/AntStat.py`, not
+  the temporary median-amplitude plot.
+
+Changes Made
+- Replaced the median-amplitude gain colormap in `script/gdp-stats` with
+  AntStat-style Real-1 and Imag percent colormap panels.
+- Made `script/gdp-plot --gain-colormap` use the same Real-1/Imag percent
+  plotting logic.
+- Flagged or missing data are masked to white, and the color scale is symmetric
+  around zero using the 99th percentile absolute value.
+- Updated CLI help and HTML docs to describe the Real-1/Imag percent colormap
+  behavior.
+
+## 2026-07-15 14:15:00 IST
+
+Prompt / Request
+- Make the gain colormap look closer to `arx/AntStat.py`.
+- Use elapsed seconds on the vertical axis, read the integration time for each
+  timestamp, simplify the plot title to include the scan number, and reduce
+  horizontal/vertical tick-label font size.
+
+Changes Made
+- Added `time` and `interval` arrays to the GDP gains NPZ product, sourced from
+  the CASA `TIME` and `INTERVAL` columns.
+- Updated `script/gdp-stats --gain-colormap` and `script/gdp-plot
+  --gain-colormap` to use elapsed seconds for gain-mode plot geometry and tick
+  labels, with interval-aware time-bin edges.
+- Kept bandpass colormaps on channel axes.
+- Changed colormap figure titles to `<mode> <scan> colormap [%]`, for example
+  `gain scan3 colormap [%]`.
+- Reduced x/y tick-label sizes on gain colormap panels and colorbars.
+- Updated the gains product-format page and the `gdp-stats`/`gdp-plot` HTML
+  pages.
+
+## 2026-07-15 14:28:38 IST
+
+Prompt / Request
+- Show mean, std, skew, and kurtosis at the top of each gain-colormap subplot.
+
+Changes Made
+- Restored per-panel statistics in the subplot titles for both
+  `script/gdp-stats --gain-colormap` and `script/gdp-plot --gain-colormap`.
+- The values are computed over the unmasked points displayed in that exact
+  subplot.
+
+## 2026-07-15 14:31:38 IST
+
+Prompt / Request
+- Format the full gain-colormap title as
+  `Gain Table: <table> | Scan: <scan> [%]`.
+- Make the colorbar span the plot from top to bottom, remove the right-column
+  y-axis label, and reduce whitespace between subplots.
+
+Changes Made
+- Updated both `script/gdp-stats --gain-colormap` and `script/gdp-plot
+  --gain-colormap` to use the requested full-figure title format.
+- `gdp-plot` reads the input table name from the gains NPZ `header_json`; the
+  direct `gdp-stats` path uses the in-memory gains header.
+- The shared colorbar now attaches to all gain-colormap subplot axes.
+- Removed repeated y-axis labels from the right column and tightened subplot
+  horizontal/vertical spacing.
+
+## 2026-07-15 14:35:35 IST
+
+Prompt / Request
+- `gdp-setup` should have separate options for gain and bandpass tables.
+
+Changes Made
+- Added `--gain-table` and `--bandpass-table` to `script/gdp-setup`.
+- Kept `--gain-dir` as a backward-compatible alias for `--gain-table`.
+- Saved separate `gain_table` and `bandpass_table` keys in `.gdp-config.json`.
+- Updated `script/gdp-stats` so gain mode defaults to `gain_table` and bandpass
+  mode defaults to `bandpass_table` when no explicit input table is supplied.
+- Added `--gain-table` and `--bandpass-table` forwarding to `script/gdp-plot`
+  for missing-product creation.
+- Updated `script/gdp-util` to fall back to saved gain or bandpass tables when
+  no general `source_data` path is configured.
+- Updated setup, stats, plot, plan-run, and README documentation.
+
+## 2026-07-15 14:42:11 IST
+
+Prompt / Request
+- Add the `plot_gain_histogram` functionality from `arx/AntStat.py` to
+  `gdp-plot` with a `--gain-hist` CLI option.
+- Use the GDP gains NPZ product that stores the full gain-table samples.
+
+Changes Made
+- Added `gdp-plot --gain-hist`, backed by the existing gains NPZ product
+  created by `gdp-stats --gains`.
+- Added missing-product creation for `--gain-hist`, so `gdp-plot` runs
+  `gdp-stats --gains` first when the required gains NPZ is absent.
+- Replicated the AntStat histogram behavior: per-Stokes rows, Real-1 and Imag
+  columns, gain value in percent on the y-axis, antenna on the x-axis, and
+  log10 percentage per antenna as the color value with empty bins masked white.
+- Added `--hist-bins` and `--hist-range MIN,MAX` for histogram binning control.
+- Updated plot documentation, README examples, and standard plot-name notes.
+
+## 2026-07-15 14:46:46 IST
+
+Prompt / Request
+- Replace individual `gdp-plot` plot-selection flags with a `-pmode` option.
+- Supported modes should include `gain-colormap`, `gain-hist`, `antenna`,
+  `stats`, `ks`, `self-corr-colormap`, `self-corr-antenna`, and
+  `cross-corr-colormap`.
+- Use the AntStat single-antenna gain-time and bandpass-channel plotting style
+  for `-pmode antenna`.
+
+Changes Made
+- Added `-pmode`/`--pmode` to `script/gdp-plot`, accepting comma-separated or
+  space-separated plot mode names.
+- Kept the older individual flags as hidden compatibility aliases.
+- Added `-pmode antenna`, using the GDP gains NPZ to write separate plots for
+  each selected antenna and Stokes. Gain mode plots Real-1 and Imag versus
+  elapsed seconds; bandpass mode plots Real-1 and Imag versus channel.
+- Added `-pmode self-corr-antenna`, which writes per-antenna self-correlation
+  line plots from the self-corr NPZ product.
+- Updated documentation examples to use `-pmode`.
+
+## 2026-07-15 15:02:00 IST
+
+Prompt / Request
+- When `-pmode` is `antenna`, allow antenna numbers to be written directly
+  after `antenna`, and plot Real/Imag for both Stokes if both are present.
+
+Changes Made
+- Added hidden trailing positional values to `script/gdp-plot`.
+- If `-pmode antenna` is selected and `--antenna` is not supplied, trailing
+  values such as `3` or `3,5` are treated as the antenna list.
+- The existing antenna plotter already writes one Real/Imag plot per selected
+  antenna and every Stokes present in the gains NPZ.
+- Updated `gdp-plot` and README documentation examples.
+
+## 2026-07-15 15:11:54 IST
+
+Prompt / Request
+- Add mean, std, skew, and kurtosis values to gain histogram plots.
+
+Changes Made
+- Added per-panel sample statistics to `gdp-plot -pmode gain-hist` subplot
+  titles.
+- Statistics are computed from the Real-1 or Imag samples used to build each
+  histogram panel, after antenna/stokes/flag filtering.
+
+## 2026-07-15 15:14:14 IST
+
+Prompt / Request
+- In `-pmode antenna`, plot both Stokes side by side.
+
+Changes Made
+- Changed `gdp-plot -pmode antenna` from one file per antenna/Stokes to one
+  file per antenna.
+- Each antenna plot now has Stokes as columns and Real-1/Imag as stacked rows.
+- Updated `gdp-plot` and README documentation to describe the side-by-side
+  Stokes layout.
+
+## 2026-07-15 15:15:24 IST
+
+Prompt / Request
+- If an antenna is absent, mention it in terminal/log output instead of giving
+  an error.
+
+Changes Made
+- Updated `gdp-plot -pmode antenna` to print a skip message for requested
+  antennas that are absent from the gains NPZ.
+- Fully flagged or otherwise non-finite selected antennas are also reported as
+  skipped with sample/flag counts.
+- The plot task now continues with any remaining valid antennas and no longer
+  raises an error when all requested antennas are absent or unusable.
+
+## 2026-07-15 15:25:17 IST
+
+Prompt / Request
+- Rework `pmode stats`, `pmode ks`, `pmode self-corr-colormap`, and
+  `pmode self-corr-antenna` to follow the corresponding plotting functions in
+  `arx/AntStat.py`.
+
+Changes Made
+- Changed `pmode stats` to use the full gains NPZ and plot an AntStat-style
+  2x2 per-antenna grid: mean, std, skewness, and kurtosis.
+- Changed `pmode ks` to use the full gains NPZ and compute/plot AntStat-style
+  per-antenna normal KS D-statistics for Real-1 and Imag by Stokes.
+- Updated `pmode self-corr-colormap` to use Stokes rows, Real-1/Imag columns,
+  antenna x-axis, tau y-axis, log10(S2) color, and threshold markers.
+- Updated `pmode self-corr-antenna` to use AntStat-style structure-function
+  line plots with S2=1 and threshold reference lines.
+- Added `--s2-thr` to control the self-correlation threshold marker.
+
+## 2026-07-15 15:30:56 IST
+
+Prompt / Request
+- Fix `gdp-stats --self-corr` crash when flagged or missing data leaves empty
+  antenna samples; skipped antennas should not stop the scan, and plots should
+  show missing products as white/blank cells.
+
+Changes Made
+- Fixed NPZ header serialization by converting NumPy arrays and scalar values
+  to JSON-safe Python types before writing `header_json`.
+- Updated self-correlation generation to keep fixed lag-bin rows for
+  antenna/stokes/component series with fewer than two finite unflagged samples.
+  These rows save NaN `s2`/`err` values and zero `count`, so plotting can leave
+  them white.
+- Added terminal skip messages for unusable self-correlation series while
+  allowing the remaining antennas to continue.
+- Removed empty-slice warnings from the time/channel averaging step and made
+  jackknife error calculation tolerant of empty lag bins.
+
+## 2026-07-15 15:33:01 IST
+
+Prompt / Request
+- In the `gdp-plot` HTML documentation, keep the `-pmode` options together and
+  color their background light blue.
+
+Changes Made
+- Grouped all `-pmode` option rows together in `doc/gdp-plot.html`.
+- Added a shared CSS style for `pmode` rows with a light-blue table background.
+
+## 2026-07-15 15:36:03 IST
+
+Prompt / Request
+- Modify `gdp-stats` so the saved statistics products use the proper
+  per-antenna calculations implied by the AntStat plotting functions:
+  `plot_antenna_gain_stats_grid`, `plot_antenna_gain_ks_grid`,
+  `plot_structure_function_colormap`, and `plot_single_structure_function`.
+
+Changes Made
+- Updated the stats product calculation to follow the AntStat convention:
+  real samples are `real(gain)-1`, imaginary samples are `imag(gain)`, and
+  mean/std/median/MAD/min/max are saved in percent while skew/kurtosis remain
+  dimensionless.
+- Changed `--subtract-mean` default to false so the default statistics match
+  AntStat plot behavior.
+- Replaced the KS placeholder with an actual AntStat-style fitted-normal KS
+  D-statistic product, saved in percent per scan/antenna/stokes/component.
+- Documented the updated stats and KS product conventions in the HTML docs.
+
+## 2026-07-15 15:39:50 IST
+
+Prompt / Request
+- Fix `gdp-plot -pmode stats` and `gdp-plot -pmode ks`, which were still
+  plotting only one antenna instead of the full antenna-wise products.
+
+Changes Made
+- Routed `pmode stats` to the stats NPZ directory and `gdp-stats --stats`
+  instead of the gains NPZ product.
+- Routed `pmode ks` to the KS NPZ directory and `gdp-stats --ks` instead of
+  the gains NPZ product.
+- Updated the stats and KS plotting functions to read the saved product axes
+  directly, so the plots use the full `antennas` axis in the stats/KS NPZ.
+- Updated `gdp-plot` documentation to describe stats and KS as product-based
+  plots rather than gains-NPZ-derived plots.

@@ -57,13 +57,15 @@
 
     <section>
       <h2>Quick Start</h2>
-      <pre><code>script/gdp-setup --gain-dir /path/to/gain/table.g --rundir /path/to/rundir  [save the default input table and runtime directory]
+      <pre><code>script/gdp-setup --gain-table /path/to/gain/table.g --bandpass-table /path/to/bandpass/table.b --rundir /path/to/rundir  [save separate gain and bandpass defaults plus runtime directory]
 script/gdp-setup --show  [print the saved GDP setup]
 script/gdp-util /path/to/table.g --header  [inspect table metadata]
 script/gdp-stats --stats --csv  [compute stats and optional CSV from the saved input]
 script/gdp-stats --stats --combine-scans  [write one combined allscans stats product]
-script/gdp-stats --mode gain --gain-colormap  [create gains NPZ and a gain colormap plot]
-script/gdp-plot --mode gain --stats  [plot stats, creating the stats NPZ first if needed]
+script/gdp-stats --mode gain --gain-colormap  [create gains NPZ and Real-1/Imag colormap plots with elapsed seconds on the y axis]
+script/gdp-plot --mode gain -pmode gain-hist  [plot AntStat-style gain histograms from gains NPZ]
+script/gdp-plot --mode gain -pmode antenna 0,1,2  [plot selected antennas with Stokes side by side]
+script/gdp-plot --mode gain -pmode stats  [plot stats, creating the stats NPZ first if needed]
 script/gdp-plan-run pipelines/sample_stats.plan --dry-run  [preview a pipeline plan without running it]</code></pre>
     </section>
   </main>

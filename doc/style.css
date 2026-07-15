@@ -84,3 +84,6 @@ th {
   background: #f5f7fa;
   text-align: left;
 }
+tr.pmode-option td {
+  background: #dff3ff;
+}

@@ -36,14 +36,14 @@
 
     <section>
       <h2>Purpose</h2>
-      <p><code>gdp-stats</code> reads a CASA gain or bandpass table and creates GDP data products. If no input table is supplied, it uses the saved <code>gain_dir</code> from <code>gdp-setup</code>. Each requested subtask writes to the runtime product folders and records timing information in a log file.</p>
+      <p><code>gdp-stats</code> reads a CASA gain or bandpass table and creates GDP data products. If no input table is supplied, gain mode uses the saved <code>gain_table</code> and bandpass mode uses the saved <code>bandpass_table</code> from <code>gdp-setup</code>. Each requested subtask writes to the runtime product folders and records timing information in a log file.</p>
     </section>
 
     <section>
       <h2>Usage</h2>
-      <pre><code>script/gdp-setup --gain-dir /path/to/table.g --rundir /path/to/rundir  [save the default input table and runtime directory]
+      <pre><code>script/gdp-setup --gain-table /path/to/table.g --bandpass-table /path/to/table.b --rundir /path/to/rundir  [save separate gain and bandpass defaults plus runtime directory]
 script/gdp-stats --stats --csv  [compute statistics from the saved input and also write CSV]
-script/gdp-stats --mode gain --gain-colormap  [create gains NPZ and save a gain amplitude colormap plot]
+script/gdp-stats --mode gain --gain-colormap  [create gains NPZ and save Real-1/Imag percent colormap plots with elapsed seconds on the gain-mode y axis]
 script/gdp-stats --stats --combine-scans  [combine scans into one allscans stats product]
 script/gdp-stats /path/to/table.b --mode bandpass --bchan 0 --echan 128 --gains --stats  [process selected bandpass channels and save gains plus stats]
 script/gdp-stats --scan 1,2 --antennas 0,1,2 --all  [run every stats subtask for selected scans and antennas]</code></pre>
@@ -55,7 +55,9 @@ script/gdp-stats --scan 1,2 --antennas 0,1,2 --all  [run every stats subtask for
         <tr><th>Option</th><th>Description</th></tr>
         <tr><td><code>input_table</code></td><td>Optional positional CASA gain/bandpass table path.</td></tr>
         <tr><td><code>--input-table PATH</code></td><td>Named input table path. Overrides the positional path.</td></tr>
-        <tr><td><code>--gain-dir PATH</code></td><td>Named gain/bandpass table path. Defaults to the saved <code>gdp-setup</code> gain directory when omitted.</td></tr>
+        <tr><td><code>--gain-table PATH</code></td><td>Named gain table path. Defaults to saved <code>gain_table</code> in gain mode.</td></tr>
+        <tr><td><code>--bandpass-table PATH</code></td><td>Named bandpass table path. Defaults to saved <code>bandpass_table</code> in bandpass mode.</td></tr>
+        <tr><td><code>--gain-dir PATH</code></td><td>Backward-compatible alias for <code>--gain-table</code>.</td></tr>
         <tr><td><code>--mode {auto,gain,bandpass}</code></td><td>Statistics mode. Default: <code>auto</code>.</td></tr>
         <tr><td><code>--scan LIST</code></td><td>Comma-separated scans. Default: all scans.</td></tr>
         <tr><td><code>--combine-scans</code></td><td>Combine selected scans into one <code>allscans</code>-style product. Default: false, so GDP writes one product per scan.</td></tr>
@@ -63,12 +65,12 @@ script/gdp-stats --scan 1,2 --antennas 0,1,2 --all  [run every stats subtask for
         <tr><td><code>--bchan INT</code></td><td>Start channel, inclusive.</td></tr>
         <tr><td><code>--echan INT</code></td><td>End channel, exclusive.</td></tr>
         <tr><td><code>--use-flags</code>, <code>--no-use-flags</code></td><td>Apply or ignore the CASA <code>FLAG</code> mask. Default: apply flags.</td></tr>
-        <tr><td><code>--subtract-mean</code>, <code>--no-subtract-mean</code></td><td>Subtract real and imaginary means before computing statistics. Default: enabled.</td></tr>
+        <tr><td><code>--subtract-mean</code>, <code>--no-subtract-mean</code></td><td>Subtract real and imaginary means before computing statistics. Default: disabled, matching the AntStat statistics plots.</td></tr>
         <tr><td><code>--gains</code></td><td>Save selected gain/bandpass samples as a GDP gains NPZ product.</td></tr>
-        <tr><td><code>--gain-colormap</code></td><td>Also save a gain/bandpass amplitude colormap plot from the gains NPZ product. Default: off.</td></tr>
-        <tr><td><code>--stats</code></td><td>Compute mean, std, skew, kurtosis, median, MAD, min, and max statistics. This is the default when no subtask is selected.</td></tr>
-        <tr><td><code>--ks</code></td><td>Create the KS product schema. Full sample KS calculation is planned for a later implementation pass.</td></tr>
-        <tr><td><code>--self-corr</code></td><td>Compute self structure-function correlation curves and save a long-format NPZ product.</td></tr>
+        <tr><td><code>--gain-colormap</code></td><td>Also save AntStat-style Real-1 and Imag percent colormap plots from the gains NPZ product. Gain-mode plots use elapsed seconds from <code>TIME</code> and <code>INTERVAL</code>; bandpass plots use channel. Default: off.</td></tr>
+        <tr><td><code>--stats</code></td><td>Compute AntStat-style per-antenna mean, std, skew, kurtosis, median, MAD, min, and max statistics. This is the default when no subtask is selected.</td></tr>
+        <tr><td><code>--ks</code></td><td>Compute AntStat-style per-antenna fitted-normal KS D-statistics.</td></tr>
+        <tr><td><code>--self-corr</code></td><td>Compute self structure-function correlation curves and save a long-format NPZ product. Antenna/stokes/component series with fewer than two finite unflagged samples are skipped and saved as NaN lag bins.</td></tr>
         <tr><td><code>--cross-corr</code></td><td>Compute cross structure-function correlation times between antenna/stokes/component pairs and save NPZ output.</td></tr>
         <tr><td><code>--all</code></td><td>Run all GDP stats subtasks.</td></tr>
         <tr><td><code>--output-npz PATH</code></td><td>Output NPZ path. Default: configured <code>stats/npz</code> runtime directory.</td></tr>
@@ -103,6 +105,7 @@ script/gdp-stats --scan 1,2 --antennas 0,1,2 --all  [run every stats subtask for
         <tr><td><code>--self-corr</code></td><td><code>gdp-self-corr-&lt;mode&gt;-&lt;scan&gt;.npz</code></td><td><a href="gdp-product-self-corr.html">self-corr NPZ</a></td></tr>
         <tr><td><code>--cross-corr</code></td><td><code>gdp-cross-corr-&lt;mode&gt;-&lt;scan&gt;.npz</code></td><td><a href="gdp-product-cross-corr.html">cross-corr NPZ</a></td></tr>
         <tr><td><code>--gain-colormap</code></td><td><code>gdp-plot-gain-colormap-&lt;mode&gt;-&lt;scan&gt;.png</code></td><td>optional plot under <code>plots/png</code></td></tr>
+        <tr><td><code>gdp-plot --gain-hist</code></td><td><code>gdp-plot-gain-hist-&lt;mode&gt;-&lt;scan&gt;.png</code></td><td>plot from <a href="gdp-product-gains.html">gains NPZ</a></td></tr>
       </table>
       <p>The <code>&lt;scan&gt;</code> field is <code>scan1</code>, <code>scan2</code>, etc. by default. With <code>--combine-scans</code>, the field is <code>allscans</code> when no scan list is supplied, or <code>scan1-2</code>/<code>scan5</code> style when <code>--scan</code> is supplied.</p>
     </section>

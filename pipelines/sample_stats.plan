@@ -13,19 +13,22 @@ variables:
   plot_png_dir: ${project_root}/rundir/plots/png
 
 intent: gdp-stats
-  name: gain statistics with csv
+  #name: gain statistics with csv
   mode: gain
-  combine-scans: true
-  stats: true
-  output-npz: ${stats_npz}
-  csv: true
-  output-csv: ${stats_csv}
+  combine-scans: false
+  gains: true
+  scan: 2
+#  stats: true
+#  output-npz: ${stats_npz}
+#  csv: true
+#  output-csv: ${stats_csv}
+   gain-colormap: true
 end
 
-intent: gdp-plot
-  name: plot gain statistics
-  mode: gain
-  combine-scans: true
-  stats: true
-  plot-dir: ${plot_png_dir}
-end
+#intent: gdp-plot
+#  name: plot gain statistics
+#  mode: gain
+#  combine-scans: true
+#  stats: true
+#  plot-dir: ${plot_png_dir}
+#end

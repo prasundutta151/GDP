@@ -23,7 +23,7 @@ flag-product generation.
 ## Active Commands
 
 - `script/gdp-setup`: initializes and remembers the GDP runtime directory and
-  gain/source-data directory.
+  separate gain, bandpass, and optional source-data locations.
 - `script/gdp-util`: reads useful metadata from CASA gain, bandpass, or
   MeasurementSet tables, and provides `--git-push` release/git workflow
   support.
@@ -65,7 +65,7 @@ Inside this repository the default runtime directory is `rundir/`, but
 Set up GDP:
 
 ```bash
-script/gdp-setup --gain-dir /path/to/gain/table.g --rundir /path/to/rundir
+script/gdp-setup --gain-table /path/to/gain/table.g --bandpass-table /path/to/bandpass/table.b --rundir /path/to/rundir
 ```
 
 Show the saved setup:
@@ -84,6 +84,18 @@ Compute GDP statistics:
 
 ```bash
 script/gdp-stats --stats --csv
+```
+
+Plot AntStat-style gain histograms from the gains NPZ product:
+
+```bash
+script/gdp-plot --mode gain -pmode gain-hist
+```
+
+Plot selected antennas as AntStat-style gain-time plots with Stokes side by side:
+
+```bash
+script/gdp-plot --mode gain -pmode antenna 0,1,2
 ```
 
 Read table date and channel-width metadata as JSON:

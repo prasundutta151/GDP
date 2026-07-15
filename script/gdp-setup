@@ -116,9 +116,19 @@ def parse_args() -> argparse.Namespace:
         help="Source data directory to remember for later GDP commands.",
     )
     p.add_argument(
+        "--gain-table",
+        default=None,
+        help="CASA gain calibration table to remember as the default gain-mode input.",
+    )
+    p.add_argument(
+        "--bandpass-table",
+        default=None,
+        help="CASA bandpass calibration table to remember as the default bandpass-mode input.",
+    )
+    p.add_argument(
         "--gain-dir",
         default=None,
-        help="Gain/bandpass table or directory to remember for later GDP commands. Alias for --source-data when --source-data is omitted.",
+        help="Backward-compatible alias for --gain-table.",
     )
     p.add_argument(
         "--config",
@@ -143,6 +153,20 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
+def resolve_optional_path(value: object) -> Path | None:
+    if value in (None, ""):
+        return None
+    return Path(str(value)).expanduser().resolve()
+
+
+def validate_existing_path(path: Path, label: str, allow_missing: bool) -> None:
+    if not path.exists() and not allow_missing:
+        raise FileNotFoundError(
+            f"{label} does not exist: {path}\n"
+            "Use --allow-missing-source if this path will be created later."
+        )
+
+
 def main() -> None:
     args = parse_args()
     cfg_path = Path(args.config).expanduser().resolve() if args.config else default_config_path()
@@ -158,31 +182,39 @@ def main() -> None:
         or (project_root() / "rundir")
     ).expanduser().resolve()
 
-    source_value = args.source_data or args.gain_dir or old.get("gain_dir") or old.get("source_data")
-    if not source_value:
+    source_data = resolve_optional_path(args.source_data or old.get("source_data"))
+    gain_table = resolve_optional_path(args.gain_table or args.gain_dir or old.get("gain_table") or old.get("gain_dir"))
+    bandpass_table = resolve_optional_path(args.bandpass_table or old.get("bandpass_table"))
+
+    if source_data is None and gain_table is None and bandpass_table is None:
         raise SystemExit(
-            "Source data directory is required for first setup. "
-            "Pass --source-data /path/to/data."
+            "At least one input location is required for first setup. "
+            "Pass --gain-table, --bandpass-table, or --source-data."
         )
-    source_data = Path(str(source_value)).expanduser().resolve()
-    if not source_data.exists() and not args.allow_missing_source:
-        raise FileNotFoundError(
-            f"Source data directory does not exist: {source_data}\n"
-            "Use --allow-missing-source if this path will be created later."
-        )
-    if source_data.exists() and not source_data.is_dir():
-        raise NotADirectoryError(f"Source data path is not a directory: {source_data}")
+    if source_data is not None and args.source_data:
+        validate_existing_path(source_data, "Source data path", args.allow_missing_source)
+        if source_data.exists() and not source_data.is_dir():
+            raise NotADirectoryError(f"Source data path is not a directory: {source_data}")
+    if gain_table is not None and (args.gain_table or args.gain_dir):
+        validate_existing_path(gain_table, "Gain table path", args.allow_missing_source)
+    if bandpass_table is not None and args.bandpass_table:
+        validate_existing_path(bandpass_table, "Bandpass table path", args.allow_missing_source)
 
     created = ensure_rundir(rundir, dry_run=args.dry_run)
     paths = build_paths(rundir)
     config: Dict[str, object] = {
         "project_root": str(project_root()),
-        "source_data": str(source_data),
-        "gain_dir": str(source_data),
         "config_file": str(cfg_path),
         "paths": paths,
         **paths,
     }
+    if source_data is not None:
+        config["source_data"] = str(source_data)
+    if gain_table is not None:
+        config["gain_table"] = str(gain_table)
+        config["gain_dir"] = str(gain_table)
+    if bandpass_table is not None:
+        config["bandpass_table"] = str(bandpass_table)
 
     if args.dry_run:
         print("Would create directories:")
@@ -195,7 +227,12 @@ def main() -> None:
     write_config(cfg_path, config)
     print(f"GDP configuration written: {cfg_path}")
     print(f"Runtime directory: {rundir}")
-    print(f"Source data:       {source_data}")
+    if source_data is not None:
+        print(f"Source data:       {source_data}")
+    if gain_table is not None:
+        print(f"Gain table:        {gain_table}")
+    if bandpass_table is not None:
+        print(f"Bandpass table:    {bandpass_table}")
     if created:
         print("Created directories:")
         for item in created:
