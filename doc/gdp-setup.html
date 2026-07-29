@@ -16,7 +16,7 @@
       <h2 id="documentation-tree">Documentation Tree</h2>
       <ul>
         <li><a href="README.html">Main documentation</a></li>
-        <li><a href="gdp-setup.html">gdp-setup</a>: initialize and remember runtime and source-data locations.</li>
+        <li><a href="gdp-setup.html">gdp-setup</a>: initialize and remember runtime, gain-table, and bandpass-table locations.</li>
         <li><a href="gdp-util.html">gdp-util</a>: read metadata from CASA gain, bandpass, or MeasurementSet tables.</li>
         <li><a href="gdp-stats.html">gdp-stats</a>: compute antenna-wise gain and bandpass products.</li>
         <li><a href="gdp-plot.html">gdp-plot</a>: plot GDP NPZ products and create missing products with gdp-stats.</li>
@@ -36,13 +36,15 @@
 
     <section>
       <h2>Purpose</h2>
-      <p><code>gdp-setup</code> creates the runtime directory structure and saves separate gain and bandpass table locations so later GDP commands can reuse the correct default for each mode.</p>
+      <p><code>gdp-setup</code> creates the runtime directory structure and saves separate gain and bandpass table locations so later GDP commands can reuse the correct default for each mode. It stores a setup JSON file inside the runtime directory and updates the active GDP configuration used by the other commands.</p>
     </section>
 
     <section>
       <h2>Usage</h2>
       <pre><code>script/gdp-setup --gain-table /path/to/gain/table.g --bandpass-table /path/to/bandpass/table.b --rundir /path/to/work/rundir  [save separate gain and bandpass defaults plus runtime directory]
-script/gdp-setup --source-data /path/to/source/data  [save a general source-data directory]
+script/gdp-setup --gain-table /path/to/gain/table.g --rundir /path/to/work/rundir  [save only the gain table and runtime directory]
+script/gdp-setup --bandpass-table /path/to/bandpass/table.b --rundir /path/to/work/rundir  [save only the bandpass table and runtime directory]
+script/gdp-setup --setup-file project-a-setup.json --gain-table /path/to/table.g --rundir /path/to/work/rundir  [write a named setup file under the runtime directory]
 script/gdp-setup --show  [print the saved GDP setup]</code></pre>
     </section>
 
@@ -51,14 +53,13 @@ script/gdp-setup --show  [print the saved GDP setup]</code></pre>
       <table>
         <tr><th>Option</th><th>Description</th></tr>
         <tr><td><code>--rundir PATH</code></td><td>Runtime directory to create or use. Defaults to the saved value, then <code>&lt;GDP&gt;/rundir</code>.</td></tr>
-        <tr><td><code>--source-data PATH</code></td><td>Source-data directory remembered for later GDP commands.</td></tr>
         <tr><td><code>--gain-table PATH</code></td><td>Gain calibration table remembered as the default for gain-mode GDP commands.</td></tr>
         <tr><td><code>--bandpass-table PATH</code></td><td>Bandpass calibration table remembered as the default for bandpass-mode GDP commands.</td></tr>
-        <tr><td><code>--gain-dir PATH</code></td><td>Backward-compatible alias for <code>--gain-table</code>.</td></tr>
-        <tr><td><code>--config PATH</code></td><td>Configuration JSON path. Defaults to <code>&lt;GDP&gt;/.gdp-config.json</code>.</td></tr>
+        <tr><td><code>--setup-file NAME</code></td><td>Setup JSON file name to store inside the runtime directory. If omitted, GDP writes <code>gdp-setup.json</code>. Before overwriting that default file, the previous copy is archived with a <code>.YYYYMMDDTHHMMSS</code> suffix.</td></tr>
+        <tr><td><code>--config PATH</code></td><td>Active configuration JSON path used by GDP commands. Defaults to <code>&lt;GDP&gt;/.gdp-config.json</code>.</td></tr>
         <tr><td><code>--show</code></td><td>Print the saved configuration and exit.</td></tr>
         <tr><td><code>--dry-run</code></td><td>Show the directories and configuration that would be written.</td></tr>
-        <tr><td><code>--allow-missing-source</code></td><td>Allow source, gain, or bandpass paths to be recorded before they exist.</td></tr>
+        <tr><td><code>--allow-missing-table</code></td><td>Allow gain or bandpass table paths to be recorded before they exist.</td></tr>
       </table>
     </section>
 

@@ -832,3 +832,76 @@ Changes Made
 - Each section includes a NumPy loading example, header parsing, key axis/data
   arrays, and a short explanation of what the arrays represent.
 - Added shared styling for format-reader blocks.
+
+## 2026-07-29 10:46:56 IST
+
+Prompt / Request
+- Clarify what `--source-data`, `--gain-dir`, `--gain-table`, and
+  `--bandpass-table` do, determine whether some are redundant, and keep the
+  setup model focused on gain and bandpass table paths with full
+  functionality.
+
+Changes Made
+- Made `--gain-table` and `--bandpass-table` the documented canonical setup
+  inputs.
+- Removed public `--source-data` and `--gain-dir` usage from command
+  documentation and the saved configuration.
+- Kept hidden setup compatibility for old `--source-data`, `--gain-dir`, and
+  `--allow-missing-source` command lines without writing those legacy keys.
+- Updated `gdp-stats`, `gdp-plot`, and `gdp-util` input resolution so defaults
+  come from `gain_table` and `bandpass_table` only.
+
+## 2026-07-29 10:50:02 IST
+
+Prompt / Request
+- Add horizontal and vertical scroll bars to the black Usage/code windows in
+  the HTML documentation files.
+
+Changes Made
+- Updated the shared documentation stylesheet so all `<pre>` code panels have a
+  fixed maximum height and both horizontal and vertical scroll bars.
+
+## 2026-07-29 10:53:18 IST
+
+Prompt / Request
+- The black Usage windows still did not show visible scroll bars and long text
+  was cut in the browser.
+
+Changes Made
+- Made documentation code panels use explicit horizontal and vertical scrolling,
+  visible light-blue scroll thumbs, and full-width inner code blocks so long
+  command lines can be scrolled instead of clipped.
+
+## 2026-07-29 10:56:35 IST
+
+Prompt / Request
+- Add a `--setup-file` option so a particular setup filename can be given and
+  stored in the runtime directory. If no setup filename is given, use a default
+  setup file and archive the earlier default copy with a datetime suffix each
+  time it is overwritten.
+
+Changes Made
+- Added `script/gdp-setup --setup-file NAME`, storing the setup JSON under the
+  selected runtime directory.
+- Added the default runtime setup file name `gdp-setup.json`.
+- Added automatic archive rotation for the default setup file before overwrite,
+  using a `.YYYYMMDDTHHMMSS` suffix.
+- Kept the project `.gdp-config.json` active configuration updated so existing
+  GDP commands continue to find the current setup.
+- Updated setup and quick-start documentation with the new option.
+
+## 2026-07-29 11:04:37 IST
+
+Prompt / Request
+- Add `gdp-util` options for gain or bandpass table selection so headers and
+  other metadata can be read from the corresponding configured tables.
+
+Changes Made
+- Added `script/gdp-util --gain-table [PATH]` and
+  `script/gdp-util --bandpass-table [PATH]`.
+- When used without a path, the options read the saved `gain_table` or
+  `bandpass_table` from `gdp-setup`.
+- Positional input and `--input-table PATH` continue to override the
+  mode-specific table selectors.
+- Updated utility documentation, README quick-start examples, and the
+  step-by-step guide.

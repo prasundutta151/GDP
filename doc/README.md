@@ -9,7 +9,7 @@ flag-product generation.
 ## Documentation Tree
 
 - `README.html`: main browser entry point.
-- `gdp-setup.html`: setup command for runtime and source-data configuration.
+- `gdp-setup.html`: setup command for runtime, gain-table, and bandpass-table configuration.
 - `gdp-util.html`: utility command for reading metadata from CASA tables.
 - `gdp-stats.html`: statistics command and GDP data-product formats.
 - `gdp-plot.html`: plotting command for GDP NPZ products.
@@ -23,7 +23,7 @@ flag-product generation.
 ## Active Commands
 
 - `script/gdp-setup`: initializes and remembers the GDP runtime directory and
-  separate gain, bandpass, and optional source-data locations.
+  separate gain and bandpass table locations.
 - `script/gdp-util`: reads useful metadata from CASA gain, bandpass, or
   MeasurementSet tables, and provides `--git-push` release/git workflow
   support.
@@ -66,6 +66,7 @@ Set up GDP:
 
 ```bash
 script/gdp-setup --gain-table /path/to/gain/table.g --bandpass-table /path/to/bandpass/table.b --rundir /path/to/rundir
+script/gdp-setup --setup-file project-a-setup.json --gain-table /path/to/table.g --rundir /path/to/rundir
 ```
 
 Show the saved setup:
@@ -78,6 +79,8 @@ Read a CASA table header:
 
 ```bash
 script/gdp-util /path/to/table.g --header
+script/gdp-util --gain-table --header
+script/gdp-util --bandpass-table --header
 ```
 
 Compute GDP statistics:

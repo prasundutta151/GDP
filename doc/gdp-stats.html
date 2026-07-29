@@ -16,7 +16,7 @@
       <h2 id="documentation-tree">Documentation Tree</h2>
       <ul>
         <li><a href="README.html">Main documentation</a></li>
-        <li><a href="gdp-setup.html">gdp-setup</a>: initialize and remember runtime and source-data locations.</li>
+        <li><a href="gdp-setup.html">gdp-setup</a>: initialize and remember runtime, gain-table, and bandpass-table locations.</li>
         <li><a href="gdp-util.html">gdp-util</a>: read metadata from CASA gain, bandpass, or MeasurementSet tables.</li>
         <li><a href="gdp-stats.html">gdp-stats</a>: compute antenna-wise gain and bandpass products.</li>
         <li><a href="gdp-plot.html">gdp-plot</a>: plot GDP NPZ products and create missing products with gdp-stats.</li>
@@ -57,7 +57,6 @@ script/gdp-stats --scan 1,2 --antennas 0,1,2 --all  [run every stats subtask for
         <tr><td><code>--input-table PATH</code></td><td>Named input table path. Overrides the positional path.</td></tr>
         <tr><td><code>--gain-table PATH</code></td><td>Named gain table path. Defaults to saved <code>gain_table</code> in gain mode.</td></tr>
         <tr><td><code>--bandpass-table PATH</code></td><td>Named bandpass table path. Defaults to saved <code>bandpass_table</code> in bandpass mode.</td></tr>
-        <tr><td><code>--gain-dir PATH</code></td><td>Backward-compatible alias for <code>--gain-table</code>.</td></tr>
         <tr><td><code>--mode {auto,gain,bandpass}</code></td><td>Statistics mode. Default: <code>auto</code>.</td></tr>
         <tr><td><code>--scan LIST</code></td><td>Comma-separated scans. Default: all scans.</td></tr>
         <tr><td><code>--combine-scans</code></td><td>Combine selected scans into one <code>allscans</code>-style product. Default: false, so GDP writes one product per scan.</td></tr>

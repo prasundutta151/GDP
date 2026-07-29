@@ -190,8 +190,8 @@ def ensure_npz(product: str, mode: str, args: argparse.Namespace, scans: Optiona
         cmd.extend(["--input-table", args.input_table])
     elif mode == "bandpass" and args.bandpass_table:
         cmd.extend(["--bandpass-table", args.bandpass_table])
-    elif mode == "gain" and (args.gain_table or args.gain_dir):
-        cmd.extend(["--gain-table", args.gain_table or args.gain_dir])
+    elif mode == "gain" and args.gain_table:
+        cmd.extend(["--gain-table", args.gain_table])
     if scans is not None:
         cmd.extend(["--scan", ",".join(str(s) for s in scans)])
     if args.antenna:
@@ -244,8 +244,8 @@ def ensure_npzs(product: str, mode: str, args: argparse.Namespace, scans: Option
         cmd.extend(["--input-table", args.input_table])
     elif mode == "bandpass" and args.bandpass_table:
         cmd.extend(["--bandpass-table", args.bandpass_table])
-    elif mode == "gain" and (args.gain_table or args.gain_dir):
-        cmd.extend(["--gain-table", args.gain_table or args.gain_dir])
+    elif mode == "gain" and args.gain_table:
+        cmd.extend(["--gain-table", args.gain_table])
     if scans is not None:
         cmd.extend(["--scan", ",".join(str(s) for s in scans)])
     if args.antenna:
@@ -1231,7 +1231,6 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--input-table", default=None, help="Input CASA table passed to gdp-stats when products are missing.")
     p.add_argument("--gain-table", default=None, help="Gain table passed to gdp-stats when gain products are missing.")
     p.add_argument("--bandpass-table", default=None, help="Bandpass table passed to gdp-stats when bandpass products are missing.")
-    p.add_argument("--gain-dir", default=None, help="Backward-compatible alias for --gain-table.")
     p.add_argument("--scan", default=None, help="Comma-separated scans. Must match or create the corresponding GDP products.")
     p.add_argument("--combine-scans", action="store_true", help="Plot one combined allscans-style product. Default: false, make one plot per scan.")
     p.add_argument("--antenna", default=None, help="Comma-separated antenna numbers to plot and to pass to gdp-stats for missing products.")

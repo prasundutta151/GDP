@@ -16,7 +16,7 @@
       <h2 id="documentation-tree">Documentation Tree</h2>
       <ul>
         <li><a href="README.html">Main documentation</a></li>
-        <li><a href="gdp-setup.html">gdp-setup</a>: initialize and remember runtime and source-data locations.</li>
+        <li><a href="gdp-setup.html">gdp-setup</a>: initialize and remember runtime, gain-table, and bandpass-table locations.</li>
         <li><a href="gdp-util.html">gdp-util</a>: read metadata from CASA gain, bandpass, or MeasurementSet tables.</li>
         <li><a href="gdp-stats.html">gdp-stats</a>: compute antenna-wise gain and bandpass products.</li>
         <li><a href="gdp-plot.html">gdp-plot</a>: plot GDP NPZ products and create missing products with gdp-stats.</li>
@@ -72,7 +72,6 @@ script/gdp-plot -pmode cross-corr-colormap --antenna 0,1,2  [plot selected anten
         <tr><td><code>--scan LIST</code></td><td>Use the matching scan-specific product name, and pass the scan list to <code>gdp-stats</code> if products are missing.</td></tr>
         <tr><td><code>--input-table PATH</code></td><td>Explicit input table passed to <code>gdp-stats</code> when an NPZ product must be created.</td></tr>
         <tr><td><code>--gain-table PATH</code>, <code>--bandpass-table PATH</code></td><td>Mode-specific tables passed to <code>gdp-stats</code> when missing gain or bandpass NPZ products must be created.</td></tr>
-        <tr><td><code>--gain-dir PATH</code></td><td>Backward-compatible alias for <code>--gain-table</code>.</td></tr>
         <tr><td><code>--bchan INT</code>, <code>--echan INT</code></td><td>Bandpass channel selection passed to <code>gdp-stats</code> when needed.</td></tr>
         <tr><td><code>--s2-thr FLOAT</code></td><td>Threshold used for self-correlation reference lines and colormap markers. Default: <code>0.9</code>.</td></tr>
         <tr><td><code>--plot-dir PATH</code></td><td>Output plot directory. Default: configured <code>plots/&lt;format&gt;</code> runtime directory.</td></tr>

@@ -6,11 +6,14 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 from pathlib import Path
 from typing import Dict, List
+from datetime import datetime
 
 
 CONFIG_NAME = ".gdp-config.json"
+DEFAULT_SETUP_FILE_NAME = "gdp-setup.json"
 RUNDIR_SUBDIRS = [
     "data-product",
     "data-product/gains",
@@ -62,6 +65,35 @@ def write_config(path: Path, data: Dict[str, object]) -> None:
     tmp.replace(path)
 
 
+def resolve_setup_file(rundir: Path, value: object | None) -> Path:
+    name = str(value or DEFAULT_SETUP_FILE_NAME).strip()
+    if not name:
+        name = DEFAULT_SETUP_FILE_NAME
+    path = Path(name).expanduser()
+    if path.is_absolute():
+        path = Path(path.name)
+    resolved = (rundir / path).resolve()
+    try:
+        resolved.relative_to(rundir)
+    except ValueError as exc:
+        raise ValueError(f"--setup-file must stay inside the runtime directory: {name}") from exc
+    return resolved
+
+
+def archive_default_setup_file(path: Path, dry_run: bool = False) -> Path | None:
+    if path.name != DEFAULT_SETUP_FILE_NAME or not path.exists():
+        return None
+    stamp = datetime.now().strftime("%Y%m%dT%H%M%S")
+    archive = path.with_name(f"{path.name}.{stamp}")
+    counter = 1
+    while archive.exists():
+        archive = path.with_name(f"{path.name}.{stamp}.{counter}")
+        counter += 1
+    if not dry_run:
+        shutil.move(str(path), str(archive))
+    return archive
+
+
 def build_paths(rundir: Path) -> Dict[str, str]:
     return {
         "rundir": str(rundir),
@@ -101,19 +133,14 @@ def ensure_rundir(rundir: Path, dry_run: bool = False) -> List[str]:
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
         description=(
-            "Set up the GDP runtime directory and remember source-data/default "
-            "product paths for other GDP commands."
+            "Set up the GDP runtime directory and remember default gain and "
+            "bandpass tables for other GDP commands."
         )
     )
     p.add_argument(
         "--rundir",
         default=None,
         help="Runtime directory to create/use. Default: existing config value, else <GDP>/rundir.",
-    )
-    p.add_argument(
-        "--source-data",
-        default=None,
-        help="Source data directory to remember for later GDP commands.",
     )
     p.add_argument(
         "--gain-table",
@@ -126,14 +153,27 @@ def parse_args() -> argparse.Namespace:
         help="CASA bandpass calibration table to remember as the default bandpass-mode input.",
     )
     p.add_argument(
+        "--source-data",
+        default=None,
+        help=argparse.SUPPRESS,
+    )
+    p.add_argument(
         "--gain-dir",
         default=None,
-        help="Backward-compatible alias for --gain-table.",
+        help=argparse.SUPPRESS,
     )
     p.add_argument(
         "--config",
         default=None,
-        help="Configuration JSON path. Default: <GDP>/.gdp-config.json.",
+        help="Active configuration JSON path. Default: <GDP>/.gdp-config.json.",
+    )
+    p.add_argument(
+        "--setup-file",
+        default=None,
+        help=(
+            "Setup JSON file name to store inside the runtime directory. "
+            f"Default: {DEFAULT_SETUP_FILE_NAME}."
+        ),
     )
     p.add_argument(
         "--show",
@@ -148,7 +188,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--allow-missing-source",
         action="store_true",
-        help="Allow --source-data to point to a directory that does not yet exist.",
+        help=argparse.SUPPRESS,
+    )
+    p.add_argument(
+        "--allow-missing-table",
+        action="store_true",
+        help="Allow gain or bandpass table paths to be recorded before they exist.",
     )
     return p.parse_args()
 
@@ -163,7 +208,7 @@ def validate_existing_path(path: Path, label: str, allow_missing: bool) -> None:
     if not path.exists() and not allow_missing:
         raise FileNotFoundError(
             f"{label} does not exist: {path}\n"
-            "Use --allow-missing-source if this path will be created later."
+            "Use --allow-missing-table if this path will be created later."
         )
 
 
@@ -181,54 +226,58 @@ def main() -> None:
         or old.get("rundir")
         or (project_root() / "rundir")
     ).expanduser().resolve()
+    setup_file = resolve_setup_file(rundir, args.setup_file)
 
-    source_data = resolve_optional_path(args.source_data or old.get("source_data"))
-    gain_table = resolve_optional_path(args.gain_table or args.gain_dir or old.get("gain_table") or old.get("gain_dir"))
+    allow_missing = args.allow_missing_table or args.allow_missing_source
+    gain_table = resolve_optional_path(args.gain_table or args.gain_dir or old.get("gain_table"))
     bandpass_table = resolve_optional_path(args.bandpass_table or old.get("bandpass_table"))
 
-    if source_data is None and gain_table is None and bandpass_table is None:
+    if gain_table is None and bandpass_table is None:
         raise SystemExit(
             "At least one input location is required for first setup. "
-            "Pass --gain-table, --bandpass-table, or --source-data."
+            "Pass --gain-table and/or --bandpass-table."
         )
-    if source_data is not None and args.source_data:
-        validate_existing_path(source_data, "Source data path", args.allow_missing_source)
-        if source_data.exists() and not source_data.is_dir():
-            raise NotADirectoryError(f"Source data path is not a directory: {source_data}")
     if gain_table is not None and (args.gain_table or args.gain_dir):
-        validate_existing_path(gain_table, "Gain table path", args.allow_missing_source)
+        validate_existing_path(gain_table, "Gain table path", allow_missing)
     if bandpass_table is not None and args.bandpass_table:
-        validate_existing_path(bandpass_table, "Bandpass table path", args.allow_missing_source)
+        validate_existing_path(bandpass_table, "Bandpass table path", allow_missing)
 
     created = ensure_rundir(rundir, dry_run=args.dry_run)
     paths = build_paths(rundir)
     config: Dict[str, object] = {
         "project_root": str(project_root()),
         "config_file": str(cfg_path),
+        "setup_file": str(setup_file),
+        "setup_file_name": str(setup_file.relative_to(rundir)),
         "paths": paths,
         **paths,
     }
-    if source_data is not None:
-        config["source_data"] = str(source_data)
     if gain_table is not None:
         config["gain_table"] = str(gain_table)
-        config["gain_dir"] = str(gain_table)
     if bandpass_table is not None:
         config["bandpass_table"] = str(bandpass_table)
 
     if args.dry_run:
+        archived = archive_default_setup_file(setup_file, dry_run=True)
         print("Would create directories:")
         for item in created:
             print(f"  {item}")
+        if archived is not None:
+            print(f"\nWould archive default setup file:\n  {setup_file} -> {archived}")
         print("\nWould write configuration:")
+        print(f"  setup file:  {setup_file}")
+        print(f"  active file: {cfg_path}")
         print(json.dumps(config, indent=2, sort_keys=True))
         return
 
+    archived = archive_default_setup_file(setup_file)
+    write_config(setup_file, config)
     write_config(cfg_path, config)
-    print(f"GDP configuration written: {cfg_path}")
+    print(f"GDP setup file written: {setup_file}")
+    print(f"GDP active configuration written: {cfg_path}")
+    if archived is not None:
+        print(f"Previous default setup file archived: {archived}")
     print(f"Runtime directory: {rundir}")
-    if source_data is not None:
-        print(f"Source data:       {source_data}")
     if gain_table is not None:
         print(f"Gain table:        {gain_table}")
     if bandpass_table is not None:

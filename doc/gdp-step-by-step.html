@@ -17,7 +17,7 @@
       <ul>
         <li><a href="README.html">Main documentation</a></li>
         <li><a href="gdp-step-by-step.html">Step-by-step guide</a>: run GDP from setup through products, plots, and release steps.</li>
-        <li><a href="gdp-setup.html">gdp-setup</a>: initialize and remember runtime and source-data locations.</li>
+        <li><a href="gdp-setup.html">gdp-setup</a>: initialize and remember runtime, gain-table, and bandpass-table locations.</li>
         <li><a href="gdp-util.html">gdp-util</a>: read metadata from CASA gain, bandpass, or MeasurementSet tables.</li>
         <li><a href="gdp-stats.html">gdp-stats</a>: compute antenna-wise gain and bandpass products.</li>
         <li><a href="gdp-plot.html">gdp-plot</a>: plot GDP NPZ products and create missing products with gdp-stats.</li>
@@ -55,10 +55,12 @@
       <p>Run setup once for a project. GDP then remembers the gain table, optional bandpass table, and runtime directory for later commands.</p>
       <pre><code>cd /Users/prasun/Documents/GDP
 script/gdp-setup --gain-table /path/to/gain/table.g --bandpass-table /path/to/bandpass/table.b --rundir /path/to/GDP_RUN</code></pre>
+      <pre><code>script/gdp-setup --setup-file project-a-setup.json --gain-table /path/to/gain/table.g --bandpass-table /path/to/bandpass/table.b --rundir /path/to/GDP_RUN</code></pre>
       <p>Check the saved setup:</p>
       <pre><code>script/gdp-setup --show</code></pre>
       <p>Expected runtime output pattern:</p>
-      <pre><code>GDP setup
+      <pre><code>GDP setup file written: /path/to/GDP_RUN/gdp-setup.json
+GDP active configuration written: /Users/prasun/Documents/GDP/.gdp-config.json
 gain_table: /path/to/gain/table.g
 bandpass_table: /path/to/bandpass/table.b
 rundir: /path/to/GDP_RUN
@@ -70,6 +72,8 @@ plots directories: created or already present</code></pre>
       <h2>2. Inspect The Table</h2>
       <p>Use <code>gdp-util</code> to verify scans, antennas, columns, and observing time coverage before generating products.</p>
       <pre><code>script/gdp-util --header
+script/gdp-util --gain-table --header
+script/gdp-util --bandpass-table --header
 script/gdp-util --date
 script/gdp-util --channel-width</code></pre>
       <p>Expected runtime output pattern:</p>

@@ -83,15 +83,15 @@ each array, should be documented in the README files.
 runtime directory at a user-selected location and build the expected runtime
 subfolder structure below it.
 
-The setup command should also record the source-data folder that GDP commands
-will use as their default input location. Other GDP tools should be able to
-read this saved configuration so users do not need to repeatedly provide the
-same runtime path and source-data path.
+The setup command should also record the gain and bandpass calibration tables
+that GDP commands will use as their mode-specific default inputs. Other GDP
+tools should be able to read this saved configuration so users do not need to
+repeatedly provide the same runtime path and table paths.
 
 The remembered configuration should include, at minimum:
 
 - the GDP runtime directory;
-- the source-data directory;
+- the gain calibration table path and/or bandpass calibration table path;
 - paths for data products, plots, and flag products;
 - any future project-level defaults needed by the CLI tools or pipeline runner.
 
@@ -99,6 +99,13 @@ The configuration format should be simple, inspectable, and documented. It may
 be stored as a file inside the GDP project or inside the selected runtime
 directory, depending on which approach best supports portability and repeated
 use.
+
+The current setup direction is to keep the durable setup JSON inside the
+runtime directory. A named setup file may be selected for a project; otherwise
+GDP should use the default `gdp-setup.json` file and archive the previous
+default copy with a datetime suffix before overwrite. A small active
+configuration file in the GDP project may continue to point other commands to
+the current setup for backward compatibility.
 
 ## 3. Pipeline Design
 

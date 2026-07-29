@@ -1057,7 +1057,6 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--input-table", dest="input_table_opt", default=None, help="Input CASA gain/bandpass table path.")
     p.add_argument("--gain-table", default=None, help="Input gain table. Defaults to saved gdp-setup gain_table in gain mode.")
     p.add_argument("--bandpass-table", default=None, help="Input bandpass table. Defaults to saved gdp-setup bandpass_table in bandpass mode.")
-    p.add_argument("--gain-dir", default=None, help="Backward-compatible alias for --gain-table.")
     p.add_argument("--mode", choices=["auto", "gain", "bandpass"], default="auto", help="Statistics mode. Default: auto.")
     p.add_argument("--scan", default=None, help="Comma-separated scans to process. Default: all scans.")
     p.add_argument("--combine-scans", action="store_true", help="Combine selected scans into one allscans-style product. Default: false, write one product per scan.")
@@ -1095,9 +1094,9 @@ def resolve_input(value: Optional[str], mode: str) -> Path:
         return Path(value).expanduser().resolve()
     cfg = load_config()
     if mode == "bandpass":
-        source = cfg.get("bandpass_table") or cfg.get("bandpass_dir") or cfg.get("source_data")
+        source = cfg.get("bandpass_table")
     else:
-        source = cfg.get("gain_table") or cfg.get("gain_dir") or cfg.get("source_data")
+        source = cfg.get("gain_table")
     if source:
         return Path(str(source)).expanduser().resolve()
     raise SystemExit(
@@ -1222,7 +1221,7 @@ def main() -> None:
     if mode == "auto":
         mode = "bandpass" if args.bandpass_table or args.bchan is not None or args.echan is not None else "gain"
     explicit_input = args.input_table_opt or args.input_table
-    mode_input = args.bandpass_table if mode == "bandpass" else (args.gain_table or args.gain_dir)
+    mode_input = args.bandpass_table if mode == "bandpass" else args.gain_table
     input_table = resolve_input(explicit_input or mode_input, mode)
     if not input_table.exists():
         raise FileNotFoundError(f"Input table not found: {input_table}")
