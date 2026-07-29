@@ -43,6 +43,7 @@
       <h2>Usage</h2>
       <pre><code>script/gdp-plan-run pipelines/sample_stats.plan  [run every intent in the plan]
 script/gdp-plan-run pipelines/sample_stats.plan --dry-run  [print commands without executing them]
+script/gdp-plan-run pipelines/sample_stats.plan --setup-file project-a-setup.json  [run the plan with a named setup file]
 script/gdp-plan-run pipelines/sample_stats.plan --only gdp-stats  [run only intents whose command is gdp-stats]</code></pre>
     </section>
 
@@ -51,6 +52,7 @@ script/gdp-plan-run pipelines/sample_stats.plan --only gdp-stats  [run only inte
       <table>
         <tr><th>Option</th><th>Description</th></tr>
         <tr><td><code>plan_file</code></td><td>Required GDP plan file path.</td></tr>
+        <tr><td><code>--setup-file NAME</code></td><td>Setup JSON file to use for plan variables and for <code>gdp-stats</code>/<code>gdp-plot</code> intents. Relative names are resolved under the active runtime directory.</td></tr>
         <tr><td><code>--dry-run</code></td><td>Print commands without running them.</td></tr>
         <tr><td><code>--only VALUE</code></td><td>Run only the matching intent index, command name, or intent <code>name</code>.</td></tr>
       </table>
@@ -58,15 +60,17 @@ script/gdp-plan-run pipelines/sample_stats.plan --only gdp-stats  [run only inte
 
     <section>
       <h2>Plan Format</h2>
-      <p>A plan can define variables, then one or more intent blocks. Values may reference variables with <code>${name}</code>. Saved <code>gdp-setup</code> paths, such as <code>${gain_table}</code>, <code>${bandpass_table}</code>, <code>${stats_npz_dir}</code>, and <code>${stats_csv_dir}</code>, are available when configured.</p>
-      <pre><code>variables:
+      <p>A plan can optionally set <code>setup-file: NAME</code> at the top, then define variables and one or more intent blocks. Values may reference variables with <code>${name}</code>. Saved <code>gdp-setup</code> paths, such as <code>${gain_table}</code>, <code>${bandpass_table}</code>, <code>${stats_npz_dir}</code>, and <code>${stats_csv_dir}</code>, are available when configured.</p>
+      <pre><code>setup-file: project-a-setup.json
+
+variables:
   stats_npz: ${stats_npz_dir}/sample_gain_stats.npz
 
 intent: gdp-stats
   name: gain statistics
   mode: gain
   combine-scans: true
-  stats: true
+  smode: stats
   output-npz: ${stats_npz}
   csv: true
 end
@@ -75,9 +79,9 @@ intent: gdp-plot
   name: plot gain statistics
   mode: gain
   combine-scans: true
-  stats: true
+  pmode: stats
 end</code></pre>
-      <p>Intent keys become CLI flags. For example, <code>output-npz</code> becomes <code>--output-npz</code>. Boolean <code>true</code> values become standalone flags, while <code>false</code> and <code>null</code> values are omitted.</p>
+      <p>Intent keys become CLI flags. For example, <code>output-npz</code> becomes <code>--output-npz</code>. Boolean <code>true</code> values become standalone flags, while <code>false</code> and <code>null</code> values are omitted. For <code>gdp-stats</code>, task selection should be written as <code>smode: stats,ks</code> rather than older boolean task keys.</p>
     </section>
 
     <section>

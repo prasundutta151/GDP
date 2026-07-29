@@ -86,7 +86,11 @@ script/gdp-util --bandpass-table --header
 Compute GDP statistics:
 
 ```bash
-script/gdp-stats --stats --csv
+script/gdp-stats --smode stats,ks
+script/gdp-stats --smode all
+script/gdp-stats --antennas "(0,9)" --smode stats
+script/gdp-stats --antennas 1 2 3 4 13 --smode stats
+script/gdp-stats --smode stats --csv
 ```
 
 Plot AntStat-style gain histograms from the gains NPZ product:

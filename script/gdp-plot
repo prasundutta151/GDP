@@ -9,7 +9,6 @@ import math
 import subprocess
 import sys
 import time
-from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
@@ -25,6 +24,8 @@ except Exception as exc:
 
 
 CONFIG_NAME = ".gdp-config.json"
+ACTIVE_CONFIG: Optional[Dict[str, Any]] = None
+DEFAULT_PLOT_DPI = 320
 PRODUCTS = {
     "gain_colormap": ("gains", "gains_npz_dir", "gains"),
     "gain_hist": ("gains", "gains_npz_dir", "gains"),
@@ -61,12 +62,41 @@ def script_dir() -> Path:
     return project_root() / "script"
 
 
-def load_config() -> Dict[str, Any]:
+def load_project_config() -> Dict[str, Any]:
     path = project_root() / CONFIG_NAME
     if not path.exists():
         return {}
     with path.open("r", encoding="utf-8") as f:
         return json.load(f)
+
+
+def resolve_setup_file_path(setup_file: Optional[str], base_config: Dict[str, Any]) -> Optional[Path]:
+    if setup_file:
+        path = Path(setup_file).expanduser()
+        if path.is_absolute():
+            return path.resolve()
+        rundir = Path(str(base_config.get("rundir") or (project_root() / "rundir"))).expanduser().resolve()
+        return (rundir / path).resolve()
+    configured = base_config.get("setup_file")
+    return Path(str(configured)).expanduser().resolve() if configured else None
+
+
+def activate_config(setup_file: Optional[str] = None) -> Dict[str, Any]:
+    global ACTIVE_CONFIG
+    base = load_project_config()
+    setup_path = resolve_setup_file_path(setup_file, base)
+    if setup_path and setup_path.exists():
+        with setup_path.open("r", encoding="utf-8") as f:
+            ACTIVE_CONFIG = json.load(f)
+    else:
+        if setup_file:
+            raise FileNotFoundError(f"Setup file not found: {setup_path}")
+        ACTIVE_CONFIG = base
+    return ACTIVE_CONFIG
+
+
+def load_config() -> Dict[str, Any]:
+    return ACTIVE_CONFIG if ACTIVE_CONFIG is not None else activate_config()
 
 
 def config_path(key: str) -> Optional[Path]:
@@ -81,6 +111,26 @@ def parse_int_list(text: Optional[str]) -> Optional[List[int]]:
     if text is None or str(text).strip() == "":
         return None
     return sorted({int(part.strip()) for part in str(text).split(",") if part.strip()})
+
+
+def normalize_list_text(text: object) -> str:
+    if isinstance(text, (list, tuple)):
+        return " ".join(str(item) for item in text)
+    return str(text)
+
+
+def parse_antenna_list(text: object) -> Optional[List[int]]:
+    if text is None or normalize_list_text(text).strip() == "":
+        return None
+    value = normalize_list_text(text).strip()
+    if (value.startswith("(") and value.endswith(")")) or (value.startswith("[") and value.endswith("]")):
+        parts = [part.strip() for part in value[1:-1].split(",") if part.strip()]
+        if len(parts) != 2:
+            raise SystemExit("--antenna range form must be two numbers, for example --antenna '(0,9)'")
+        start, end = (int(parts[0]), int(parts[1]))
+        step = 1 if end >= start else -1
+        return list(range(start, end + step, step))
+    return sorted({int(part) for part in value.replace(",", " ").split() if part.strip()})
 
 
 def parse_float_range(text: Optional[str]) -> Optional[Tuple[float, float]]:
@@ -113,7 +163,7 @@ def parse_pmode(text: Optional[str]) -> List[str]:
 
 def antenna_from_pmode_values(args: argparse.Namespace, tasks: Sequence[str]) -> Optional[str]:
     if args.antenna:
-        return args.antenna
+        return normalize_list_text(args.antenna)
     if "antenna" not in tasks or not args.pmode_values:
         return None
     return ",".join(str(value) for value in args.pmode_values)
@@ -164,15 +214,15 @@ def ensure_npz(product: str, mode: str, args: argparse.Namespace, scans: Optiona
         print(f"Using existing {product} NPZ: {path}")
         return path
 
-    task_flag = {
-        "gain_colormap": "--gains",
-        "gain_hist": "--gains",
-        "antenna": "--gains",
-        "stats": "--stats",
-        "ks": "--ks",
-        "self_corr_colormap": "--self-corr",
-        "self_corr_antenna": "--self-corr",
-        "cross_corr_colormap": "--cross-corr",
+    smode = {
+        "gain_colormap": "gains",
+        "gain_hist": "gains",
+        "antenna": "gains",
+        "stats": "stats",
+        "ks": "ks",
+        "self_corr_colormap": "self-corr",
+        "self_corr_antenna": "self-corr",
+        "cross_corr_colormap": "cross-corr",
     }[product]
     output_flag = {
         "gain_colormap": "--output-gains-npz",
@@ -185,7 +235,9 @@ def ensure_npz(product: str, mode: str, args: argparse.Namespace, scans: Optiona
         "cross_corr_colormap": "--output-cross-corr-npz",
     }[product]
 
-    cmd = [str(script_dir() / "gdp-stats"), "--mode", mode, "--combine-scans", task_flag, output_flag, str(path)]
+    cmd = [str(script_dir() / "gdp-stats"), "--mode", mode, "--combine-scans", "--smode", smode, output_flag, str(path)]
+    if args.setup_file:
+        cmd.extend(["--setup-file", args.setup_file])
     if args.input_table:
         cmd.extend(["--input-table", args.input_table])
     elif mode == "bandpass" and args.bandpass_table:
@@ -229,17 +281,19 @@ def ensure_npzs(product: str, mode: str, args: argparse.Namespace, scans: Option
             print(f"Using existing {product} NPZ: {path}")
         return existing
 
-    task_flag = {
-        "gain_colormap": "--gains",
-        "gain_hist": "--gains",
-        "antenna": "--gains",
-        "stats": "--stats",
-        "ks": "--ks",
-        "self_corr_colormap": "--self-corr",
-        "self_corr_antenna": "--self-corr",
-        "cross_corr_colormap": "--cross-corr",
+    smode = {
+        "gain_colormap": "gains",
+        "gain_hist": "gains",
+        "antenna": "gains",
+        "stats": "stats",
+        "ks": "ks",
+        "self_corr_colormap": "self-corr",
+        "self_corr_antenna": "self-corr",
+        "cross_corr_colormap": "cross-corr",
     }[product]
-    cmd = [str(script_dir() / "gdp-stats"), "--mode", mode, task_flag]
+    cmd = [str(script_dir() / "gdp-stats"), "--mode", mode, "--smode", smode]
+    if args.setup_file:
+        cmd.extend(["--setup-file", args.setup_file])
     if args.input_table:
         cmd.extend(["--input-table", args.input_table])
     elif mode == "bandpass" and args.bandpass_table:
@@ -297,7 +351,7 @@ def apply_style(ax: Any, title: str, xlabel: str = "", ylabel: str = "") -> None
 def save_figure(fig: Any, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fig.tight_layout()
-    fig.savefig(path, dpi=160, bbox_inches="tight")
+    fig.savefig(path, dpi=DEFAULT_PLOT_DPI, bbox_inches="tight")
     plt.close(fig)
     print(f"Wrote plot: {path}")
 
@@ -334,7 +388,8 @@ def plot_gain_colormap(npz_path: Path, out: Path, antennas: Optional[List[int]],
         raw_times = z[x_key].astype(float)
         x_values = np.unique(raw_times[np.isfinite(raw_times)])
         t0 = float(np.nanmin(x_values)) if x_values.size else 0.0
-        y_centers = x_values - t0
+        elapsed_centers = x_values - t0
+        y_centers = elapsed_centers.copy()
         interval_arr = z["interval"].astype(float) if "interval" in z else np.full(raw_times.shape, np.nan)
         intervals = np.full(x_values.shape, np.nan, dtype=float)
         for idx, tv in enumerate(x_values):
@@ -351,21 +406,31 @@ def plot_gain_colormap(npz_path: Path, out: Path, antennas: Optional[List[int]],
             shift = y_edges[0]
             y_edges = y_edges - shift
             y_centers = y_centers - shift
-        y_labels = [f"{v:.0f}" for v in y_centers]
+        y_labels = [f"{v:.0f}" for v in elapsed_centers]
+        delta_t = float(np.nanmedian(intervals[np.isfinite(intervals) & (intervals > 0)])) if np.any(np.isfinite(intervals) & (intervals > 0)) else fallback_dt
+        time_row_labels = [str(int(round(v / delta_t))) if np.isfinite(delta_t) and delta_t > 0 else str(i) for i, v in enumerate(elapsed_centers)]
         x_label = "Time (s)"
     else:
         x_key = "row"
         x_values = np.unique(z[x_key]).astype(int)
         y_edges = None
         y_labels = [str(int(v)) for v in x_values]
+        time_row_labels = []
+        delta_t = np.nan
         x_label = "Table row"
     if mode == "bandpass":
         y_edges = None
+        time_row_labels = []
+        delta_t = np.nan
     if x_values.size == 0:
         raise ValueError("No x-axis values available for gain colormap.")
 
     nrows = len(stokes_all)
-    fig, axes = plt.subplots(nrows, 2, figsize=(8.4, max(3.6, 2.6 * nrows)), squeeze=False)
+    fig_height = max(6.0, 3.0 * nrows)
+    fig = plt.figure(figsize=(fig_height * 4.0 / 3.0, fig_height))
+    grid = fig.add_gridspec(nrows, 4, width_ratios=[1.0, 1.0, 0.32, 0.055], wspace=0.05, hspace=0.34)
+    axes = np.asarray([[fig.add_subplot(grid[row, col]) for col in range(2)] for row in range(nrows)])
+    cax = fig.add_subplot(grid[:, 3])
     cmap = plt.get_cmap("coolwarm").copy()
     cmap.set_bad(color="white")
     stokes_data: Dict[int, Tuple[np.ma.MaskedArray, np.ma.MaskedArray]] = {}
@@ -444,24 +509,38 @@ def plot_gain_colormap(npz_path: Path, out: Path, antennas: Optional[List[int]],
             ax.set_xlim(0, len(ant_all))
             ax.set_ylim(float(y_edges[0]), float(y_edges[-1])) if y_edges is not None else ax.set_ylim(0, len(x_values))
             ax.set_xticks(np.arange(len(ant_all)) + 0.5)
-            ax.set_xticklabels([str(a) if i % 2 == 0 else "" for i, a in enumerate(ant_all)], fontsize=6)
+            ax.set_xticklabels([str(a) if i % 2 == 0 or i == len(ant_all) - 1 else "" for i, a in enumerate(ant_all)], fontsize=6)
             nticks = min(6, len(x_values))
             tick_idx = np.linspace(0, len(x_values), nticks, endpoint=False, dtype=int)
             ax.set_yticks(y_centers[tick_idx] if y_edges is not None else tick_idx + 0.5)
             ax.set_yticklabels([y_labels[i] for i in tick_idx], fontsize=6)
             ax.set_ylabel(x_label if ci == 0 else "", fontsize=8)
+            if ci == 1 and x_key == "time":
+                tax = ax.twinx()
+                tax.set_ylim(ax.get_ylim())
+                tax.set_yticks(y_centers[tick_idx])
+                tax.set_yticklabels([time_row_labels[i] for i in tick_idx], fontsize=6)
+                tax.set_ylabel("Time row", fontsize=8, labelpad=10)
+                tax.tick_params(axis="y", labelsize=6)
             if ri == nrows - 1:
                 ax.set_xlabel("Antenna", fontsize=8)
             ax.tick_params(axis="both", labelsize=6)
-    cbar = fig.colorbar(im, ax=axes.ravel().tolist(), orientation="vertical", fraction=0.04, pad=0.025)
-    cbar.set_label("Percent", fontsize=8)
-    cbar.ax.tick_params(labelsize=6)
+            if ci == 1 and x_key == "time":
+                ax.tick_params(axis="y", left=False, labelleft=False)
+    cbar = fig.colorbar(im, cax=cax, orientation="vertical")
+    cbar.ax.set_title("Percent", fontsize=8, pad=6)
+    cbar.ax.yaxis.set_ticks_position("left")
+    cbar.ax.tick_params(labelsize=6, labelleft=True, labelright=False)
+    ticks = cbar.get_ticks()
+    cbar.set_ticks(ticks)
+    cbar.set_ticklabels([f"{tick:.1f}" for tick in ticks])
     scans = np.unique(z["scan"].astype(int))
     scan_label = str(int(scans[0])) if scans.size == 1 else "allscans"
-    fig.suptitle(f"Gain Table: {table_name} | Scan: {scan_label} [%]", fontsize=12)
+    dt_text = f" | $\\Delta t$ = {delta_t:.2f} s" if np.isfinite(delta_t) else ""
+    fig.suptitle(f"Gain Table: {table_name} | Scan: {scan_label} [%]{dt_text}", fontsize=12)
     out.parent.mkdir(parents=True, exist_ok=True)
-    fig.subplots_adjust(top=0.88, right=0.88, hspace=0.34, wspace=0.12)
-    fig.savefig(out, dpi=160, bbox_inches="tight")
+    fig.subplots_adjust(top=0.88)
+    fig.savefig(out, dpi=DEFAULT_PLOT_DPI)
     plt.close(fig)
     print(f"Wrote plot: {out}")
 
@@ -475,6 +554,15 @@ def compact_number(value: float) -> str:
     if abs_value >= 1000 or abs_value < 0.01:
         return f"{value:.1e}"
     return f"{value:.3g}"
+
+
+def factor_two_levels(max_value: float, start: float = 0.25) -> np.ndarray:
+    if not np.isfinite(max_value) or max_value <= start:
+        return np.asarray([start], dtype=float)
+    levels = [float(start)]
+    while levels[-1] * 2.0 <= max_value * (1.0 + 1e-12):
+        levels.append(levels[-1] * 2.0)
+    return np.asarray(levels, dtype=float)
 
 
 def gain_product_header(z: Dict[str, np.ndarray]) -> Dict[str, Any]:
@@ -565,12 +653,11 @@ def plot_gain_histogram(
     x_edges = np.arange(0, len(ant_all) + 1, 1)
     x_grid, y_grid = np.meshgrid(x_edges, y_edges)
 
-    nrows = len(stokes_all)
-    fig, axes = plt.subplots(nrows=nrows, ncols=2, figsize=(8.4, max(3.6, 2.6 * nrows)), squeeze=False)
     cmap = plt.get_cmap("coolwarm").copy()
     cmap.set_bad(color="white")
 
-    last_im = None
+    hist_panels: Dict[int, Tuple[Tuple[np.ma.MaskedArray, np.ndarray], Tuple[np.ma.MaskedArray, np.ndarray]]] = {}
+    scale_values: List[np.ndarray] = []
     for ri, stokes in enumerate(stokes_all):
         real_by_ant, imag_by_ant = stokes_hist[int(stokes)]
         matrices = []
@@ -589,38 +676,60 @@ def plot_gain_histogram(
             log_pct[positive_mask] = np.log10(pct[positive_mask])
             vis = np.ma.array(log_pct)
             vis.mask = np.isnan(vis)
-            positive = pct[pct > 0.0]
-            if positive.size:
-                log_vmin = float(np.log10(np.nanmin(positive)))
-                log_vmax = float(np.log10(np.nanmax(positive)))
-            else:
-                log_vmin, log_vmax = -2.0, 0.0
-            if not np.isfinite(log_vmin) or not np.isfinite(log_vmax) or log_vmin == log_vmax:
-                log_vmin, log_vmax = -2.0, 0.0
-            matrices.append((vis, log_vmin, log_vmax))
-
-        for ci, (label, matrix) in enumerate([("Real-1 [%]", matrices[0]), ("Imag [%]", matrices[1])]):
-            ax = axes[ri, ci]
-            vis, log_vmin, log_vmax = matrix
-            last_im = ax.pcolormesh(x_grid, y_grid, vis, cmap=cmap, shading="auto", vmin=log_vmin, vmax=log_vmax)
-            panel_values = [vals for vals in (real_by_ant if ci == 0 else imag_by_ant) if vals.size]
+            if vis.count():
+                scale_values.append(vis.compressed())
+            panel_values = [vals for vals in vals_by_ant if vals.size]
             vals_for_stats = np.concatenate(panel_values) if panel_values else np.array([], dtype=float)
+            matrices.append((vis, vals_for_stats))
+        hist_panels[int(stokes)] = (matrices[0], matrices[1])
+
+    if scale_values:
+        all_log_values = np.concatenate(scale_values)
+        log_vmin = float(np.nanmin(all_log_values))
+        log_vmax = float(np.nanmax(all_log_values))
+    else:
+        log_vmin, log_vmax = -2.0, 0.0
+    percent_levels = factor_two_levels(10.0 ** log_vmax)
+    log_ticks = np.log10(percent_levels)
+    log_vmin = min(log_vmin, float(log_ticks[0]))
+    log_vmax = max(log_vmax, float(log_ticks[-1]))
+    if not np.isfinite(log_vmin) or not np.isfinite(log_vmax) or log_vmin == log_vmax:
+        log_vmin, log_vmax = -2.0, 0.0
+
+    nrows = len(stokes_all)
+    fig_height = max(6.0, 3.0 * nrows)
+    fig = plt.figure(figsize=(fig_height * 4.0 / 3.0, fig_height))
+    grid = fig.add_gridspec(nrows, 3, width_ratios=[1.0, 1.0, 0.05], wspace=0.035, hspace=0.28)
+    axes = np.asarray([[fig.add_subplot(grid[row, col]) for col in range(2)] for row in range(nrows)])
+    cax = fig.add_subplot(grid[:, 2])
+
+    last_im = None
+    for ri, stokes in enumerate(stokes_all):
+        matrices = hist_panels[int(stokes)]
+        for ci, (label, matrix) in enumerate([("Real-1", matrices[0]), ("Imag", matrices[1])]):
+            ax = axes[ri, ci]
+            vis, vals_for_stats = matrix
+            last_im = ax.pcolormesh(x_grid, y_grid, vis, cmap=cmap, shading="auto", vmin=log_vmin, vmax=log_vmax)
             ax.set_title(f"Stokes {stokes} {label}\n{sample_stats_text(vals_for_stats)}", fontsize=8)
             ax.set_xlim(0, len(ant_all))
             ax.set_ylim(vmin, vmax)
             ax.set_xticks(np.arange(len(ant_all)) + 0.5)
-            ax.set_xticklabels([str(a) if i % 2 == 0 else "" for i, a in enumerate(ant_all)], fontsize=6)
+            ax.set_xticklabels([str(a) if i % 2 == 0 or i == len(ant_all) - 1 else "" for i, a in enumerate(ant_all)], fontsize=6)
             ax.tick_params(axis="both", labelsize=6)
+            ax.set_axisbelow(False)
+            ax.grid(axis="y", linestyle=":", linewidth=0.6, color="0.35", alpha=0.65)
             ax.set_ylabel("Gain value [%]" if ci == 0 else "", fontsize=8)
+            if ci == 1:
+                ax.tick_params(axis="y", left=False, labelleft=False)
             if ri == nrows - 1:
                 ax.set_xlabel("Antenna", fontsize=8)
 
     if last_im is not None:
-        cbar = fig.colorbar(last_im, ax=axes.ravel().tolist(), orientation="vertical", fraction=0.04, pad=0.025)
+        cbar = fig.colorbar(last_im, cax=cax, orientation="vertical")
+        cbar.ax.set_title("Percent", fontsize=8, pad=6)
         cbar.ax.tick_params(labelsize=6)
-        ticks = cbar.get_ticks()
-        cbar.set_ticks(ticks)
-        cbar.set_ticklabels([compact_number(t) for t in ticks])
+        cbar.set_ticks(log_ticks)
+        cbar.set_ticklabels([f"{level:.2f}" for level in percent_levels])
 
     header = gain_product_header(z)
     table_name = Path(str(header.get("input_table", "gain table"))).name or "gain table"
@@ -628,8 +737,8 @@ def plot_gain_histogram(
     scan_label = str(int(scans[0])) if scans.size == 1 else "allscans"
     fig.suptitle(f"Gain Histogram: {table_name} | Scan: {scan_label} [%]", fontsize=12)
     out.parent.mkdir(parents=True, exist_ok=True)
-    fig.subplots_adjust(top=0.88, right=0.88, hspace=0.34, wspace=0.12)
-    fig.savefig(out, dpi=160, bbox_inches="tight")
+    fig.subplots_adjust(left=0.06, right=0.95, bottom=0.075, top=0.9)
+    fig.savefig(out, dpi=DEFAULT_PLOT_DPI)
     plt.close(fig)
     print(f"Wrote plot: {out}")
 
@@ -667,6 +776,16 @@ def plot_single_antenna_gain_products(
         print("SKIP antenna plots: no Stokes values are present in the gains NPZ.")
         return []
 
+    header = {}
+    if "header_json" in z:
+        try:
+            header = json.loads(str(np.asarray(z["header_json"]).item()))
+        except Exception:
+            header = {}
+    table_name = Path(str(header.get("input_table", "gain table"))).name
+    if not table_name:
+        table_name = "gain table"
+
     ant_arr = z["antenna"].astype(int)
     stokes_arr = z["stokes"].astype(int)
     scan_arr = z["scan"].astype(int)
@@ -676,6 +795,7 @@ def plot_single_antenna_gain_products(
     row_arr = z["row"].astype(float) if "row" in z else np.arange(real_arr.size, dtype=float)
     flagged_arr = z["flagged"].astype(bool) if "flagged" in z else np.zeros(real_arr.shape, dtype=bool)
     time_arr = z["time"].astype(float) if "time" in z else None
+    interval_arr = z["interval"].astype(float) if "interval" in z else None
 
     scans = np.unique(scan_arr)
     scan_label = str(int(scans[0])) if scans.size == 1 else "allscans"
@@ -683,17 +803,18 @@ def plot_single_antenna_gain_products(
     out_base.parent.mkdir(parents=True, exist_ok=True)
 
     for ant in ant_all:
-        antenna_panels: List[Tuple[int, np.ndarray, np.ndarray, np.ndarray, str, str]] = []
+        antenna_panels: List[Tuple[int, np.ndarray, np.ndarray, np.ndarray, str, Optional[np.ndarray]]] = []
+        delta_t_values: List[float] = []
         for stokes in stokes_all:
             selector = (ant_arr == int(ant)) & (stokes_arr == int(stokes)) & ~flagged_arr
             if not np.any(selector):
                 continue
 
+            time_rows: Optional[np.ndarray] = None
             if mode == "bandpass":
                 source_axis = chan_arr.astype(float)
                 axis_values = np.unique(chan_arr[selector]).astype(float)
                 x_label = "Channel"
-                title_prefix = "Bandpass: "
             else:
                 if time_arr is not None:
                     finite_times = time_arr[selector][np.isfinite(time_arr[selector])]
@@ -701,6 +822,17 @@ def plot_single_antenna_gain_products(
                         t0 = float(np.nanmin(finite_times))
                         source_axis = time_arr - t0
                         axis_values = np.unique(source_axis[selector & np.isfinite(source_axis)])
+                        if interval_arr is not None:
+                            valid_intervals = interval_arr[selector & np.isfinite(interval_arr) & (interval_arr > 0)]
+                            delta_t = float(np.nanmedian(valid_intervals)) if valid_intervals.size else np.nan
+                        else:
+                            delta_t = np.nan
+                        if not np.isfinite(delta_t) or delta_t <= 0:
+                            diffs = np.diff(axis_values)
+                            delta_t = float(np.nanmedian(diffs[diffs > 0])) if np.any(diffs > 0) else 1.0
+                        time_rows = np.asarray([int(round(float(v) / delta_t)) for v in axis_values], dtype=int)
+                        if np.isfinite(delta_t) and delta_t > 0:
+                            delta_t_values.append(delta_t)
                     else:
                         source_axis = row_arr
                         axis_values = np.unique(source_axis[selector])
@@ -708,7 +840,6 @@ def plot_single_antenna_gain_products(
                     source_axis = row_arr
                     axis_values = np.unique(source_axis[selector])
                 x_label = "Time [s]"
-                title_prefix = ""
 
             real_series = np.full(axis_values.shape, np.nan, dtype=float)
             imag_series = np.full(axis_values.shape, np.nan, dtype=float)
@@ -718,7 +849,7 @@ def plot_single_antenna_gain_products(
                     real_series[idx] = float(np.nanmean((real_arr[m] - 1.0) * 100.0))
                     imag_series[idx] = float(np.nanmean(imag_arr[m] * 100.0))
 
-            antenna_panels.append((int(stokes), axis_values, real_series, imag_series, x_label, title_prefix))
+            antenna_panels.append((int(stokes), axis_values, real_series, imag_series, x_label, time_rows))
 
         if not antenna_panels:
             total = int(np.count_nonzero(ant_arr == int(ant)))
@@ -729,26 +860,53 @@ def plot_single_antenna_gain_products(
             )
             continue
 
+        panel_values = []
+        for _, _, real_series, imag_series, _, _ in antenna_panels:
+            panel_values.extend([real_series[np.isfinite(real_series)], imag_series[np.isfinite(imag_series)]])
+        finite_values = np.concatenate([vals for vals in panel_values if vals.size]) if any(vals.size for vals in panel_values) else np.array([])
+        shared_abs_limit = float(np.nanmax(np.abs(finite_values))) if finite_values.size else 1.0
+        if not np.isfinite(shared_abs_limit) or shared_abs_limit <= 0:
+            shared_abs_limit = 1.0
+
         ncols = len(antenna_panels)
-        fig, axs = plt.subplots(2, ncols, figsize=(max(6.0, 3.6 * ncols), 5.0), sharex="col", squeeze=False)
-        for ci, (stokes, axis_values, real_series, imag_series, x_label, title_prefix) in enumerate(antenna_panels):
-            axs[0, ci].plot(axis_values, real_series, color="blue")
-            axs[0, ci].set_title(f"Stokes {stokes} - Real Component", fontsize=9)
+        fig_width = max(6.4, 3.6 * ncols)
+        fig, axs = plt.subplots(2, ncols, figsize=(fig_width, fig_width * 3.0 / 4.0), sharex="col", squeeze=False)
+        for ci, (stokes, axis_values, real_series, imag_series, x_label, time_rows) in enumerate(antenna_panels):
+            axs[0, ci].plot(axis_values, real_series, color="blue", label=f"Stokes {stokes}")
+            axs[0, ci].set_ylim(-shared_abs_limit, shared_abs_limit)
+            axs[0, ci].legend(loc="upper right", fontsize=8, frameon=True)
             axs[0, ci].grid(True, ls=":")
-            axs[1, ci].plot(axis_values, imag_series, color="red")
-            axs[1, ci].set_title(f"Stokes {stokes} - Imag Component", fontsize=9)
+            if time_rows is not None and axis_values.size:
+                nticks = min(6, axis_values.size)
+                tick_idx = np.linspace(0, axis_values.size, nticks, endpoint=False, dtype=int)
+                top_ax = axs[0, ci].twiny()
+                top_ax.set_xlim(axs[0, ci].get_xlim())
+                top_ax.set_xticks(axis_values[tick_idx])
+                top_ax.set_xticklabels([str(int(time_rows[i])) for i in tick_idx], fontsize=7)
+                top_ax.set_xlabel("Time row", fontsize=8)
+                top_ax.tick_params(axis="x", labelsize=7)
+            axs[1, ci].plot(axis_values, imag_series, color="red", label=f"Stokes {stokes}")
             axs[1, ci].set_xlabel(x_label)
+            axs[1, ci].set_ylim(-shared_abs_limit, shared_abs_limit)
+            axs[1, ci].legend(loc="upper right", fontsize=8, frameon=True)
             axs[1, ci].grid(True, ls=":")
             if ci == 0:
                 axs[0, ci].set_ylabel("Real-1 [%]")
                 axs[1, ci].set_ylabel("Imag [%]")
+            else:
+                axs[0, ci].tick_params(axis="y", left=False, labelleft=False)
+                axs[1, ci].tick_params(axis="y", left=False, labelleft=False)
 
-        plot_kind = "Bandpass" if mode == "bandpass" else "Gain"
-        fig.suptitle(f"{plot_kind}: Antenna {int(ant)}, Scan {scan_label}", fontsize=12)
+        dt_text = ""
+        if mode != "bandpass" and delta_t_values:
+            delta_t = float(np.nanmedian(np.asarray(delta_t_values, dtype=float)))
+            if np.isfinite(delta_t) and delta_t > 0:
+                dt_text = f" | $\\Delta t$ = {delta_t:.2f} s"
+        fig.suptitle(f"Gain Table: {table_name} | Antenna: {int(ant)} | Scan: {scan_label} [%]{dt_text}", fontsize=12)
         fig.tight_layout(rect=(0, 0, 1, 0.94))
 
         out = derived_output_path(out_base, f"ant{int(ant)}")
-        fig.savefig(out, dpi=160)
+        fig.savefig(out, dpi=DEFAULT_PLOT_DPI)
         plt.close(fig)
         written.append(out)
         print(f"Wrote plot: {out}")
@@ -904,7 +1062,7 @@ def plot_antenna_gain_stats_grid(npz_path: Path, out: Path, antennas: Optional[L
     scan_label = str(int(scans[0])) if scans.size == 1 else "allscans"
     fig.suptitle(f"Per-antenna Gain Statistics (Scan {scan_label})", fontsize=12)
     out.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out, dpi=160)
+    fig.savefig(out, dpi=DEFAULT_PLOT_DPI)
     plt.close(fig)
     print(f"Wrote plot: {out}")
 
@@ -980,7 +1138,7 @@ def plot_antenna_gain_ks_grid(npz_path: Path, out: Path, antennas: Optional[List
     ax.tick_params(axis="both", labelsize=12)
     out.parent.mkdir(parents=True, exist_ok=True)
     fig.tight_layout()
-    fig.savefig(out, dpi=160)
+    fig.savefig(out, dpi=DEFAULT_PLOT_DPI)
     plt.close(fig)
     print(f"Wrote plot: {out}")
 
@@ -1053,7 +1211,13 @@ def plot_self_corr_colormap(npz_path: Path, out: Path, antennas: Optional[List[i
             matrices[(int(stokes), comp)] = mat
     if not np.isfinite(min_positive) or min_positive <= 0:
         min_positive = 1e-3
-    vmin_log, vmax_log = np.log10(min_positive), np.log10(1.5)
+    positive_groups = [mat[np.isfinite(mat) & (mat > 0)] for mat in matrices.values() if np.any(np.isfinite(mat) & (mat > 0))]
+    positive_values = np.concatenate(positive_groups) if positive_groups else np.asarray([], dtype=float)
+    max_positive = float(np.nanmax(positive_values)) if positive_values.size else 1.5
+    factor_levels = factor_two_levels(max_positive)
+    ticks_log = np.log10(factor_levels)
+    vmin_log = min(np.log10(min_positive), float(ticks_log[0]))
+    vmax_log = max(np.log10(max_positive), float(ticks_log[-1]))
     last_im = None
     for ri, stokes in enumerate(stokes_all):
         for ci, comp in enumerate(("real", "imag")):
@@ -1084,14 +1248,13 @@ def plot_self_corr_colormap(npz_path: Path, out: Path, antennas: Optional[List[i
                 ax.set_xlabel("Antenna")
     if last_im is not None:
         cbar = fig.colorbar(last_im, ax=axes[:, 1], orientation="vertical", fraction=0.08, pad=0.04)
-        ticks_log = np.linspace(vmin_log, vmax_log, num=5)
         cbar.set_ticks(ticks_log)
-        cbar.set_ticklabels([f"{10 ** t:.2f}" for t in ticks_log])
+        cbar.set_ticklabels([f"{level:.2f}" for level in factor_levels])
     scans = np.unique(z["scan"].astype(int)) if "scan" in z else np.array([])
     scan_label = str(int(scans[0])) if scans.size == 1 else "allscans"
     fig.suptitle(f"Structure Function | Scan: {scan_label}", fontsize=12)
     out.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out, dpi=160)
+    fig.savefig(out, dpi=DEFAULT_PLOT_DPI)
     plt.close(fig)
     print(f"Wrote plot: {out}")
 
@@ -1141,7 +1304,7 @@ def plot_self_corr_antenna_products(npz_path: Path, out_base: Path, antennas: Op
                 ax.grid(True, which="both", ls=":", alpha=0.4)
         fig.tight_layout()
         out = derived_output_path(out_base, f"ant{int(ant)}")
-        fig.savefig(out, dpi=160)
+        fig.savefig(out, dpi=DEFAULT_PLOT_DPI)
         plt.close(fig)
         written.append(out)
         print(f"Wrote plot: {out}")
@@ -1231,9 +1394,10 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--input-table", default=None, help="Input CASA table passed to gdp-stats when products are missing.")
     p.add_argument("--gain-table", default=None, help="Gain table passed to gdp-stats when gain products are missing.")
     p.add_argument("--bandpass-table", default=None, help="Bandpass table passed to gdp-stats when bandpass products are missing.")
+    p.add_argument("--setup-file", default=None, help="Setup JSON file to use. Relative names are resolved under the active runtime directory.")
     p.add_argument("--scan", default=None, help="Comma-separated scans. Must match or create the corresponding GDP products.")
     p.add_argument("--combine-scans", action="store_true", help="Plot one combined allscans-style product. Default: false, make one plot per scan.")
-    p.add_argument("--antenna", default=None, help="Comma-separated antenna numbers to plot and to pass to gdp-stats for missing products.")
+    p.add_argument("--antenna", nargs="+", default=None, help="Antenna list or inclusive range. Examples: --antenna 1,2,3,13 ; --antenna 1 2 3 13 ; --antenna '(0,9)'. The same list is passed to gdp-stats if missing products must be created.")
     p.add_argument("--bchan", type=int, default=None, help="Bandpass start channel passed to gdp-stats when needed.")
     p.add_argument("--echan", type=int, default=None, help="Bandpass end channel passed to gdp-stats when needed.")
     p.add_argument("--gain-colormap", action="store_true", help=argparse.SUPPRESS)
@@ -1259,6 +1423,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    activate_config(args.setup_file)
     scans = parse_int_list(args.scan)
     hist_range = parse_float_range(args.hist_range)
     scan_label = scan_text(scans)
@@ -1266,7 +1431,7 @@ def main() -> None:
     tasks = selected_tasks(args)
     antenna_text = antenna_from_pmode_values(args, tasks)
     args.antenna = antenna_text
-    ants = parse_int_list(antenna_text)
+    ants = parse_antenna_list(antenna_text)
 
     for mode in modes_from_arg(args.mode):
         for task in tasks:

@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 
 CONFIG_NAME = ".gdp-config.json"
+ACTIVE_CONFIG: Optional[Dict[str, Any]] = None
 VAR_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
 
@@ -25,12 +26,41 @@ def script_dir() -> Path:
     return project_root() / "script"
 
 
-def load_config() -> Dict[str, Any]:
+def load_project_config() -> Dict[str, Any]:
     path = project_root() / CONFIG_NAME
     if not path.exists():
         return {}
     with path.open("r", encoding="utf-8") as f:
         return json.load(f)
+
+
+def resolve_setup_file_path(setup_file: Optional[str], base_config: Dict[str, Any]) -> Optional[Path]:
+    if setup_file:
+        path = Path(setup_file).expanduser()
+        if path.is_absolute():
+            return path.resolve()
+        rundir = Path(str(base_config.get("rundir") or (project_root() / "rundir"))).expanduser().resolve()
+        return (rundir / path).resolve()
+    configured = base_config.get("setup_file")
+    return Path(str(configured)).expanduser().resolve() if configured else None
+
+
+def activate_config(setup_file: Optional[str] = None) -> Dict[str, Any]:
+    global ACTIVE_CONFIG
+    base = load_project_config()
+    setup_path = resolve_setup_file_path(setup_file, base)
+    if setup_path and setup_path.exists():
+        with setup_path.open("r", encoding="utf-8") as f:
+            ACTIVE_CONFIG = json.load(f)
+    else:
+        if setup_file:
+            raise FileNotFoundError(f"Setup file not found: {setup_path}")
+        ACTIVE_CONFIG = base
+    return ACTIVE_CONFIG
+
+
+def load_config() -> Dict[str, Any]:
+    return ACTIVE_CONFIG if ACTIVE_CONFIG is not None else activate_config()
 
 
 def strip_comment(line: str) -> str:
@@ -83,8 +113,9 @@ def parse_key_value(line: str, lineno: int) -> Tuple[str, Any]:
     return key, parse_scalar(value)
 
 
-def parse_plan(path: Path) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
+def parse_plan(path: Path) -> Tuple[Dict[str, Any], List[Dict[str, Any]], Dict[str, Any]]:
     variables: Dict[str, Any] = {}
+    settings: Dict[str, Any] = {}
     intents: List[Dict[str, Any]] = []
     section: Optional[str] = None
     current: Optional[Dict[str, Any]] = None
@@ -129,16 +160,18 @@ def parse_plan(path: Path) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
             variables[key] = value
         elif section == "intent" and current is not None:
             current["args"][key] = value
+        elif section is None and key in {"setup-file", "setup_file"}:
+            settings["setup_file"] = value
         else:
             raise ValueError(
-                f"Line {lineno}: key/value line must be inside variables: or an intent block"
+                f"Line {lineno}: key/value line must be inside variables:, an intent block, or a supported top-level setting"
             )
 
     if current is not None:
         intents.append(current)
     if not intents:
         raise ValueError(f"No intents found in plan: {path}")
-    return variables, intents
+    return variables, intents, settings
 
 
 def flatten_config(config: Dict[str, Any]) -> Dict[str, Any]:
@@ -205,8 +238,21 @@ def args_to_cli(args: Dict[str, Any], variables: Dict[str, Any]) -> List[str]:
     return cli
 
 
-def run_plan(plan_path: Path, dry_run: bool = False, only: Optional[str] = None) -> None:
-    plan_vars, intents = parse_plan(plan_path)
+def normalize_intent_args(command: str, args: Dict[str, Any]) -> Dict[str, Any]:
+    if command != "gdp-stats":
+        return dict(args)
+    old_keys = ["gains", "gain-colormap", "gain_colormap", "stats", "ks", "self-corr", "self_corr", "cross-corr", "cross_corr", "all"]
+    used = [key for key in old_keys if key in args and args[key] is not False and args[key] is not None]
+    if used:
+        names = ", ".join(used)
+        raise ValueError(f"gdp-stats plan intents must use smode: ... instead of old task keys: {names}")
+    return dict(args)
+
+
+def run_plan(plan_path: Path, dry_run: bool = False, only: Optional[str] = None, setup_file: Optional[str] = None) -> None:
+    plan_vars, intents, settings = parse_plan(plan_path)
+    selected_setup_file = setup_file or settings.get("setup_file")
+    activate_config(str(selected_setup_file) if selected_setup_file else None)
     variables = {
         "project_root": str(project_root()),
         "script_dir": str(script_dir()),
@@ -222,7 +268,10 @@ def run_plan(plan_path: Path, dry_run: bool = False, only: Optional[str] = None)
         if only is not None and only not in {command, label, str(index)}:
             continue
         exe = command_path(command)
-        cli = args_to_cli(intent["args"], variables)
+        intent_args = normalize_intent_args(command, intent["args"])
+        if selected_setup_file and command in {"gdp-stats", "gdp-plot"} and "setup-file" not in intent_args and "setup_file" not in intent_args:
+            intent_args["setup-file"] = selected_setup_file
+        cli = args_to_cli(intent_args, variables)
         cmd = [str(exe), *cli]
         print(f"[{index}] {label}")
         print("$ " + " ".join(cmd))
@@ -234,6 +283,7 @@ def run_plan(plan_path: Path, dry_run: bool = False, only: Optional[str] = None)
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Run a GDP plan file composed of GDP command intents.")
     p.add_argument("plan_file", help="GDP plan file path.")
+    p.add_argument("--setup-file", default=None, help="Setup JSON file to use. Relative names are resolved under the active runtime directory.")
     p.add_argument("--dry-run", action="store_true", help="Print commands without running them.")
     p.add_argument("--only", default=None, help="Run only the matching intent index, command, or name.")
     return p.parse_args()
@@ -245,9 +295,11 @@ def main() -> None:
     if not plan.exists():
         raise FileNotFoundError(f"Plan file not found: {plan}")
     try:
-        run_plan(plan, dry_run=args.dry_run, only=args.only)
+        run_plan(plan, dry_run=args.dry_run, only=args.only, setup_file=args.setup_file)
     except subprocess.CalledProcessError as exc:
         raise SystemExit(exc.returncode) from exc
+    except (ValueError, KeyError) as exc:
+        raise SystemExit(str(exc)) from exc
 
 
 if __name__ == "__main__":

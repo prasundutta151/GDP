@@ -42,8 +42,8 @@
         <tr><th>Step</th><th>Goal</th><th>Main Command</th></tr>
         <tr><td>1</td><td>Remember input and runtime paths.</td><td><code>script/gdp-setup</code></td></tr>
         <tr><td>2</td><td>Check table metadata before processing.</td><td><code>script/gdp-util --header</code></td></tr>
-        <tr><td>3</td><td>Create stats and KS products.</td><td><code>script/gdp-stats --stats --ks</code></td></tr>
-        <tr><td>4</td><td>Create self-correlation products.</td><td><code>script/gdp-stats --self-corr</code></td></tr>
+        <tr><td>3</td><td>Create stats and KS products.</td><td><code>script/gdp-stats --smode stats,ks</code></td></tr>
+        <tr><td>4</td><td>Create self-correlation products.</td><td><code>script/gdp-stats --smode self-corr</code></td></tr>
         <tr><td>5</td><td>Make diagnostic plots.</td><td><code>script/gdp-plot -pmode ...</code></td></tr>
         <tr><td>6</td><td>Run a pipeline plan when repeated operations are needed.</td><td><code>script/gdp-plan-run</code></td></tr>
         <tr><td>7</td><td>Version and release the software.</td><td><code>script/gdp-util --version --git-push</code></td></tr>
@@ -90,7 +90,9 @@ antennas: [...]</code></pre>
     <section>
       <h2>3. Generate Stats And KS Products</h2>
       <p>Run these in a CASA-enabled shell because table reading uses <code>casatools</code>.</p>
-      <pre><code>casa --nogui --nologger --nologfile --log2term -c script/gdp-stats --mode gain --scan 2 --stats --ks</code></pre>
+      <pre><code>casa --nogui --nologger --nologfile --log2term -c script/gdp-stats --mode gain --scan 2 --smode stats,ks</code></pre>
+      <pre><code>casa --nogui --nologger --nologfile --log2term -c script/gdp-stats --mode gain --scan 2 --antennas "(0,9)" --smode stats,ks
+casa --nogui --nologger --nologfile --log2term -c script/gdp-stats --mode gain --scan 2 --antennas 1 2 3 4 13 --smode stats</code></pre>
       <p>Expected runtime output pattern:</p>
       <pre><code>START stats scan2
 Wrote stats NPZ: .../data-product/stats/npz/gdp-stats-gain-scan2.npz
@@ -104,7 +106,7 @@ DONE  ks scan2 elapsed_sec=...</code></pre>
     <section>
       <h2>4. Generate Self-Correlation Products</h2>
       <p>The self-correlation product should normally be generated for all antennas unless a focused antenna subset is required.</p>
-      <pre><code>casa --nogui --nologger --nologfile --log2term -c script/gdp-stats --mode gain --scan 2 --self-corr</code></pre>
+      <pre><code>casa --nogui --nologger --nologfile --log2term -c script/gdp-stats --mode gain --scan 2 --smode self-corr</code></pre>
       <p>Expected runtime output pattern:</p>
       <pre><code>START self-corr scan2
 SKIP self-corr scan=2 antenna=... reason=fewer than two finite unflagged samples

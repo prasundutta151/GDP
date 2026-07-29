@@ -905,3 +905,279 @@ Changes Made
   mode-specific table selectors.
 - Updated utility documentation, README quick-start examples, and the
   step-by-step guide.
+
+## 2026-07-29 11:13:53 IST
+
+Prompt / Request
+- Add a `gdp-stats --smode` option with suboptions `gains`,
+  `gain-colormap`, `stats`, `ks`, `self-corr`, `all`, and `cross-corr`.
+  The `all` mode should run the modes listed before it, and `cross-corr`
+  should remain a placeholder for now. In the HTML options table, show these
+  modes with a different background color like the `gdp-plot` `pmode` block.
+
+Changes Made
+- Added `script/gdp-stats --smode MODE[,MODE...]` with comma-or-space parsing.
+- Implemented `--smode all` as `gains`, `gain-colormap`, `stats`, `ks`, and
+  `self-corr`.
+- Made `cross-corr` a placeholder path that logs the task but does not write a
+  cross-corr product.
+- Kept backward-compatible individual flags, including `--gains`, `--stats`,
+  `--ks`, `--self-corr`, `--gain-colormap`, `--all`, and `--cross-corr`.
+- Added a light-green `smode` option block to `doc/gdp-stats.html`.
+- Added `--smode` examples to the main README documentation.
+
+## 2026-07-29 11:22:54 IST
+
+Prompt / Request
+- Remove older `gdp-stats` task options such as standalone `--stats`, update
+  `gdp-plan-run` and help files accordingly, and add setup-file selection for
+  stats and plan workflows. In plan-run, allow a setup file to be set at the
+  top of the plan.
+
+Changes Made
+- Removed public `gdp-stats` task selector flags (`--gains`,
+  `--gain-colormap`, `--stats`, `--ks`, `--self-corr`, `--cross-corr`,
+  `--all`) so task selection now goes through `--smode`.
+- Added `--setup-file` to `gdp-stats`, `gdp-plot`, and `gdp-plan-run`.
+- Setup-file names are resolved under the active runtime directory; if omitted,
+  commands use the setup file last activated by `gdp-setup`.
+- Updated `gdp-plot` missing-product calls to invoke `gdp-stats --smode ...`.
+- Added top-level `setup-file: NAME` support to GDP plan files.
+- Updated `pipelines/sample_stats.plan`, `gdp-plan-run` documentation,
+  `gdp-stats` documentation, product pages, README examples, and the
+  step-by-step guide.
+
+## 2026-07-29 11:26:56 IST
+
+Prompt / Request
+- Change `gdp-stats --antennas LIST` to support two input styles: inclusive
+  range syntax like `(0,9)` or `[0,9]`, and explicit antenna IDs like
+  `1,2,3,4,13` or `1 2 3 4 13`.
+
+Changes Made
+- Added antenna-list parsing to `gdp-stats` where `(start,end)` or
+  `[start,end]` expands inclusively.
+- Added space-separated antenna values in addition to comma-separated values.
+- Mirrored the same parser in `gdp-plot --antenna` so plotting and missing
+  `gdp-stats` product creation use the same antenna selection syntax.
+- Updated README, `gdp-stats`, `gdp-plot`, and step-by-step documentation with
+  examples.
+
+## 2026-07-29 11:32:45 IST
+
+Prompt / Request
+- If a user accidentally runs a mode/table combination with a scan number that
+  is not present in the selected table, execution should check this, print a
+  text error message, and stop.
+
+Changes Made
+- Added an early `gdp-stats` scan validation step after the input table is
+  resolved and before product/log batches are started.
+- The error message reports the selected mode, table path, missing scan(s), and
+  available scan(s).
+- Updated `gdp-stats` documentation to mention the validation behavior.
+
+## 2026-07-29 11:39:22 IST
+
+Prompt / Request
+- Correct gain colormap plots so the right-side colorbar is separated from the
+  plots and does not hide the right-column antenna panels. Add a right-side
+  timestamp axis to the right column and include the timestamp width
+  (`Delta t`) in the full plot title.
+
+Changes Made
+- Updated both `gdp-stats --smode gain-colormap` and
+  `gdp-plot -pmode gain-colormap` to use a dedicated colorbar GridSpec column.
+- Added right-column timestamp axes for gain-time colormaps, with labels in
+  IST.
+- Added median positive integration interval as `Delta t = ... s` in the
+  figure title when time information is available.
+- Updated `gdp-stats` and `gdp-plot` HTML documentation.
+
+## 2026-07-29 11:46:09 IST
+
+Prompt / Request
+- For gain colormap plots, remove the duplicated left-side time tick labels
+  from the right column, show time row numbers on the right-side axis instead
+  of timestamp strings, and make the overall figure 4:3.
+
+Changes Made
+- Updated both `gdp-stats --smode gain-colormap` and
+  `gdp-plot -pmode gain-colormap` so right-column gain-time panels hide their
+  left y-axis tick labels and use a right y-axis labeled `Time row`.
+- Time row labels are derived from elapsed seconds divided by the median
+  positive integration interval (`Delta t`), so they run from 0 upward.
+- Set the gain colormap figure size to a 4:3 aspect ratio while preserving the
+  separated colorbar column.
+- Updated the `gdp-stats` and `gdp-plot` HTML documentation.
+
+## 2026-07-29 11:52:00 IST
+
+Prompt / Request
+- Increase the default PNG plot resolution by a factor of 2.
+
+Changes Made
+- Added `DEFAULT_PLOT_DPI = 320` in both `gdp-plot` and `gdp-stats`.
+- Replaced all GDP plot `savefig` calls that used `160 dpi` with the shared
+  `320 dpi` default.
+- Updated the `gdp-plot` and `gdp-stats` HTML option descriptions to mention
+  the PNG resolution.
+
+## 2026-07-29 12:01:36 IST
+
+Prompt / Request
+- In `gdp-plot -pmode antenna`, set the vertical ranges for all four panels
+  from the highest modulus across the four plotted series.
+
+Changes Made
+- Updated `plot_single_antenna_gain_products` so each selected antenna figure
+  computes one shared absolute y-limit from all finite Real-1 and Imag values
+  across the Stokes panels.
+- Applied the same symmetric `[-max_abs, +max_abs]` y-range to every panel in
+  that antenna figure.
+- Updated the `gdp-plot` HTML documentation for the antenna plot mode.
+
+## 2026-07-29 12:03:03 IST
+
+Prompt / Request
+- For `gdp-plot -pmode antenna`, replace subplot titles with legends in the
+  top-right corners, showing labels such as `ST 0, Re` and `ST 1, Im`.
+- Add a time-row axis to the top of the upper row, similar to the gain
+  colormap time-row labels.
+
+Changes Made
+- Removed per-subplot titles from antenna plots and added per-panel legends
+  that identify the Stokes and Real/Imag component.
+- Added a top x-axis labeled `Time row` for gain-time antenna plots on the
+  upper row panels, with row numbers derived from elapsed time divided by the
+  median positive integration interval.
+- Updated the `gdp-plot` HTML documentation for antenna plot mode.
+
+## 2026-07-29 12:04:57 IST
+
+Prompt / Request
+- Add an overall antenna-plot title like the colormap title, including gain
+  table, scan, and `Delta t` information.
+
+Changes Made
+- Updated `gdp-plot -pmode antenna` to read the table name from the gains NPZ
+  header and include it in the figure title.
+- The antenna plot title now includes table name, antenna number, scan label,
+  percent units, and gain-mode `Delta t` when time information is available.
+- Updated `gdp-plot` HTML documentation for the antenna plot title format.
+
+## 2026-07-29 12:06:22 IST
+
+Prompt / Request
+- For antenna plots, remove the left-axis levels from the right column and make
+  the overall plot 4:3.
+
+Changes Made
+- Updated `gdp-plot -pmode antenna` so right-column panels hide duplicate
+  left-side y-axis tick marks and labels.
+- Changed antenna plot figure sizing to a 4:3 aspect ratio.
+- Updated the `gdp-plot` HTML documentation for antenna plot layout.
+
+## 2026-07-29 12:09:58 IST
+
+Prompt / Request
+- In antenna subplot legends, use labels such as `Stokes 0` and `Stokes 1`
+  instead of abbreviated labels that include `ST`, `Re`, or `Im`.
+
+Changes Made
+- Updated `gdp-plot -pmode antenna` legend labels to show only the Stokes
+  number, while the row y-axis labels continue to indicate Real-1 and Imag.
+- Updated the `gdp-plot` HTML documentation for the antenna legend labels.
+
+## 2026-07-29 12:13:35 IST
+
+Prompt / Request
+- For `gdp-plot -pmode gain-hist`, match the colormap plot style for the four
+  panel labels, the right-side colorbar position, and colorbar levels.
+
+Changes Made
+- Updated gain histogram panels to use `Stokes <n> Real-1` and
+  `Stokes <n> Imag` titles with the same compact summary-statistic line used
+  by gain colormap panels.
+- Changed gain histogram layout to use the same separated right-side colorbar
+  GridSpec column as gain colormap plots.
+- Changed gain histogram color scaling to a single shared log10 percentage
+  range across all panels, so the right colorbar describes every panel.
+- Suppressed duplicate y-axis tick marks and labels on right-column histogram
+  panels.
+- Saved gain histogram plots without tight cropping to preserve the figure
+  aspect and colorbar placement.
+
+## 2026-07-29 12:16:18 IST
+
+Prompt / Request
+- Add horizontal grids in the gain histogram plots.
+
+Changes Made
+- Added horizontal dotted grid lines to each `gdp-plot -pmode gain-hist`
+  panel.
+- The grid is drawn above the histogram image so the gain-value levels remain
+  visible.
+- Updated the `gdp-plot` HTML documentation for gain histogram panels.
+
+## 2026-07-29 12:20:20 IST
+
+Prompt / Request
+- Make gain histogram plot margins smaller, place the colorbar closer, show
+  colorbar levels in percentage even though the plotted values remain log10,
+  and keep the figure aspect ratio at 4:3.
+
+Changes Made
+- Tightened `gdp-plot -pmode gain-hist` GridSpec spacing and figure margins
+  while preserving the 4:3 canvas.
+- Moved the separated right colorbar closer to the histogram panels.
+- Kept the histogram color scale in log10 percent, but changed colorbar tick
+  labels to display percentage values.
+- Updated the `gdp-plot` HTML documentation for the colorbar labels.
+
+## 2026-07-29 12:24:26 IST
+
+Prompt / Request
+- For gain colormap plots, keep percentage colorbar levels to one decimal
+  place and show them on the left side of the colorbar.
+
+Changes Made
+- Updated both `gdp-plot -pmode gain-colormap` and
+  `gdp-stats --smode gain-colormap` colorbars so percent tick labels are
+  formatted with one decimal place.
+- Moved gain colormap colorbar ticks and label to the left side.
+- Updated the `gdp-plot` and `gdp-stats` HTML documentation.
+
+## 2026-07-29 12:30:03 IST
+
+Prompt / Request
+- For the histogram percentage colorbar levels, use consistent two-decimal
+  labels such as `0.25`, `0.50`, `1.00`, `2.00`, `4.00`, `8.00`, and `16.00`,
+  without appending a `%` sign to each value.
+
+Changes Made
+- Updated `gdp-plot -pmode gain-hist` so the colorbar still uses log10
+  percent internally but displays fixed percentage levels at the requested
+  powers-of-two sequence.
+- The histogram color scale is expanded when needed so the standard
+  `0.25` through `16.00` tick sequence is visible consistently.
+- Colorbar labels are formatted with two decimal places and do not include a
+  trailing percent sign.
+- Updated the `gdp-plot` HTML documentation for gain histogram colorbar levels.
+
+## 2026-07-29 12:34:04 IST
+
+Prompt / Request
+- Make sure colorbar levels start from `0.25` and then increase by factors of
+  two to the highest value available in the corresponding antenna/scan
+  combination.
+
+Changes Made
+- Added a reusable factor-of-two colorbar level helper.
+- Updated `gdp-plot -pmode gain-hist` so percent colorbar ticks are generated
+  dynamically from `0.25` up to the highest factor-of-two level present in the
+  plotted scan/antenna selection, with two-decimal labels and no `%` suffix.
+- Applied the same positive log-colorbar level rule to
+  `gdp-plot -pmode self-corr-colormap`.
+- Updated the `gdp-plot` HTML documentation for dynamic histogram colorbar
+  levels.

@@ -5,7 +5,11 @@
 # - Use ${name} to substitute a variable or a saved gdp-setup path.
 # - Each intent names a GDP command from script/.
 # - Intent keys become CLI flags, for example output-npz -> --output-npz.
+# - Use smode for gdp-stats task selection.
 # - Boolean true values become flags; false/null values are omitted.
+
+# Optional top-level setup file. A relative name is resolved under the active rundir.
+# setup-file: gdp-setup.json
 
 variables:
   stats_npz: ${project_root}/rundir/data-product/stats/npz/gdp-stats-gain-allscans.npz
@@ -16,19 +20,17 @@ intent: gdp-stats
   #name: gain statistics with csv
   mode: gain
   combine-scans: false
-  gains: true
+  smode: gain-colormap
   scan: 2
-#  stats: true
 #  output-npz: ${stats_npz}
 #  csv: true
 #  output-csv: ${stats_csv}
-   gain-colormap: true
 end
 
 #intent: gdp-plot
 #  name: plot gain statistics
 #  mode: gain
 #  combine-scans: true
-#  stats: true
+#  pmode: stats
 #  plot-dir: ${plot_png_dir}
 #end
