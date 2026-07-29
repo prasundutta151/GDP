@@ -229,6 +229,14 @@ def normalize_flag(flag: np.ndarray, data_shape: Sequence[int]) -> np.ndarray:
     raise ValueError(f"Unexpected FLAG shape {flag.shape}; expected compatible with data shape {tuple(data_shape)}")
 
 
+def require_flag_column(cols: Sequence[str], input_table: Path) -> None:
+    if "FLAG" not in cols:
+        raise SystemExit(
+            "WARNING: --use-flags was requested, but the selected table has no FLAG column; stopping.\n"
+            f"Table: {input_table}"
+        )
+
+
 def open_context(
     input_table: Path,
     mode: str,
@@ -398,6 +406,8 @@ def compute_stats(
         input_table, mode, scans, antennas, bchan, echan
     )
     try:
+        if use_flags:
+            require_flag_column(cols, input_table)
         stokes_count: Optional[int] = None
         stats = valid_count = total_count = flagged_count = None
         for s_idx, scan in enumerate(selected_scans):
@@ -408,8 +418,11 @@ def compute_stats(
             if data_full.ndim == 2:
                 data_full = data_full[:, None, :]
             data = data_full[:, :, row_ids]
-            flag_raw = np.asarray(tb.getcol("FLAG")) if "FLAG" in cols else np.zeros(data.shape, dtype=bool)
-            flag_raw = flag_raw[:, :, row_ids] if flag_raw.ndim == 3 else flag_raw[:, row_ids]
+            if use_flags:
+                flag_raw = np.asarray(tb.getcol("FLAG"))
+                flag_raw = flag_raw[:, :, row_ids] if flag_raw.ndim == 3 else flag_raw[:, row_ids]
+            else:
+                flag_raw = np.zeros(data.shape, dtype=bool)
             ant = all_ant[row_ids]
             if data.ndim == 2:
                 data = data[:, None, :]
@@ -482,6 +495,8 @@ def compute_stats(
 def compute_gains(input_table: Path, mode: str, scans: Optional[List[int]], antennas: Optional[List[int]], use_flags: bool, bchan: Optional[int], echan: Optional[int]) -> Dict[str, Any]:
     tb, cols, data_col, all_ant, all_scan, selected_scans, selected_antennas, ch0, ch1 = open_context(input_table, mode, scans, antennas, bchan, echan)
     try:
+        if use_flags:
+            require_flag_column(cols, input_table)
         all_time = np.asarray(tb.getcol("TIME"), dtype=float) if "TIME" in cols else np.arange(tb.nrows(), dtype=float)
         all_interval = np.asarray(tb.getcol("INTERVAL"), dtype=float) if "INTERVAL" in cols else np.full(tb.nrows(), np.nan, dtype=float)
         rows: Dict[str, List[Any]] = {k: [] for k in ["scan", "antenna", "stokes", "channel", "row", "time", "interval", "real", "imag", "flagged"]}
@@ -494,7 +509,7 @@ def compute_gains(input_table: Path, mode: str, scans: Optional[List[int]], ante
             if data.ndim == 2:
                 data = data[:, None, :]
             data = data[:, ch0:ch1, 0].astype(np.complex128, copy=True)
-            if "FLAG" in cols:
+            if use_flags:
                 raw_flag = np.asarray(tb.getcol("FLAG", startrow=rid, nrow=1))
                 flag = normalize_flag(raw_flag, (data.shape[0], data.shape[1], 1))[:, :, 0]
             else:
@@ -545,6 +560,8 @@ def compute_ks(
         input_table, mode, scans, antennas, bchan, echan
     )
     try:
+        if use_flags:
+            require_flag_column(cols, input_table)
         stokes_count: Optional[int] = None
         ks = sample_count = None
         for s_idx, scan in enumerate(selected_scans):
@@ -555,8 +572,11 @@ def compute_ks(
             if data_full.ndim == 2:
                 data_full = data_full[:, None, :]
             data = data_full[:, :, row_ids]
-            flag_raw = np.asarray(tb.getcol("FLAG")) if "FLAG" in cols else np.zeros(data.shape, dtype=bool)
-            flag_raw = flag_raw[:, :, row_ids] if flag_raw.ndim == 3 else flag_raw[:, row_ids]
+            if use_flags:
+                flag_raw = np.asarray(tb.getcol("FLAG"))
+                flag_raw = flag_raw[:, :, row_ids] if flag_raw.ndim == 3 else flag_raw[:, row_ids]
+            else:
+                flag_raw = np.zeros(data.shape, dtype=bool)
             ant = all_ant[row_ids]
             if data.ndim == 2:
                 data = data[:, None, :]
@@ -759,6 +779,8 @@ def read_series(
         input_table, mode, scans, antennas, bchan, echan
     )
     try:
+        if use_flags:
+            require_flag_column(cols, input_table)
         times = np.asarray(tb.getcol("TIME"), dtype=float) if "TIME" in cols else np.arange(tb.nrows(), dtype=float)
         out: Dict[int, Dict[int, Dict[int, Dict[str, Tuple[np.ndarray, np.ndarray]]]]] = {}
         stokes_count = 0
@@ -772,7 +794,7 @@ def read_series(
                 if data_full.ndim == 2:
                     data_full = data_full[:, None, :]
                 data = data_full[:, ch0:ch1, :][:, :, row_ids].astype(np.complex128, copy=True)
-                if "FLAG" in cols:
+                if use_flags:
                     flag_full = np.asarray(tb.getcol("FLAG"))
                     flag_full = flag_full[:, None, :] if flag_full.ndim == 2 else flag_full
                     flag = normalize_flag(flag_full[:, ch0:ch1, :][:, :, row_ids], data.shape)
@@ -1200,7 +1222,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--antennas", nargs="+", default=None, help="Antenna list or inclusive range. Examples: --antennas 1,2,3,13 ; --antennas 1 2 3 13 ; --antennas '(0,9)'. Default: all antennas.")
     p.add_argument("--bchan", type=int, default=None, help="Start channel, inclusive.")
     p.add_argument("--echan", type=int, default=None, help="End channel, exclusive.")
-    p.add_argument("--use-flags", action=argparse.BooleanOptionalAction, default=True, help="Apply FLAG mask. Default: true.")
+    p.add_argument("--use-flags", action="store_true", help="Apply the CASA FLAG mask. Default: false. If requested and the table has no FLAG column, GDP stops with a warning.")
     p.add_argument(
         "--smode",
         default=None,

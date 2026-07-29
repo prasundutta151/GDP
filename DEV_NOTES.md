@@ -1395,3 +1395,24 @@ Changes Made
 - Replaced the extra bottom legend band with tighter manual subplot margins so
   the plot fills the 4:3 figure more effectively.
 - Updated the `gdp-plot` HTML documentation.
+
+## 2026-07-29 13:51:49 IST
+
+Prompt / Request
+- Change `gdp-stats` flag handling from the paired
+  `--use-flags` / `--no-use-flags` options to a single opt-in
+  `--use-flags` option.
+- When `--use-flags` is set, check and use the table `FLAG` column. If the
+  table has no `FLAG` column, print a warning and stop. If the option is not
+  set, do not use flags.
+
+Changes Made
+- Changed `gdp-stats --use-flags` to a simple `store_true` option with default
+  disabled.
+- Added a shared flag-column check. `gdp-stats` now stops with a warning if
+  `--use-flags` is requested for a table without `FLAG`.
+- Updated gains, stats, KS, and structure-function series reading so `FLAG` is
+  read only when `--use-flags` is enabled.
+- Updated `gdp-plot` missing-product forwarding to use `--use-flags` instead
+  of the removed `--no-use-flags`.
+- Updated the `gdp-stats` and `gdp-plot` HTML documentation.

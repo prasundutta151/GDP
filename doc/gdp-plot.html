@@ -78,6 +78,7 @@ script/gdp-plot -pmode cross-corr-colormap --antenna 0,1,2  [plot selected anten
         <tr><td><code>--gain-table PATH</code>, <code>--bandpass-table PATH</code></td><td>Mode-specific tables passed to <code>gdp-stats</code> when missing gain or bandpass NPZ products must be created.</td></tr>
         <tr><td><code>--setup-file NAME</code></td><td>Setup JSON file to use for product directories and for any missing-product <code>gdp-stats</code> calls.</td></tr>
         <tr><td><code>--bchan INT</code>, <code>--echan INT</code></td><td>Bandpass channel selection passed to <code>gdp-stats</code> when needed.</td></tr>
+        <tr><td><code>--use-flags</code></td><td>Pass <code>--use-flags</code> to <code>gdp-stats</code> when missing products must be created. Default: disabled, so missing products are created without flag masking unless this option is set.</td></tr>
         <tr><td><code>--s2-thr FLOAT</code></td><td>Threshold used for self-correlation reference lines and colormap markers. Default: <code>0.9</code>.</td></tr>
         <tr><td><code>--plot-dir PATH</code></td><td>Output plot directory. Default: configured <code>plots/&lt;format&gt;</code> runtime directory.</td></tr>
         <tr><td><code>--format {png,pdf,eps}</code></td><td>Plot file format. Default: <code>png</code>. PNG files are written at <code>320 dpi</code>.</td></tr>

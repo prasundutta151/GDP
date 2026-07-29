@@ -262,8 +262,8 @@ def ensure_npz(product: str, mode: str, args: argparse.Namespace, scans: Optiona
         cmd.extend(["--bchan", str(args.bchan)])
     if args.echan is not None:
         cmd.extend(["--echan", str(args.echan)])
-    if args.no_use_flags:
-        cmd.append("--no-use-flags")
+    if args.use_flags:
+        cmd.append("--use-flags")
 
     print("Creating missing NPZ with gdp-stats:")
     print("$ " + " ".join(cmd))
@@ -318,8 +318,8 @@ def ensure_npzs(product: str, mode: str, args: argparse.Namespace, scans: Option
         cmd.extend(["--bchan", str(args.bchan)])
     if args.echan is not None:
         cmd.extend(["--echan", str(args.echan)])
-    if args.no_use_flags:
-        cmd.append("--no-use-flags")
+    if args.use_flags:
+        cmd.append("--use-flags")
 
     print("Creating missing per-scan NPZ products with gdp-stats:")
     print("$ " + " ".join(cmd))
@@ -1533,7 +1533,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--format", choices=["png", "pdf", "eps"], default="png", help="Plot format. Default: png.")
     p.add_argument("--recompute", action="store_true", help="Run gdp-stats even if the matching NPZ product already exists.")
     p.add_argument("--dry-run", action="store_true", help="Print gdp-stats commands for missing products without plotting.")
-    p.add_argument("--no-use-flags", action="store_true", help="Pass --no-use-flags to gdp-stats when creating missing products.")
+    p.add_argument("--use-flags", action="store_true", help="Pass --use-flags to gdp-stats when creating missing products. Default: false.")
     p.add_argument("pmode_values", nargs="*", help=argparse.SUPPRESS)
     return p.parse_args()
 
