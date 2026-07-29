@@ -1181,3 +1181,217 @@ Changes Made
   `gdp-plot -pmode self-corr-colormap`.
 - Updated the `gdp-plot` HTML documentation for dynamic histogram colorbar
   levels.
+
+## 2026-07-29 12:51:57 IST
+
+Prompt / Request
+- In `gdp-plot -pmode stats`, use the colormap-style title with the table name
+  and scan information.
+- Remove the `--subtract-mean` / `--no-subtract-mean` options from `gdp-stats`.
+- Keep mean subtraction as a plot-only option in `gdp-plot`, disabled by
+  default, and include `subtract-mean` in the output filename when it is used.
+
+Changes Made
+- Routed `gdp-plot -pmode stats` through the full gains NPZ product so plot-time
+  statistics can be calculated directly from antenna samples.
+- Added `gdp-plot --subtract-mean` for stats plots. When enabled, each selected
+  antenna/stokes/component sample distribution is centered before the plotted
+  statistics are calculated.
+- Updated stats plot filenames to use
+  `gdp-plot-stats-<mode>-<scan>-subtract-mean.<format>` when centering is
+  enabled.
+- Removed the public subtract-mean CLI from `gdp-stats`; stats products are now
+  written without mean subtraction by default.
+- Updated `gdp-plot`, `gdp-stats`, README, and step-by-step HTML documentation.
+
+## 2026-07-29 13:03:05 IST
+
+Prompt / Request
+- Replace the `gdp-plot --subtract-mean` stats-plot option with
+  `--divide-mean`.
+- For `--divide-mean`, calculate the mean over all selected antennas for each
+  stokes/real-imag combination, then divide every antenna sample in that
+  combination by the shared mean.
+
+Changes Made
+- Renamed the plot-side stats option to `gdp-plot --divide-mean`.
+- Changed `gdp-plot -pmode stats --divide-mean` to normalize gain samples by a
+  shared all-antenna mean for each stokes/component before calculating mean,
+  std, skewness, and kurtosis for the plotted grid.
+- Updated stats plot filenames to use
+  `gdp-plot-stats-<mode>-<scan>-divide-mean.<format>` when normalization is
+  enabled.
+- Updated the `gdp-plot` HTML usage and option documentation.
+
+## 2026-07-29 13:08:05 IST
+
+Prompt / Request
+- Replace the `gdp-plot --divide-mean` option with `--adjust-mean`.
+- For the adjustment, divide only the real samples by the shared all-antenna
+  mean, while subtracting the shared all-antenna mean from the imaginary
+  samples.
+
+Changes Made
+- Renamed the plot-side stats option to `gdp-plot --adjust-mean`.
+- Updated `gdp-plot -pmode stats --adjust-mean` so real values are divided by
+  the all-selected-antenna mean for each stokes/real combination, while
+  imaginary values subtract the all-selected-antenna mean for each stokes/imag
+  combination.
+- Updated stats plot filenames to use
+  `gdp-plot-stats-<mode>-<scan>-adjust-mean.<format>` when this adjustment is
+  enabled.
+- Updated the `gdp-plot` HTML usage and option documentation.
+
+## 2026-07-29 13:10:36 IST
+
+Prompt / Request
+- In the stats plot mean panel, plot the real gain quantity with the `-1`
+  convention but do not apply `-1` to the imaginary quantity.
+- Change the top-left stats subplot title to `Mean [%]`.
+- Mark real legend entries with `-1`.
+
+Changes Made
+- Updated `gdp-plot -pmode stats` to calculate stats-plot values from raw gain
+  samples, then apply the display convention: real mean is shown as
+  `(real - 1) * 100`, while imaginary mean is shown as `imag * 100`.
+- Preserved the `--adjust-mean` behavior before display scaling: real samples
+  are divided by the shared real mean, and imaginary samples subtract the shared
+  imaginary mean.
+- Changed the mean subplot title to `Mean [%]`.
+- Changed stats plot real legend labels from `re` to `re-1`.
+- Updated the `gdp-plot` HTML documentation.
+
+## 2026-07-29 13:15:08 IST
+
+Prompt / Request
+- In the stats plots, add a black horizontal dashed line with linewidth 2 in
+  the mean, skewness, and kurtosis panels.
+
+Changes Made
+- Added a black dashed zero-reference line with linewidth 2 to the mean,
+  skewness, and kurtosis panels in `gdp-plot -pmode stats`.
+- Included zero in the y-axis range calculation for those panels so the
+  reference line remains visible.
+- Updated the `gdp-plot` HTML documentation.
+
+## 2026-07-29 13:21:25 IST
+
+Prompt / Request
+- In the KS plot, add a title in the same style as the recently updated
+  colormap and stats plots.
+
+Changes Made
+- Updated `gdp-plot -pmode ks` to use a figure title of the form
+  `Gain Table: <table> | Scan: <scan> [%]`, reading the table name from the KS
+  product header when available.
+- Adjusted the KS plot layout so the new figure title has reserved space.
+- Updated the `gdp-plot` HTML documentation.
+
+## 2026-07-29 13:22:42 IST
+
+Prompt / Request
+- Make the KS and stats plots use a 4:3 aspect ratio.
+
+Changes Made
+- Updated `gdp-plot -pmode stats` to use a `10 x 7.5` inch figure.
+- Updated `gdp-plot -pmode ks` to use a `10 x 7.5` inch figure.
+- Updated the `gdp-plot` HTML documentation.
+
+## 2026-07-29 13:25:49 IST
+
+Prompt / Request
+- In the KS plot, add dashed lines for each Stokes/real-imag option comparing
+  two simulated Gaussian samples with the same sample size as each antenna.
+
+Changes Made
+- Added an internal two-sample KS helper for simulated Gaussian comparisons.
+- Updated `gdp-plot -pmode ks` to read `sample_count` from the KS NPZ product
+  and overlay same-color dashed reference lines for each Stokes/component
+  series.
+- For gains-product fallback plotting, the simulated reference uses the finite
+  sample count read directly from the selected gain samples.
+- Updated the `gdp-plot` HTML documentation.
+
+## 2026-07-29 13:28:53 IST
+
+Prompt / Request
+- For the KS plot, replace the per-antenna simulated Gaussian KS references
+  with a horizontal representative line for each Stokes/real-imag combination.
+
+Changes Made
+- Changed `gdp-plot -pmode ks` so measured KS values remain plotted per
+  antenna, while the simulated Gaussian comparison is drawn as one same-color
+  horizontal dashed line per Stokes/component series.
+- The horizontal reference uses the median representative sample count across
+  the selected antennas for that series.
+- Set the simulated reference line width to 1.
+- Updated the `gdp-plot` HTML documentation.
+
+## 2026-07-29 13:31:15 IST
+
+Prompt / Request
+- Adjust the KS plot range so the highest measured KS value and the highest
+  horizontal simulated reference line are both included.
+
+Changes Made
+- Updated `gdp-plot -pmode ks` to collect measured KS values and simulated
+  horizontal reference levels while plotting.
+- Set the KS y-axis range from zero to a padded maximum over both measured and
+  simulated values.
+- Updated the `gdp-plot` HTML documentation.
+
+## 2026-07-29 13:32:51 IST
+
+Prompt / Request
+- Calculate each KS simulated horizontal reference line from 128 realizations
+  of Gaussian sample pairs, then use the mean over those realizations.
+
+Changes Made
+- Updated the simulated Gaussian KS helper used by `gdp-plot -pmode ks` to run
+  128 two-sample Gaussian-pair realizations by default.
+- The horizontal simulated reference value is now the mean KS statistic over
+  those 128 realizations for the representative sample size.
+- Updated the `gdp-plot` HTML documentation.
+
+## 2026-07-29 13:35:04 IST
+
+Prompt / Request
+- The `0-im sim` horizontal reference line in the KS plot is not visible.
+
+Changes Made
+- Confirmed that the active KS product has valid `0-im` sample counts, and that
+  the simulated reference levels are very close to the other Stokes/component
+  references.
+- Changed `gdp-plot -pmode ks` simulated references from plain axis-wide
+  horizontal lines to explicit horizontal line segments with higher z-order.
+- Added distinct dash patterns and right-edge text labels for each simulated
+  reference line so close levels such as `0-im sim` remain identifiable.
+- Updated the `gdp-plot` HTML documentation.
+
+## 2026-07-29 13:38:21 IST
+
+Prompt / Request
+- Remove inline KS simulated-reference labels such as `0-im sim`.
+- Put the KS legend at the bottom in a four-column by two-row layout, with the
+  dashed simulated entries in the bottom row.
+
+Changes Made
+- Removed right-edge inline text labels from `gdp-plot -pmode ks`.
+- Moved the KS legend below the plot with four columns. The legend entries are
+  ordered as measured/simulated pairs so measured solid lines appear in the top
+  row and dashed simulated references appear in the bottom row.
+- Reserved bottom layout space for the legend.
+- Updated the `gdp-plot` HTML documentation.
+
+## 2026-07-29 13:40:41 IST
+
+Prompt / Request
+- Keep the KS legend labels inside the plot rather than outside, and make the
+  plot fill the figure edges properly while keeping a 4:3 aspect ratio.
+
+Changes Made
+- Moved the `gdp-plot -pmode ks` legend inside the lower center of the plotting
+  axes, preserving the four-column by two-row legend layout.
+- Replaced the extra bottom legend band with tighter manual subplot margins so
+  the plot fills the 4:3 figure more effectively.
+- Updated the `gdp-plot` HTML documentation.

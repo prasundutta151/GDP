@@ -1201,7 +1201,6 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--bchan", type=int, default=None, help="Start channel, inclusive.")
     p.add_argument("--echan", type=int, default=None, help="End channel, exclusive.")
     p.add_argument("--use-flags", action=argparse.BooleanOptionalAction, default=True, help="Apply FLAG mask. Default: true.")
-    p.add_argument("--subtract-mean", action=argparse.BooleanOptionalAction, default=False, help="Subtract real/imag means before statistics. Default: false.")
     p.add_argument(
         "--smode",
         default=None,
@@ -1304,7 +1303,7 @@ def run_batch(
 
     if args.stats:
         t0 = logger.start(f"stats {scan_label}")
-        stats_result = compute_stats(input_table, mode, scans, antennas, args.use_flags, args.subtract_mean, args.bchan, args.echan)
+        stats_result = compute_stats(input_table, mode, scans, antennas, args.use_flags, False, args.bchan, args.echan)
         out = Path(args.output_npz).expanduser().resolve() if args.output_npz else build_default_output(input_table, scan_label, mode, "stats", "npz")
         write_npz(out, stats_result)
         logger.write(f"Wrote stats NPZ: {out}")

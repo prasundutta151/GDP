@@ -30,7 +30,7 @@ PRODUCTS = {
     "gain_colormap": ("gains", "gains_npz_dir", "gains"),
     "gain_hist": ("gains", "gains_npz_dir", "gains"),
     "antenna": ("gains", "gains_npz_dir", "gains"),
-    "stats": ("stats", "stats_npz_dir", "stats"),
+    "stats": ("gains", "gains_npz_dir", "gains"),
     "ks": ("ks", "ks_npz_dir", "ks"),
     "self_corr_colormap": ("self_corr", "self_corr_npz_dir", "self-corr"),
     "self_corr_antenna": ("self_corr", "self_corr_npz_dir", "self-corr"),
@@ -208,17 +208,27 @@ def output_path(plot_dir: Path, task: str, mode: str, scan_label: str, fmt: str)
     return plot_dir / f"gdp-plot-{task.replace('_', '-')}-{mode}-{scan_label}.{fmt}"
 
 
+def stats_output_path(plot_dir: Path, mode: str, scan_label: str, fmt: str, adjust_mean: bool) -> Path:
+    suffix = "-adjust-mean" if adjust_mean else ""
+    return plot_dir / f"gdp-plot-stats-{mode}-{scan_label}{suffix}.{fmt}"
+
+
+def product_message_name(product: str) -> str:
+    product_name, _, _ = PRODUCTS[product]
+    return f"{product_name} NPZ for {product.replace('_', '-')}" if product_name != product else f"{product} NPZ"
+
+
 def ensure_npz(product: str, mode: str, args: argparse.Namespace, scans: Optional[List[int]], scan_label: str) -> Path:
     path = default_product_path(product, mode, scan_label)
     if path.exists() and not args.recompute:
-        print(f"Using existing {product} NPZ: {path}")
+        print(f"Using existing {product_message_name(product)}: {path}")
         return path
 
     smode = {
         "gain_colormap": "gains",
         "gain_hist": "gains",
         "antenna": "gains",
-        "stats": "stats",
+        "stats": "gains",
         "ks": "ks",
         "self_corr_colormap": "self-corr",
         "self_corr_antenna": "self-corr",
@@ -228,7 +238,7 @@ def ensure_npz(product: str, mode: str, args: argparse.Namespace, scans: Optiona
         "gain_colormap": "--output-gains-npz",
         "gain_hist": "--output-gains-npz",
         "antenna": "--output-gains-npz",
-        "stats": "--output-npz",
+        "stats": "--output-gains-npz",
         "ks": "--output-ks-npz",
         "self_corr_colormap": "--output-self-corr-npz",
         "self_corr_antenna": "--output-self-corr-npz",
@@ -278,14 +288,14 @@ def ensure_npzs(product: str, mode: str, args: argparse.Namespace, scans: Option
     existing = [(label, default_product_path(product, mode, label)) for label in labels]
     if existing and not args.recompute and all(path.exists() for _, path in existing):
         for _, path in existing:
-            print(f"Using existing {product} NPZ: {path}")
+            print(f"Using existing {product_message_name(product)}: {path}")
         return existing
 
     smode = {
         "gain_colormap": "gains",
         "gain_hist": "gains",
         "antenna": "gains",
-        "stats": "stats",
+        "stats": "gains",
         "ks": "ks",
         "self_corr_colormap": "self-corr",
         "self_corr_antenna": "self-corr",
@@ -934,6 +944,27 @@ def finite_gain_values(z: Dict[str, np.ndarray], ant: int, stokes: int, componen
     return vals[np.isfinite(vals)].ravel()
 
 
+def raw_gain_values(z: Dict[str, np.ndarray], ant: int, stokes: int, component: str) -> np.ndarray:
+    selector = (z["antenna"].astype(int) == int(ant)) & (z["stokes"].astype(int) == int(stokes))
+    if "flagged" in z:
+        selector &= ~z["flagged"].astype(bool)
+    source = z["real"].astype(float) if component == "real" else z["imag"].astype(float)
+    vals = source[selector]
+    return vals[np.isfinite(vals)].ravel()
+
+
+def gain_component_metrics(vals: np.ndarray, component: str) -> Dict[str, float]:
+    vals = np.asarray(vals, dtype=float)
+    vals = vals[np.isfinite(vals)]
+    if vals.size == 0:
+        return {"mean": np.nan, "std": np.nan, "skew": np.nan, "kurt": np.nan}
+    mean = float(np.mean(vals))
+    std = float(np.std(vals))
+    skew, kurt = nan_skew_kurt(vals)
+    display_mean = (mean - 1.0) * 100.0 if component == "real" else mean * 100.0
+    return {"mean": display_mean, "std": std * 100.0, "skew": skew, "kurt": kurt}
+
+
 def nan_skew_kurt(vals: np.ndarray) -> Tuple[float, float]:
     vals = np.asarray(vals, dtype=float)
     vals = vals[np.isfinite(vals)]
@@ -953,9 +984,11 @@ def component_index(components: Sequence[Any], name: str) -> Optional[int]:
     return labels.index(name) if name in labels else None
 
 
-def plot_antenna_gain_stats_grid(npz_path: Path, out: Path, antennas: Optional[List[int]]) -> None:
+def plot_antenna_gain_stats_grid(npz_path: Path, out: Path, antennas: Optional[List[int]], adjust_mean: bool = False) -> None:
     z = load_npz(npz_path)
     if "stats" in z:
+        if adjust_mean:
+            raise ValueError("--adjust-mean for stats plots requires a gains NPZ product.")
         required = {"scan_numbers", "antennas", "stokes", "components", "metrics", "stats"}
         missing = required - set(z)
         if missing:
@@ -1001,6 +1034,18 @@ def plot_antenna_gain_stats_grid(npz_path: Path, out: Path, antennas: Optional[L
         if ant_all.size == 0 or stokes_all.size == 0:
             raise ValueError("No antennas/stokes available for stats grid.")
 
+        group_means: Dict[Tuple[int, str], float] = {}
+        if adjust_mean:
+            for stokes in stokes_all:
+                for comp in ("real", "imag"):
+                    combined = [
+                        raw_gain_values(z, int(ant), int(stokes), comp)
+                        for ant in ant_all
+                    ]
+                    vals = np.concatenate([item for item in combined if item.size]) if any(item.size for item in combined) else np.array([])
+                    mean = float(np.mean(vals)) if vals.size else np.nan
+                    group_means[(int(stokes), comp)] = mean if np.isfinite(mean) else np.nan
+
         stats = {}
         for stokes in stokes_all:
             stats[int(stokes)] = {
@@ -1009,20 +1054,23 @@ def plot_antenna_gain_stats_grid(npz_path: Path, out: Path, antennas: Optional[L
             }
             for ai, ant in enumerate(ant_all):
                 for comp in ("real", "imag"):
-                    vals = finite_gain_values(z, int(ant), int(stokes), comp)
+                    vals = raw_gain_values(z, int(ant), int(stokes), comp)
                     if vals.size == 0:
                         continue
-                    skew, kurt = nan_skew_kurt(vals)
-                    stats[int(stokes)][comp]["mean"][ai] = float(np.mean(vals))
-                    stats[int(stokes)][comp]["std"][ai] = float(np.std(vals))
-                    stats[int(stokes)][comp]["skew"][ai] = skew
-                    stats[int(stokes)][comp]["kurt"][ai] = kurt
+                    if adjust_mean:
+                        group_mean = group_means.get((int(stokes), comp), np.nan)
+                        if not np.isfinite(group_mean) or (comp == "real" and group_mean == 0.0):
+                            continue
+                        vals = vals / group_mean if comp == "real" else vals - group_mean
+                    metrics = gain_component_metrics(vals, comp)
+                    for metric, value in metrics.items():
+                        stats[int(stokes)][comp][metric][ai] = value
         scans = np.unique(z["scan"].astype(int)) if "scan" in z else np.array([])
 
-    fig, axes = plt.subplots(2, 2, figsize=(10, 7), constrained_layout=True)
+    fig, axes = plt.subplots(2, 2, figsize=(10, 7.5), constrained_layout=True)
     ax_mean, ax_std = axes[0, 0], axes[0, 1]
     ax_skew, ax_kurt = axes[1, 1], axes[1, 0]
-    axes_map = [("mean", ax_mean, "Mean-1 [%]"), ("std", ax_std, "Std [%]"), ("skew", ax_skew, "Skewness"), ("kurt", ax_kurt, "Kurtosis")]
+    axes_map = [("mean", ax_mean, "Mean [%]"), ("std", ax_std, "Std [%]"), ("skew", ax_skew, "Skewness"), ("kurt", ax_kurt, "Kurtosis")]
     markers = ["o", "s", "^", "D", "v", "P", "X"]
     colors = plt.rcParams["axes.prop_cycle"].by_key().get("color", ["C0", "C1", "C2", "C3"])
     xs = np.arange(len(ant_all))
@@ -1032,7 +1080,7 @@ def plot_antenna_gain_stats_grid(npz_path: Path, out: Path, antennas: Optional[L
         marker = markers[si % len(markers)]
         label_base = str(int(stokes))
         for metric, ax, _title in axes_map:
-            ax.plot(xs, stats[int(stokes)]["real"][metric], marker=marker, ms=5, color=color, linestyle="-", label=f"{label_base}-re", markerfacecolor=color)
+            ax.plot(xs, stats[int(stokes)]["real"][metric], marker=marker, ms=5, color=color, linestyle="-", label=f"{label_base}-re-1", markerfacecolor=color)
             ax.plot(xs, stats[int(stokes)]["imag"][metric], marker=marker, ms=5, color=color, linestyle="--", label=f"{label_base}-im", markerfacecolor="white")
     for metric, ax, title in axes_map:
         all_vals = []
@@ -1040,10 +1088,14 @@ def plot_antenna_gain_stats_grid(npz_path: Path, out: Path, antennas: Optional[L
             for comp in ("real", "imag"):
                 vals = stats[int(stokes)][comp][metric]
                 all_vals.extend(vals[np.isfinite(vals)])
+        if metric in {"mean", "skew", "kurt"}:
+            all_vals.append(0.0)
         if all_vals:
             vmin, vmax = float(np.min(all_vals)), float(np.max(all_vals))
             pad = 0.05 * (vmax - vmin) if vmax > vmin else 1.0
             ax.set_ylim(vmin - pad, vmax + pad)
+        if metric in {"mean", "skew", "kurt"}:
+            ax.axhline(0.0, color="black", linestyle="--", linewidth=2)
         ax.set_xlim(-0.5, len(ant_all) - 0.5)
         ax.set_xticks(xs)
         ax.set_xticklabels(xticklabels)
@@ -1060,7 +1112,10 @@ def plot_antenna_gain_stats_grid(npz_path: Path, out: Path, antennas: Optional[L
     axes[1, 0].set_xlabel("Antenna")
     axes[1, 1].set_xlabel("Antenna")
     scan_label = str(int(scans[0])) if scans.size == 1 else "allscans"
-    fig.suptitle(f"Per-antenna Gain Statistics (Scan {scan_label})", fontsize=12)
+    header = gain_product_header(z)
+    table_name = Path(str(header.get("input_table", "gain table"))).name or "gain table"
+    adjust_text = " | adjust-mean" if adjust_mean else ""
+    fig.suptitle(f"Gain Table: {table_name} | Scan: {scan_label} [%]{adjust_text}", fontsize=12)
     out.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out, dpi=DEFAULT_PLOT_DPI)
     plt.close(fig)
@@ -1081,6 +1136,31 @@ def normal_ks_d(vals: np.ndarray) -> float:
     return float(max(np.max(np.abs(empirical_hi - cdf)), np.max(np.abs(cdf - empirical_lo))))
 
 
+def two_sample_ks_d(x: np.ndarray, y: np.ndarray) -> float:
+    x = np.sort(np.asarray(x, dtype=float)[np.isfinite(x)])
+    y = np.sort(np.asarray(y, dtype=float)[np.isfinite(y)])
+    if x.size < 2 or y.size < 2:
+        return np.nan
+    pooled = np.concatenate([x, y])
+    cdf_x = np.searchsorted(x, pooled, side="right") / float(x.size)
+    cdf_y = np.searchsorted(y, pooled, side="right") / float(y.size)
+    return float(np.max(np.abs(cdf_x - cdf_y)))
+
+
+def simulated_gaussian_ks_percent(n_sample: float, seed: int, realizations: int = 128) -> float:
+    n = int(round(float(n_sample))) if np.isfinite(n_sample) else 0
+    if n < 2:
+        return np.nan
+    rng = np.random.default_rng(seed)
+    values = [
+        two_sample_ks_d(rng.normal(size=n), rng.normal(size=n))
+        for _ in range(max(1, int(realizations)))
+    ]
+    finite = np.asarray(values, dtype=float)
+    finite = finite[np.isfinite(finite)]
+    return float(np.mean(finite) * 100.0) if finite.size else np.nan
+
+
 def plot_antenna_gain_ks_grid(npz_path: Path, out: Path, antennas: Optional[List[int]]) -> None:
     z = load_npz(npz_path)
     if "ks" in z:
@@ -1094,6 +1174,7 @@ def plot_antenna_gain_ks_grid(npz_path: Path, out: Path, antennas: Optional[List
         ant_lookup = {int(ant): idx for idx, ant in enumerate(stored_ants)}
         comp_lookup = {comp: component_index(z["components"], comp) for comp in ("real", "imag")}
         d_idx = metric_index(z["metrics"], "d_statistic")
+        n_idx = metric_index(z["metrics"], "n_sample")
         scans = z["scan_numbers"].astype(int)
     else:
         required = {"antenna", "stokes", "real", "imag"}
@@ -1105,39 +1186,74 @@ def plot_antenna_gain_ks_grid(npz_path: Path, out: Path, antennas: Optional[List
         ant_lookup = {}
         comp_lookup = {}
         d_idx = None
+        n_idx = None
         scans = np.unique(z["scan"].astype(int)) if "scan" in z else np.array([])
     if ant_all.size == 0 or stokes_all.size == 0:
         raise ValueError("No antennas/stokes available for KS grid.")
     xs = np.arange(len(ant_all))
-    fig, ax = plt.subplots(figsize=(10, 6))
+    fig, ax = plt.subplots(figsize=(10, 7.5))
     markers = ["o", "s", "^", "D"]
     colors = ["C0", "C1", "C2", "C3", "C4", "C5"]
+    sim_linestyles = ["--", "-.", (0, (5, 2)), (0, (2, 2))]
+    y_values: List[float] = []
     for si, stokes in enumerate(stokes_all):
         marker = markers[si % len(markers)]
-        for ci, comp in enumerate(("real", "imag")):
+        for comp_pos, comp in enumerate(("real", "imag")):
             vals = np.full(len(ant_all), np.nan)
+            sample_counts: List[float] = []
             for ai, ant in enumerate(ant_all):
                 if "ks" in z:
-                    ci = comp_lookup[comp]
-                    if ci is not None and d_idx is not None:
-                        product_vals = z["ks"].astype(float)[:, ant_lookup[int(ant)], si, ci, d_idx]
+                    comp_idx = comp_lookup[comp]
+                    if comp_idx is not None and d_idx is not None:
+                        product_vals = z["ks"].astype(float)[:, ant_lookup[int(ant)], si, comp_idx, d_idx]
                         vals[ai] = float(np.nanmean(product_vals)) if np.any(np.isfinite(product_vals)) else np.nan
+                        if "sample_count" in z:
+                            count_vals = z["sample_count"].astype(float)[:, ant_lookup[int(ant)], si, comp_idx]
+                        elif n_idx is not None:
+                            count_vals = z["ks"].astype(float)[:, ant_lookup[int(ant)], si, comp_idx, n_idx]
+                        else:
+                            count_vals = np.array([])
+                        if count_vals.size and np.any(np.isfinite(count_vals)):
+                            sample_counts.append(float(np.nanmean(count_vals)))
                 else:
-                    d = normal_ks_d(finite_gain_values(z, int(ant), int(stokes), comp))
+                    sample_vals = finite_gain_values(z, int(ant), int(stokes), comp)
+                    d = normal_ks_d(sample_vals)
                     vals[ai] = d * 100.0 if np.isfinite(d) else np.nan
-            color = colors[(2 * si + ci) % len(colors)]
+                    if sample_vals.size:
+                            sample_counts.append(float(sample_vals.size))
+            color = colors[(2 * si + comp_pos) % len(colors)]
             ax.plot(xs, vals, color=color, linestyle="-", marker=marker, label=f"{int(stokes)}-{'re' if comp == 'real' else 'im'}", markerfacecolor=color if comp == "real" else "white")
+            y_values.extend(float(v) for v in vals[np.isfinite(vals)])
+            finite_counts = np.asarray(sample_counts, dtype=float)
+            finite_counts = finite_counts[np.isfinite(finite_counts)]
+            if finite_counts.size:
+                sim_ref = simulated_gaussian_ks_percent(
+                    float(np.nanmedian(finite_counts)),
+                    seed=20260729 + 101 * int(stokes) + 1009 * comp_pos,
+                )
+                if np.isfinite(sim_ref):
+                    sim_label = f"{int(stokes)}-{'re' if comp == 'real' else 'im'} sim"
+                    style = sim_linestyles[(2 * si + comp_pos) % len(sim_linestyles)]
+                    ax.hlines(sim_ref, xs[0] - 0.35, xs[-1] + 0.35, color=color, linestyle=style, linewidth=1.0, label=sim_label, zorder=5)
+                    y_values.append(float(sim_ref))
     ax.set_xticks(xs)
     ax.set_xticklabels([str(a) for a in ant_all])
+    ax.set_xlim(-0.5, len(ant_all) - 0.5)
     ax.set_xlabel("Antenna", fontsize=14)
     ax.set_ylabel("KS-statistic [%]", fontsize=14)
     scan_label = str(int(scans[0])) if scans.size == 1 else "allscans"
-    ax.set_title(f"Antenna Gain KS Statistics (Scan {scan_label})", fontsize=14)
+    header = gain_product_header(z)
+    table_name = Path(str(header.get("input_table", "gain table"))).name or "gain table"
+    fig.suptitle(f"Gain Table: {table_name} | Scan: {scan_label} [%]", fontsize=12)
+    if y_values:
+        ymax = float(np.nanmax(np.asarray(y_values, dtype=float)))
+        upper = ymax * 1.08 if ymax > 0 else ymax + 1.0
+        ax.set_ylim(0.0, upper)
     ax.grid(True, ls=":")
-    ax.legend(fontsize=12, ncol=2)
+    ax.legend(fontsize=10, ncol=4, loc="lower center", bbox_to_anchor=(0.5, 0.03), frameon=True)
     ax.tick_params(axis="both", labelsize=12)
     out.parent.mkdir(parents=True, exist_ok=True)
-    fig.tight_layout()
+    fig.subplots_adjust(left=0.07, right=0.985, bottom=0.105, top=0.92)
     fig.savefig(out, dpi=DEFAULT_PLOT_DPI)
     plt.close(fig)
     print(f"Wrote plot: {out}")
@@ -1403,6 +1519,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--gain-colormap", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--gain-hist", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--antenna-plot", action="store_true", help=argparse.SUPPRESS)
+    p.add_argument("--adjust-mean", action="store_true", help="For -pmode stats, divide real samples by the all-antenna mean and subtract the all-antenna mean from imaginary samples for each stokes. Default: false.")
     p.add_argument("--hist-bins", type=int, default=64, help="Gain histogram bin count. Default: 64.")
     p.add_argument("--hist-range", default=None, help="Optional gain histogram value range as min,max in percent.")
     p.add_argument("--s2-thr", type=float, default=0.9, help="S2 threshold for self-correlation reference markers. Default: 0.9.")
@@ -1440,7 +1557,7 @@ def main() -> None:
                 continue
             for label, npz in products:
                 t0 = time.perf_counter()
-                out = output_path(plot_dir, task, mode, label, args.format)
+                out = stats_output_path(plot_dir, mode, label, args.format, args.adjust_mean) if task == "stats" else output_path(plot_dir, task, mode, label, args.format)
                 print(f"START plot {task} mode={mode} scan={label}")
                 if task == "gain_colormap":
                     plot_gain_colormap(npz, out, ants, mode)
@@ -1449,7 +1566,7 @@ def main() -> None:
                 elif task == "antenna":
                     plot_single_antenna_gain_products(npz, out, ants, mode)
                 elif task == "stats":
-                    plot_antenna_gain_stats_grid(npz, out, ants)
+                    plot_antenna_gain_stats_grid(npz, out, ants, args.adjust_mean)
                 elif task == "ks":
                     plot_antenna_gain_ks_grid(npz, out, ants)
                 elif task == "self_corr_colormap":
