@@ -47,12 +47,15 @@ script/gdp-stats --smode all  [run gains, gain-colormap, stats, KS, and self-cor
 script/gdp-stats --smode cross-corr  [record the cross-corr placeholder task]
 script/gdp-stats --setup-file project-a-setup.json --smode stats  [use a named setup file from the active runtime directory]
 script/gdp-stats --smode stats --csv  [compute statistics from the saved input and also write CSV]
-script/gdp-stats --mode gain --smode gain-colormap  [create gains NPZ and save Real-1/Imag percent colormap plots with elapsed seconds on the gain-mode y axis]
+script/gdp-stats --mode gain --smode gain-colormap --range 20  [create gains NPZ and save Real-1/Imag percent colormap plots saturated at +/-20 percent]
+script/gdp-stats --mode bandpass --smode gain-colormap -pchans "[16,64]" --range 20  [plot only channels 16 through 63, saturating the colormap at +/-20 percent]
+script/gdp-stats --mode bandpass --smode stats --use-flags --flag-chans "[0,3000]"  [use a shorter 3000-channel FLAG axis and treat all channels outside 0 through 2999 as flagged]
 script/gdp-stats --smode stats --combine-scans  [combine scans into one allscans stats product]
 script/gdp-stats /path/to/table.b --mode bandpass --bchan 0 --echan 128 --smode gains,stats  [process selected bandpass channels and save gains plus stats]
 script/gdp-stats --scan 1,2 --antennas 0,1,2 --smode all  [run every implemented stats subtask for selected antennas]
-script/gdp-stats --antennas "(0,9)" --smode stats  [use antennas 0 through 9 inclusively]
-script/gdp-stats --antennas 1 2 3 4 13 --smode stats  [use only antennas 1, 2, 3, 4, and 13]</code></pre>
+script/gdp-stats --antennas [0,9] --smode stats  [use antennas 0 through 9 inclusively]
+script/gdp-stats --antennas 1 2 3 4 13 --smode stats  [use only antennas 1, 2, 3, 4, and 13]
+script/gdp-stats --smode all --antenna-flag 3,4  [force antennas 3 and 4 to be treated as flagged/non-finite while keeping them in product axes]</code></pre>
     </section>
 
     <section>
@@ -67,13 +70,17 @@ script/gdp-stats --antennas 1 2 3 4 13 --smode stats  [use only antennas 1, 2, 3
         <tr><td><code>--mode {auto,gain,bandpass}</code></td><td>Statistics mode. Default: <code>auto</code>.</td></tr>
         <tr><td><code>--scan LIST</code></td><td>Comma-separated scans. Default: all scans.</td></tr>
         <tr><td><code>--combine-scans</code></td><td>Combine selected scans into one <code>allscans</code>-style product. Default: false, so GDP writes one product per scan.</td></tr>
-        <tr><td><code>--antennas LIST</code></td><td>Antenna selection. Use <code>--antennas "(0,9)"</code> or <code>--antennas "[0,9]"</code> for an inclusive range. Use <code>--antennas 1,2,3,4,13</code> or <code>--antennas 1 2 3 4 13</code> for explicit antenna numbers. Default: all antennas.</td></tr>
-        <tr><td><code>--bchan INT</code></td><td>Start channel, inclusive.</td></tr>
-        <tr><td><code>--echan INT</code></td><td>End channel, exclusive.</td></tr>
+        <tr><td><code>--antennas LIST</code></td><td>Antenna selection. Use <code>--antennas [0,9]</code> for an inclusive range. Use <code>--antennas 2,3,4,31</code> or <code>--antennas 2 3 4 31</code> for explicit antenna numbers. Default: all antennas.</td></tr>
+        <tr><td><code>--antenna-flag LIST</code></td><td>Force selected antennas to be treated as flagged. Uses the same list/range syntax as <code>--antennas</code>. Forced antennas remain in output axes, but their gains, stats, KS, and correlation samples are saved as flagged or non-finite.</td></tr>
+        <tr><td><code>--bchan INT</code></td><td>Start channel, inclusive. In bandpass mode, when both <code>--bchan</code> and <code>--echan</code> are supplied, default product names include <code>chan_&lt;bchan&gt;_&lt;echan&gt;</code>.</td></tr>
+        <tr><td><code>--echan INT</code></td><td>End channel, exclusive. In bandpass mode, when both <code>--bchan</code> and <code>--echan</code> are supplied, default product names include <code>chan_&lt;bchan&gt;_&lt;echan&gt;</code>.</td></tr>
+        <tr><td><code>-pchans [START,END]</code></td><td>Plot-only channel window for <code>--smode gain-colormap</code>. The start channel is inclusive and the end channel is exclusive. The gains NPZ is still created from the normal <code>--bchan</code>/<code>--echan</code> selection, but the colormap display and subplot-title mean/std/skew/kurtosis use only the selected plot channels. Default plot names append <code>pchan_&lt;start&gt;_&lt;end&gt;</code>.</td></tr>
+        <tr><td><code>--range FLOAT</code></td><td>Colormap saturation half-range in percent for gain or bandpass <code>--smode gain-colormap</code>. For example, <code>--range 20</code> uses <code>-20</code> to <code>+20</code> percent. Values are rounded up to a multiple of 5, with seven colorbar labels that include <code>0</code> and use no decimal places.</td></tr>
+        <tr><td><code>--flag-chans [START,END]</code></td><td>Use when <code>--use-flags</code> is enabled and the table <code>FLAG</code> channel axis is shorter than the data channel axis. This declares which original data channels the shorter FLAG array covers. Channels outside this window are treated as flagged. Example: <code>--flag-chans "[0,3000]"</code> means FLAG covers channels 0 through 2999.</td></tr>
         <tr><td><code>--use-flags</code></td><td>Apply the CASA <code>FLAG</code> mask. Default: disabled, so flags are ignored. If this option is used and the selected table has no <code>FLAG</code> column, GDP prints a warning and stops.</td></tr>
         <tr class="smode-option"><td><code>--smode MODE[,MODE...]</code></td><td>Select stats products. Supported modes are <code>gains</code>, <code>gain-colormap</code>, <code>stats</code>, <code>ks</code>, <code>self-corr</code>, <code>all</code>, and <code>cross-corr</code>. Modes may be comma or space separated.</td></tr>
         <tr class="smode-option"><td><code>gains</code></td><td>Save selected gain/bandpass samples as a GDP gains NPZ product.</td></tr>
-        <tr class="smode-option"><td><code>gain-colormap</code></td><td>Save the gains NPZ if needed and also save AntStat-style Real-1 and Imag percent colormap plots. Gain-mode plots use elapsed seconds from <code>TIME</code> and <code>INTERVAL</code>, show time-row numbers on the right-side axis of the right column, suppress duplicate left-side time labels there, include <code>Delta t</code> in the title, and use a 4:3 figure aspect ratio. The percent colorbar shows one-decimal tick labels on the left side. Bandpass plots use channel.</td></tr>
+        <tr class="smode-option"><td><code>gain-colormap</code></td><td>Save the gains NPZ if needed and also save AntStat-style Real-1 and Imag percent colormap plots. Gain-mode plots use elapsed seconds from <code>TIME</code> and <code>INTERVAL</code>, show time-row numbers on the right-side axis of the right column, suppress duplicate left-side time labels there, include <code>Delta t</code> in the title, and use a 4:3 figure aspect ratio. Bandpass plots show <code>nu</code> in whole MHz on the left axis of left-column panels, preserve channel order from bottom upward, show channel numbers on the right axis of right-column panels, no duplicate left-axis labels on right-column panels, and show <code>Delta nu</code> in kHz with two decimal places in the title. Subplot mean/std/skew/kurtosis values are shown to one decimal place. The colorbar is symmetric from negative to positive saturation range and shows seven integer labels at multiples of 5 including <code>0</code>.</td></tr>
         <tr class="smode-option"><td><code>stats</code></td><td>Compute AntStat-style per-antenna mean, std, skew, kurtosis, median, MAD, min, and max statistics. This remains the default when no subtask is selected.</td></tr>
         <tr class="smode-option"><td><code>ks</code></td><td>Compute AntStat-style per-antenna fitted-normal KS D-statistics.</td></tr>
         <tr class="smode-option"><td><code>self-corr</code></td><td>Compute self structure-function correlation curves and save a long-format NPZ product. Antenna/stokes/component series with fewer than two finite unflagged samples are skipped and saved as NaN lag bins.</td></tr>
@@ -98,22 +105,22 @@ script/gdp-stats --antennas 1 2 3 4 13 --smode stats  [use only antennas 1, 2, 3
 
     <section>
       <h2>Subtasks and Logs</h2>
-      <p>Before products are created, <code>gdp-stats</code> checks any requested <code>--scan</code> values against the selected gain or bandpass table. If a scan is absent, it prints a text error with the missing and available scans and stops. Each subtask prints a start/done message with elapsed time and writes the same messages to a timestamped log file under the configured <code>logs</code> runtime directory.</p>
+      <p>Before products are created, <code>gdp-stats</code> checks any requested <code>--scan</code> values against the selected gain or bandpass table. If a scan is absent, it prints a text error with the missing and available scans and stops. Channel options such as <code>--bchan</code>, <code>--echan</code>, <code>-pchans</code>, and <code>--flag-chans</code> are valid only in bandpass mode; in gain mode GDP prints a text error and stops. Each subtask prints a start/done message with elapsed time and writes the same messages to a timestamped log file under the configured <code>logs</code> runtime directory.</p>
     </section>
 
     <section>
       <h2>Standard Product Names</h2>
       <table>
         <tr><th>Subtask</th><th>Default filename</th><th>Format page</th></tr>
-        <tr><td><code>--smode gains</code></td><td><code>gdp-gains-&lt;mode&gt;-&lt;scan&gt;.npz</code></td><td><a href="gdp-product-gains.html">gains NPZ</a></td></tr>
-        <tr><td><code>--smode stats</code></td><td><code>gdp-stats-&lt;mode&gt;-&lt;scan&gt;.npz</code></td><td><a href="gdp-product-stats.html">stats NPZ</a></td></tr>
-        <tr><td><code>--smode ks</code></td><td><code>gdp-ks-&lt;mode&gt;-&lt;scan&gt;.npz</code></td><td><a href="gdp-product-ks.html">KS NPZ</a></td></tr>
-        <tr><td><code>--smode self-corr</code></td><td><code>gdp-self-corr-&lt;mode&gt;-&lt;scan&gt;.npz</code></td><td><a href="gdp-product-self-corr.html">self-corr NPZ</a></td></tr>
+        <tr><td><code>--smode gains</code></td><td><code>gdp-gains-&lt;mode&gt;-&lt;scan&gt;[-chan_&lt;bchan&gt;_&lt;echan&gt;].npz</code></td><td><a href="gdp-product-gains.html">gains NPZ</a></td></tr>
+        <tr><td><code>--smode stats</code></td><td><code>gdp-stats-&lt;mode&gt;-&lt;scan&gt;[-chan_&lt;bchan&gt;_&lt;echan&gt;].npz</code></td><td><a href="gdp-product-stats.html">stats NPZ</a></td></tr>
+        <tr><td><code>--smode ks</code></td><td><code>gdp-ks-&lt;mode&gt;-&lt;scan&gt;[-chan_&lt;bchan&gt;_&lt;echan&gt;].npz</code></td><td><a href="gdp-product-ks.html">KS NPZ</a></td></tr>
+        <tr><td><code>--smode self-corr</code></td><td><code>gdp-self-corr-&lt;mode&gt;-&lt;scan&gt;[-chan_&lt;bchan&gt;_&lt;echan&gt;].npz</code></td><td><a href="gdp-product-self-corr.html">self-corr NPZ</a></td></tr>
         <tr><td><code>--smode cross-corr</code></td><td>placeholder only</td><td><a href="gdp-product-cross-corr.html">planned cross-corr NPZ</a></td></tr>
-        <tr><td><code>--smode gain-colormap</code></td><td><code>gdp-plot-gain-colormap-&lt;mode&gt;-&lt;scan&gt;.png</code></td><td>optional plot under <code>plots/png</code></td></tr>
-        <tr><td><code>gdp-plot --gain-hist</code></td><td><code>gdp-plot-gain-hist-&lt;mode&gt;-&lt;scan&gt;.png</code></td><td>plot from <a href="gdp-product-gains.html">gains NPZ</a></td></tr>
+        <tr><td><code>--smode gain-colormap</code></td><td><code>gdp-plot-gain-colormap-&lt;mode&gt;-&lt;scan&gt;[-chan_&lt;bchan&gt;_&lt;echan&gt;][-pchan_&lt;start&gt;_&lt;end&gt;].png</code></td><td>optional plot under <code>plots/png</code></td></tr>
+        <tr><td><code>gdp-plot --gain-hist</code></td><td><code>gdp-plot-gain-hist-&lt;mode&gt;-&lt;scan&gt;[-chan_&lt;bchan&gt;_&lt;echan&gt;].png</code></td><td>plot from <a href="gdp-product-gains.html">gains NPZ</a></td></tr>
       </table>
-      <p>The <code>&lt;scan&gt;</code> field is <code>scan1</code>, <code>scan2</code>, etc. by default. With <code>--combine-scans</code>, the field is <code>allscans</code> when no scan list is supplied, or <code>scan1-2</code>/<code>scan5</code> style when <code>--scan</code> is supplied.</p>
+      <p>The <code>&lt;scan&gt;</code> field is <code>scan1</code>, <code>scan2</code>, etc. by default. With <code>--combine-scans</code>, the field is <code>allscans</code> when no scan list is supplied, or <code>scan1-2</code>/<code>scan5</code> style when <code>--scan</code> is supplied. In bandpass mode, if both <code>--bchan</code> and <code>--echan</code> are supplied, default filenames append <code>-chan_&lt;bchan&gt;_&lt;echan&gt;</code>; for example <code>gdp-gains-bandpass-scan2-chan_0_128.npz</code>.</p>
     </section>
 
     <section>
@@ -133,7 +140,7 @@ script/gdp-stats --antennas 1 2 3 4 13 --smode stats  [use only antennas 1, 2, 3
       <h2 id="sample-plots">Sample Plots</h2>
       <table>
         <tr><th>Plot Type</th><th>Sample</th><th>Command</th><th>Description</th></tr>
-        <tr><td>Gain colormap</td><td><a href="sample_plots/sample-gain-colormap-gain-scan2.png">sample-gain-colormap-gain-scan2.png</a></td><td><code>script/gdp-plot --mode gain --scan 2 -pmode gain-colormap</code></td><td>Real-1 and Imag gain percent colormaps by antenna and elapsed time.</td></tr>
+        <tr><td>Gain colormap</td><td><a href="sample_plots/sample-gain-colormap-gain-scan2.png">sample-gain-colormap-gain-scan2.png</a></td><td><code>script/gdp-plot --mode gain --scan 2 -pmode gain-colormap</code></td><td>Real-1 and Imag gain percent colormaps by antenna and elapsed time; bandpass colormaps use nu in MHz and channel-number axes.</td></tr>
         <tr><td>Gain histogram</td><td><a href="sample_plots/sample-gain-hist-gain-scan2.png">sample-gain-hist-gain-scan2.png</a></td><td><code>script/gdp-plot --mode gain --scan 2 -pmode gain-hist</code></td><td>AntStat-style per-antenna gain distribution panels with summary statistics.</td></tr>
         <tr><td>Antenna time series</td><td><a href="sample_plots/sample-antenna-gain-scan2-ant2.png">sample-antenna-gain-scan2-ant2.png</a></td><td><code>script/gdp-plot --mode gain --scan 2 -pmode antenna 2</code></td><td>Single-antenna Real-1 and Imag gain traces with Stokes shown side by side.</td></tr>
         <tr><td>Statistics grid</td><td><a href="sample_plots/sample-stats-gain-scan2.png">sample-stats-gain-scan2.png</a></td><td><code>script/gdp-plot --mode gain --scan 2 -pmode stats</code></td><td>Per-antenna mean, standard deviation, skewness, and kurtosis grid.</td></tr>

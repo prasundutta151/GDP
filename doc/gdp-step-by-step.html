@@ -91,8 +91,8 @@ antennas: [...]</code></pre>
       <h2>3. Generate Stats And KS Products</h2>
       <p>Run these in a CASA-enabled shell because table reading uses <code>casatools</code>.</p>
       <pre><code>casa --nogui --nologger --nologfile --log2term -c script/gdp-stats --mode gain --scan 2 --smode stats,ks</code></pre>
-      <pre><code>casa --nogui --nologger --nologfile --log2term -c script/gdp-stats --mode gain --scan 2 --antennas "(0,9)" --smode stats,ks
-casa --nogui --nologger --nologfile --log2term -c script/gdp-stats --mode gain --scan 2 --antennas 1 2 3 4 13 --smode stats</code></pre>
+      <pre><code>casa --nogui --nologger --nologfile --log2term -c script/gdp-stats --mode gain --scan 2 --antennas [0,9] --smode stats,ks
+casa --nogui --nologger --nologfile --log2term -c script/gdp-stats --mode gain --scan 2 --antennas 2,3,4,31 --smode stats</code></pre>
       <p>Expected runtime output pattern:</p>
       <pre><code>START stats scan2
 Wrote stats NPZ: .../data-product/stats/npz/gdp-stats-gain-scan2.npz
@@ -120,8 +120,10 @@ DONE  self-corr scan2 elapsed_sec=...</code></pre>
       <p>Once products exist, plotting can run from the normal shell. Use <code>--recompute</code> only when the shell can also run <code>gdp-stats</code> with CASA access.</p>
       <pre><code>script/gdp-plot --mode gain --scan 2 -pmode stats,ks
 script/gdp-plot --mode gain --scan 2 -pmode self-corr-colormap
-script/gdp-plot --mode gain --scan 2 -pmode gain-colormap,gain-hist
-script/gdp-plot --mode gain --scan 2 -pmode antenna 2</code></pre>
+script/gdp-plot --mode gain --scan 2 -pmode gain-colormap,gain-hist --range 20
+script/gdp-plot --mode gain --scan 2 -pmode antenna 2
+script/gdp-plot --mode bandpass --scan 2 --bchan 0 --echan 128 -pmode gain-colormap -pchans "[16,64]" --range 20
+script/gdp-stats --mode bandpass --scan 2 --smode stats --use-flags --flag-chans "[0,3000]"</code></pre>
       <p>Expected runtime output pattern:</p>
       <pre><code>Using existing gains NPZ for stats: .../gdp-gains-gain-scan2.npz
 START plot stats mode=gain scan=scan2
@@ -132,7 +134,7 @@ DONE  plot stats elapsed_sec=...</code></pre>
         <tr><td>Stats</td><td><a href="sample_plots/sample-stats-gain-scan2.png">sample-stats-gain-scan2.png</a></td><td>All selected antennas appear on the x-axis.</td></tr>
         <tr><td>KS</td><td><a href="sample_plots/sample-ks-gain-scan2.png">sample-ks-gain-scan2.png</a></td><td>D-statistic trends are shown per antenna and Stokes/component.</td></tr>
         <tr><td>Self-corr colormap</td><td><a href="sample_plots/sample-self-corr-colormap-gain-scan2.png">sample-self-corr-colormap-gain-scan2.png</a></td><td>White columns or cells correspond to NaN/insufficient samples.</td></tr>
-        <tr><td>Gain colormap</td><td><a href="sample_plots/sample-gain-colormap-gain-scan2.png">sample-gain-colormap-gain-scan2.png</a></td><td>Real-1 and Imag panels show antenna/time gain structure.</td></tr>
+        <tr><td>Gain colormap</td><td><a href="sample_plots/sample-gain-colormap-gain-scan2.png">sample-gain-colormap-gain-scan2.png</a></td><td>Real-1 and Imag panels show antenna/time gain structure; bandpass versions use whole-MHz nu labels and bottom-up channel indices.</td></tr>
       </table>
     </section>
 
@@ -172,7 +174,7 @@ Version archive: .../gdp-...tgz</code></pre>
       <h2 id="sample-plots">Sample Plots</h2>
       <table>
         <tr><th>Plot Type</th><th>Sample</th><th>Command</th><th>Description</th></tr>
-        <tr><td>Gain colormap</td><td><a href="sample_plots/sample-gain-colormap-gain-scan2.png">sample-gain-colormap-gain-scan2.png</a></td><td><code>script/gdp-plot --mode gain --scan 2 -pmode gain-colormap</code></td><td>Real-1 and Imag gain percent colormaps by antenna and elapsed time.</td></tr>
+        <tr><td>Gain colormap</td><td><a href="sample_plots/sample-gain-colormap-gain-scan2.png">sample-gain-colormap-gain-scan2.png</a></td><td><code>script/gdp-plot --mode gain --scan 2 -pmode gain-colormap</code></td><td>Real-1 and Imag gain percent colormaps by antenna and elapsed time; bandpass colormaps use whole-MHz nu labels and bottom-up channel-number axes.</td></tr>
         <tr><td>Gain histogram</td><td><a href="sample_plots/sample-gain-hist-gain-scan2.png">sample-gain-hist-gain-scan2.png</a></td><td><code>script/gdp-plot --mode gain --scan 2 -pmode gain-hist</code></td><td>AntStat-style per-antenna gain distribution panels with summary statistics.</td></tr>
         <tr><td>Antenna time series</td><td><a href="sample_plots/sample-antenna-gain-scan2-ant2.png">sample-antenna-gain-scan2-ant2.png</a></td><td><code>script/gdp-plot --mode gain --scan 2 -pmode antenna 2</code></td><td>Single-antenna Real-1 and Imag gain traces with Stokes shown side by side.</td></tr>
         <tr><td>Statistics grid</td><td><a href="sample_plots/sample-stats-gain-scan2.png">sample-stats-gain-scan2.png</a></td><td><code>script/gdp-plot --mode gain --scan 2 -pmode stats</code></td><td>Per-antenna mean, standard deviation, skewness, and kurtosis grid.</td></tr>

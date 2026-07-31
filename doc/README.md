@@ -1,6 +1,6 @@
 # GDP Documentation
 
-GDP version: `0.1.0`
+GDP version: `0.1.5`
 
 GDP (Gain Diagnostic Product) is being developed as a command-line toolkit for
 gain and bandpass diagnostics, statistics products, plotting, diagnosis, and
@@ -28,12 +28,13 @@ flag-product generation.
   MeasurementSet tables, and provides `--git-push` release/git workflow
   support.
 - `script/gdp-stats`: computes gain/bandpass products including raw gains,
-  antenna-wise statistics, and KS product schema, with optional CSV output.
-  By default it writes one product per scan; use `--combine-scans` for one
-  combined `allscans` product.
+  antenna-wise statistics, KS products, and self-correlation products, with
+  optional CSV output. By default it writes one product per scan; use
+  `--combine-scans` for one combined `allscans` product.
 - `script/gdp-plot`: plots GDP NPZ products and runs `gdp-stats` first when a
   requested product is missing. By default it writes one plot per scan; use
-  `--combine-scans` for one combined `allscans` plot.
+  `--combine-scans` for one combined `allscans` plot, or `--npz-path` to plot
+  directly from a selected NPZ file.
 - `script/gdp-plan-run`: reads a GDP plan file and runs GDP command intents
   with internal variable substitution.
 
@@ -88,7 +89,9 @@ Compute GDP statistics:
 ```bash
 script/gdp-stats --smode stats,ks
 script/gdp-stats --smode all
-script/gdp-stats --antennas "(0,9)" --smode stats
+script/gdp-stats --mode gain --smode gain-colormap --range 20
+script/gdp-stats --mode bandpass --smode gain-colormap -pchans "[16,64]" --range 20
+script/gdp-stats --antennas [0,9] --smode stats
 script/gdp-stats --antennas 1 2 3 4 13 --smode stats
 script/gdp-stats --smode stats --csv
 ```
@@ -99,10 +102,17 @@ Plot AntStat-style gain histograms from the gains NPZ product:
 script/gdp-plot --mode gain -pmode gain-hist
 ```
 
+Plot a selected NPZ directly:
+
+```bash
+script/gdp-plot --mode gain -pmode gain-colormap --npz-path /path/to/gdp-gains-gain-scan2.npz
+```
+
 Plot selected antennas as AntStat-style gain-time plots with Stokes side by side:
 
 ```bash
 script/gdp-plot --mode gain -pmode antenna 0,1,2
+script/gdp-plot --mode bandpass -pmode antenna 0,1,2 --bchan 0 --echan 128
 ```
 
 Read table date and channel-width metadata as JSON:

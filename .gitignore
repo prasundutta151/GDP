@@ -53,6 +53,9 @@ rundir/*
 __pycache__/
 *.py[cod]
 
+# CASA runtime logs
+casa-*.log
+
 # Local OS/editor files
 .DS_Store
 *.swp

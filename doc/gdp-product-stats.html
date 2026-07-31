@@ -35,14 +35,14 @@
     </section>
     <section>
       <h2>Standard Name</h2>
-      <p><code>gdp-stats-&lt;mode&gt;-&lt;scan&gt;.npz</code></p>
-      <p>Example: <code>gdp-stats-gain-scan1.npz</code>. With <code>--combine-scans</code>: <code>gdp-stats-gain-allscans.npz</code>.</p>
+      <p><code>gdp-stats-&lt;mode&gt;-&lt;scan&gt;[-chan_&lt;bchan&gt;_&lt;echan&gt;].npz</code></p>
+      <p>Example: <code>gdp-stats-gain-scan1.npz</code>. With <code>--combine-scans</code>: <code>gdp-stats-gain-allscans.npz</code>. In bandpass mode with <code>--bchan 0 --echan 128</code>: <code>gdp-stats-bandpass-scan1-chan_0_128.npz</code>.</p>
     </section>
     <section>
       <h2>Arrays</h2>
       <table>
         <tr><th>Array</th><th>Description</th></tr>
-        <tr><td><code>header_json</code></td><td>JSON metadata with format, version, input table, mode, data column, flag policy, mean-subtraction policy, channel selection, and axis descriptions.</td></tr>
+        <tr><td><code>header_json</code></td><td>JSON metadata with format, version, input table, mode, data column, flag policy, shorter-FLAG channel coverage from <code>--flag-chans</code>, forced antenna flags from <code>--antenna-flag</code>, mean-subtraction policy, channel selection, and axis descriptions.</td></tr>
         <tr><td><code>scan_numbers</code></td><td>Scan axis values.</td></tr>
         <tr><td><code>antennas</code></td><td>Antenna axis values.</td></tr>
         <tr><td><code>stokes</code></td><td>Stokes/polarization indices.</td></tr>
@@ -78,7 +78,7 @@ real_i = list(components).index("real")
 mean_real = stats[:, :, :, real_i, mean_i]
 print("shape:", stats.shape)
 print("mean real percent by scan/antenna/stokes:", mean_real.shape)</code></pre>
-      <p>Reading this product gives a dense array with axes <code>(scan, antenna, stokes, component, metric)</code>. The axis-label arrays tell you which scan, antenna, Stokes, component, and metric each index represents. Use <code>valid_count</code>, <code>total_count</code>, and <code>flagged_count</code> to check how much data contributed to each statistic.</p>
+      <p>Reading this product gives a dense array with axes <code>(scan, antenna, stokes, component, metric)</code>. The axis-label arrays tell you which scan, antenna, Stokes, component, and metric each index represents. Use <code>valid_count</code>, <code>total_count</code>, and <code>flagged_count</code> to check how much data contributed to each statistic. If <code>--antenna-flag</code> was used, those antennas stay in the antenna axis with zero finite samples and are listed in <code>header["antenna_flags"]</code>.</p>
     </section>
 
     <section class="sample-plots" aria-labelledby="sample-plots">

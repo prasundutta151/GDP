@@ -119,14 +119,14 @@ def normalize_list_text(text: object) -> str:
     return str(text)
 
 
-def parse_antenna_list(text: object) -> Optional[List[int]]:
+def parse_antenna_list(text: object, option_name: str = "--antenna") -> Optional[List[int]]:
     if text is None or normalize_list_text(text).strip() == "":
         return None
     value = normalize_list_text(text).strip()
     if (value.startswith("(") and value.endswith(")")) or (value.startswith("[") and value.endswith("]")):
         parts = [part.strip() for part in value[1:-1].split(",") if part.strip()]
         if len(parts) != 2:
-            raise SystemExit("--antenna range form must be two numbers, for example --antenna '(0,9)'")
+            raise SystemExit(f"{option_name} range form must be two numbers, for example {option_name} [0,9]")
         start, end = (int(parts[0]), int(parts[1]))
         step = 1 if end >= start else -1
         return list(range(start, end + step, step))
@@ -142,6 +142,21 @@ def parse_float_range(text: Optional[str]) -> Optional[Tuple[float, float]]:
     if parts[0] == parts[1]:
         raise ValueError("--hist-range min and max must differ.")
     return (min(parts), max(parts))
+
+
+def parse_channel_pair(text: object, option_name: str = "-pchans") -> Optional[Tuple[int, int]]:
+    if text is None or normalize_list_text(text).strip() == "":
+        return None
+    value = normalize_list_text(text).strip()
+    if (value.startswith("[") and value.endswith("]")) or (value.startswith("(") and value.endswith(")")):
+        value = value[1:-1]
+    parts = [part.strip() for part in value.replace(",", " ").split() if part.strip()]
+    if len(parts) != 2:
+        raise SystemExit(f"{option_name} must be two channel numbers, for example {option_name} '[0,128]'")
+    start, end = int(parts[0]), int(parts[1])
+    if end <= start:
+        raise SystemExit(f"{option_name} end channel must be greater than start channel.")
+    return start, end
 
 
 def parse_pmode(text: Optional[str]) -> List[str]:
@@ -173,6 +188,47 @@ def scan_text(scans: Optional[List[int]]) -> str:
     return "allscans" if scans is None else "scan" + "-".join(str(s) for s in scans)
 
 
+def channel_tag(mode: str, bchan: Optional[int], echan: Optional[int]) -> str:
+    if mode == "bandpass" and bchan is not None and echan is not None:
+        return f"chan_{int(bchan)}_{int(echan)}"
+    return ""
+
+
+def label_with_channel(scan_label: str, mode: str, bchan: Optional[int], echan: Optional[int]) -> str:
+    tag = channel_tag(mode, bchan, echan)
+    return f"{scan_label}-{tag}" if tag else scan_label
+
+
+def plot_channel_tag(pchans: Optional[Tuple[int, int]]) -> str:
+    if pchans is None:
+        return ""
+    return f"pchan_{int(pchans[0])}_{int(pchans[1])}"
+
+
+def label_with_plot_channels(scan_label: str, pchans: Optional[Tuple[int, int]]) -> str:
+    tag = plot_channel_tag(pchans)
+    return f"{scan_label}-{tag}" if tag else scan_label
+
+
+def validate_channel_options_for_mode(mode: str, args: argparse.Namespace, pchans: Optional[Tuple[int, int]]) -> None:
+    if mode != "gain":
+        return
+    used = []
+    if args.bchan is not None:
+        used.append("--bchan")
+    if args.echan is not None:
+        used.append("--echan")
+    if pchans is not None:
+        used.append("-pchans/--pchans")
+    if args.flag_chans is not None:
+        used.append("--flag-chans")
+    if used:
+        raise SystemExit(
+            "Channel options are valid only in bandpass mode. "
+            f"Remove {', '.join(used)} or run with --mode bandpass."
+        )
+
+
 def default_product_dir(product: str) -> Path:
     _, config_key, folder = PRODUCTS[product]
     configured = config_path(config_key)
@@ -181,19 +237,30 @@ def default_product_dir(product: str) -> Path:
     return project_root() / "rundir" / "data-product" / folder / "npz"
 
 
-def default_product_path(product: str, mode: str, scan_label: str) -> Path:
+def default_product_path(product: str, mode: str, scan_label: str, bchan: Optional[int] = None, echan: Optional[int] = None) -> Path:
     product_name, _, _ = PRODUCTS[product]
-    return default_product_dir(product) / f"gdp-{product_name.replace('_', '-')}-{mode}-{scan_label}.npz"
+    output_label = label_with_channel(scan_label, mode, bchan, echan)
+    return default_product_dir(product) / f"gdp-{product_name.replace('_', '-')}-{mode}-{output_label}.npz"
 
 
-def discover_scan_products(product: str, mode: str) -> List[Tuple[str, Path]]:
+def discover_scan_products(product: str, mode: str, bchan: Optional[int] = None, echan: Optional[int] = None) -> List[Tuple[str, Path]]:
     product_name, _, _ = PRODUCTS[product]
-    pattern = f"gdp-{product_name.replace('_', '-')}-{mode}-scan*.npz"
+    tag = channel_tag(mode, bchan, echan)
+    suffix = f"-{tag}" if tag else ""
+    pattern = f"gdp-{product_name.replace('_', '-')}-{mode}-scan*{suffix}.npz"
     found = []
     for path in sorted(default_product_dir(product).glob(pattern)):
         label = path.stem.split(f"gdp-{product_name.replace('_', '-')}-{mode}-", 1)[-1]
         found.append((label, path))
     return found
+
+
+def label_from_npz_path(path: Path, product: str, mode: str) -> str:
+    product_name, _, _ = PRODUCTS[product]
+    prefix = f"gdp-{product_name.replace('_', '-')}-{mode}-"
+    if path.stem.startswith(prefix):
+        return path.stem[len(prefix):]
+    return path.stem
 
 
 def default_plot_dir(fmt: str) -> Path:
@@ -219,7 +286,7 @@ def product_message_name(product: str) -> str:
 
 
 def ensure_npz(product: str, mode: str, args: argparse.Namespace, scans: Optional[List[int]], scan_label: str) -> Path:
-    path = default_product_path(product, mode, scan_label)
+    path = default_product_path(product, mode, scan_label, args.bchan, args.echan)
     if path.exists() and not args.recompute:
         print(f"Using existing {product_message_name(product)}: {path}")
         return path
@@ -262,6 +329,8 @@ def ensure_npz(product: str, mode: str, args: argparse.Namespace, scans: Optiona
         cmd.extend(["--bchan", str(args.bchan)])
     if args.echan is not None:
         cmd.extend(["--echan", str(args.echan)])
+    if args.flag_chans:
+        cmd.extend(["--flag-chans", normalize_list_text(args.flag_chans)])
     if args.use_flags:
         cmd.append("--use-flags")
 
@@ -276,16 +345,23 @@ def ensure_npz(product: str, mode: str, args: argparse.Namespace, scans: Optiona
 
 
 def ensure_npzs(product: str, mode: str, args: argparse.Namespace, scans: Optional[List[int]]) -> List[Tuple[str, Path]]:
+    if args.npz_path:
+        path = Path(args.npz_path).expanduser().resolve()
+        if not path.exists():
+            raise FileNotFoundError(f"--npz-path does not exist: {path}")
+        print(f"Using supplied NPZ for {product.replace('_', '-')}: {path}")
+        return [(label_from_npz_path(path, product, mode), path)]
+
     if args.combine_scans:
         label = scan_text(scans)
-        return [(label, ensure_npz(product, mode, args, scans, label))]
+        return [(label_with_channel(label, mode, args.bchan, args.echan), ensure_npz(product, mode, args, scans, label))]
 
     if scans is not None:
         labels = [f"scan{int(scan)}" for scan in scans]
+        existing = [(label_with_channel(label, mode, args.bchan, args.echan), default_product_path(product, mode, label, args.bchan, args.echan)) for label in labels]
     else:
-        labels = [label for label, _ in discover_scan_products(product, mode)]
-
-    existing = [(label, default_product_path(product, mode, label)) for label in labels]
+        existing = discover_scan_products(product, mode, args.bchan, args.echan)
+        labels = [label for label, _ in existing]
     if existing and not args.recompute and all(path.exists() for _, path in existing):
         for _, path in existing:
             print(f"Using existing {product_message_name(product)}: {path}")
@@ -318,6 +394,8 @@ def ensure_npzs(product: str, mode: str, args: argparse.Namespace, scans: Option
         cmd.extend(["--bchan", str(args.bchan)])
     if args.echan is not None:
         cmd.extend(["--echan", str(args.echan)])
+    if args.flag_chans:
+        cmd.extend(["--flag-chans", normalize_list_text(args.flag_chans)])
     if args.use_flags:
         cmd.append("--use-flags")
 
@@ -328,9 +406,9 @@ def ensure_npzs(product: str, mode: str, args: argparse.Namespace, scans: Option
     subprocess.run(cmd, cwd=str(project_root()), check=True)
 
     if scans is not None:
-        result = [(label, default_product_path(product, mode, label)) for label in labels]
+        result = [(label_with_channel(label, mode, args.bchan, args.echan), default_product_path(product, mode, label, args.bchan, args.echan)) for label in labels]
     else:
-        result = discover_scan_products(product, mode)
+        result = discover_scan_products(product, mode, args.bchan, args.echan)
     missing = [str(path) for _, path in result if not path.exists()]
     if missing:
         raise FileNotFoundError(f"Missing expected per-scan products: {missing}")
@@ -351,6 +429,37 @@ def filter_antennas(values: np.ndarray, antennas: Optional[List[int]]) -> np.nda
     return values[np.isin(values, np.asarray(antennas, dtype=values.dtype))]
 
 
+def plot_channel_mask(channels: np.ndarray, pchans: Optional[Tuple[int, int]], context: str) -> np.ndarray:
+    channels = np.asarray(channels, dtype=int)
+    if pchans is None:
+        return np.ones(channels.shape, dtype=bool)
+    mask = (channels >= int(pchans[0])) & (channels < int(pchans[1]))
+    if not np.any(mask):
+        raise ValueError(f"No channels in {context} match -pchans [{int(pchans[0])}, {int(pchans[1])}).")
+    return mask
+
+
+def pchan_title_text(pchans: Optional[Tuple[int, int]]) -> str:
+    if pchans is None:
+        return ""
+    return f" | PChans: {int(pchans[0])}-{int(pchans[1]) - 1}"
+
+
+def colorbar_ticks_7(limit: float) -> np.ndarray:
+    limit = float(limit)
+    if not np.isfinite(limit) or limit <= 0:
+        limit = 15.0
+    limit = float(max(15, int(math.ceil(limit / 5.0)) * 5))
+    candidates = [value for value in range(5, int(limit), 5)]
+    if len(candidates) >= 2:
+        inner = [candidates[len(candidates) // 3], candidates[(2 * len(candidates)) // 3]]
+    elif len(candidates) == 1:
+        inner = [candidates[0], candidates[0]]
+    else:
+        inner = [limit, limit]
+    return np.asarray([-limit, -inner[1], -inner[0], 0.0, inner[0], inner[1], limit], dtype=float)
+
+
 def apply_style(ax: Any, title: str, xlabel: str = "", ylabel: str = "") -> None:
     ax.set_title(title)
     ax.set_xlabel(xlabel)
@@ -366,7 +475,14 @@ def save_figure(fig: Any, path: Path) -> None:
     print(f"Wrote plot: {path}")
 
 
-def plot_gain_colormap(npz_path: Path, out: Path, antennas: Optional[List[int]], mode: str) -> None:
+def plot_gain_colormap(
+    npz_path: Path,
+    out: Path,
+    antennas: Optional[List[int]],
+    mode: str,
+    pchans: Optional[Tuple[int, int]] = None,
+    plot_range: Optional[float] = None,
+) -> None:
     z = load_npz(npz_path)
     required = {"scan", "antenna", "stokes", "channel", "real", "imag"}
     missing = required - set(z)
@@ -377,6 +493,8 @@ def plot_gain_colormap(npz_path: Path, out: Path, antennas: Optional[List[int]],
     stokes_all = np.unique(z["stokes"]).astype(int)
     if ant_all.size == 0 or stokes_all.size == 0:
         raise ValueError("No antennas/stokes available for gain colormap.")
+    chan_arr_all = z["channel"].astype(int)
+    pchan_mask = plot_channel_mask(chan_arr_all, pchans, str(npz_path))
 
     header = {}
     if "header_json" in z:
@@ -390,9 +508,42 @@ def plot_gain_colormap(npz_path: Path, out: Path, antennas: Optional[List[int]],
 
     if mode == "bandpass":
         x_key = "channel"
-        x_values = np.unique(z[x_key]).astype(int)
-        y_labels = [str(int(v)) for v in x_values]
-        x_label = "Channel"
+        x_values = np.unique(z[x_key][pchan_mask]).astype(int)
+        chan_freq_arr = z["channel_freq_hz"].astype(float) if "channel_freq_hz" in z else np.full(chan_arr_all.shape, np.nan)
+        chan_width_arr = z["channel_width_hz"].astype(float) if "channel_width_hz" in z else np.full(chan_arr_all.shape, np.nan)
+        freq_by_chan = np.full(x_values.shape, np.nan, dtype=float)
+        width_by_chan = np.full(x_values.shape, np.nan, dtype=float)
+        for idx, chan in enumerate(x_values):
+            selector = (chan_arr_all == int(chan)) & pchan_mask
+            freqs = chan_freq_arr[selector]
+            widths = chan_width_arr[selector]
+            if freqs.size and np.any(np.isfinite(freqs)):
+                freq_by_chan[idx] = float(np.nanmedian(freqs))
+            if widths.size and np.any(np.isfinite(widths)):
+                width_by_chan[idx] = float(np.nanmedian(np.abs(widths)))
+        if np.any(np.isfinite(freq_by_chan)):
+            y_centers = freq_by_chan / 1.0e6
+            finite_widths = width_by_chan[np.isfinite(width_by_chan) & (width_by_chan > 0)]
+            delta_nu_mhz = float(np.nanmedian(finite_widths) / 1.0e6) if finite_widths.size else np.nan
+            if not np.isfinite(delta_nu_mhz) or delta_nu_mhz <= 0:
+                diffs = np.diff(y_centers[np.isfinite(y_centers)])
+                delta_nu_mhz = float(np.nanmedian(np.abs(diffs[diffs != 0]))) if diffs.size else 1.0
+            y_centers[~np.isfinite(y_centers)] = np.arange(np.count_nonzero(~np.isfinite(y_centers)), dtype=float)
+        else:
+            y_centers = np.arange(len(x_values), dtype=float)
+            delta_nu_mhz = np.nan
+        y_edges = np.empty(len(x_values) + 1, dtype=float)
+        if len(x_values) == 1:
+            half = 0.5 * (delta_nu_mhz if np.isfinite(delta_nu_mhz) and delta_nu_mhz > 0 else 1.0)
+            y_edges[0] = y_centers[0] - half
+            y_edges[1] = y_centers[0] + half
+        else:
+            y_edges[1:-1] = 0.5 * (y_centers[:-1] + y_centers[1:])
+            y_edges[0] = y_centers[0] - 0.5 * (y_centers[1] - y_centers[0])
+            y_edges[-1] = y_centers[-1] + 0.5 * (y_centers[-1] - y_centers[-2])
+        y_labels = [f"{float(v):.0f}" for v in y_centers]
+        channel_row_labels = [str(int(v)) for v in x_values]
+        x_label = r"$\nu$ (MHz)"
     elif "time" in z:
         x_key = "time"
         raw_times = z[x_key].astype(float)
@@ -429,7 +580,6 @@ def plot_gain_colormap(npz_path: Path, out: Path, antennas: Optional[List[int]],
         delta_t = np.nan
         x_label = "Table row"
     if mode == "bandpass":
-        y_edges = None
         time_row_labels = []
         delta_t = np.nan
     if x_values.size == 0:
@@ -438,7 +588,7 @@ def plot_gain_colormap(npz_path: Path, out: Path, antennas: Optional[List[int]],
     nrows = len(stokes_all)
     fig_height = max(6.0, 3.0 * nrows)
     fig = plt.figure(figsize=(fig_height * 4.0 / 3.0, fig_height))
-    grid = fig.add_gridspec(nrows, 4, width_ratios=[1.0, 1.0, 0.32, 0.055], wspace=0.05, hspace=0.34)
+    grid = fig.add_gridspec(nrows, 4, width_ratios=[1.0, 1.0, 0.32, 0.055], wspace=0.10, hspace=0.34)
     axes = np.asarray([[fig.add_subplot(grid[row, col]) for col in range(2)] for row in range(nrows)])
     cax = fig.add_subplot(grid[:, 3])
     cmap = plt.get_cmap("coolwarm").copy()
@@ -462,7 +612,7 @@ def plot_gain_colormap(npz_path: Path, out: Path, antennas: Optional[List[int]],
                 selector = (ant_arr == ant) & (stokes_arr == stokes) & (x_arr == xv)
                 if not np.any(selector):
                     continue
-                valid = selector & ~flagged_arr
+                valid = selector & pchan_mask & ~flagged_arr
                 rvals = (real_arr[valid] - 1.0) * 100.0
                 ivals = imag_arr[valid] * 100.0
                 if rvals.size or ivals.size:
@@ -478,11 +628,14 @@ def plot_gain_colormap(npz_path: Path, out: Path, antennas: Optional[List[int]],
             scale_values.append(np.abs(imag_masked.compressed()))
 
     if scale_values:
-        vmax = float(np.nanpercentile(np.concatenate(scale_values), 99.0))
+        vmax = float(np.nanmax(np.concatenate(scale_values)))
     else:
         vmax = 1.0
+    if plot_range is not None:
+        vmax = float(plot_range)
     if not np.isfinite(vmax) or vmax <= 0:
         vmax = 1.0
+    vmax = float(max(15, int(math.ceil(vmax / 5.0)) * 5))
     vmin = -vmax
 
     def skew(values: np.ndarray) -> float:
@@ -505,7 +658,7 @@ def plot_gain_colormap(npz_path: Path, out: Path, antennas: Optional[List[int]],
         vals = values.compressed()
         if vals.size == 0:
             return "mean=nan std=nan skew=nan kurt=nan"
-        return f"mean={np.nanmean(vals):.2f} std={np.nanstd(vals):.2f} skew={skew(vals):.2f} kurt={kurt(vals):.2f}"
+        return f"mean={np.nanmean(vals):.1f} std={np.nanstd(vals):.1f} skew={skew(vals):.1f} kurt={kurt(vals):.1f}"
 
     for ri, stokes in enumerate(stokes_all):
         real_masked, imag_masked = stokes_data[int(stokes)]
@@ -521,10 +674,17 @@ def plot_gain_colormap(npz_path: Path, out: Path, antennas: Optional[List[int]],
             ax.set_xticks(np.arange(len(ant_all)) + 0.5)
             ax.set_xticklabels([str(a) if i % 2 == 0 or i == len(ant_all) - 1 else "" for i, a in enumerate(ant_all)], fontsize=6)
             nticks = min(6, len(x_values))
-            tick_idx = np.linspace(0, len(x_values), nticks, endpoint=False, dtype=int)
+            tick_idx = np.unique(np.linspace(0, len(x_values) - 1, nticks, dtype=int))
             ax.set_yticks(y_centers[tick_idx] if y_edges is not None else tick_idx + 0.5)
             ax.set_yticklabels([y_labels[i] for i in tick_idx], fontsize=6)
             ax.set_ylabel(x_label if ci == 0 else "", fontsize=8)
+            if ci == 1 and mode == "bandpass":
+                tax = ax.twinx()
+                tax.set_ylim(ax.get_ylim())
+                tax.set_yticks(y_centers[tick_idx])
+                tax.set_yticklabels([channel_row_labels[i] for i in tick_idx], fontsize=6)
+                tax.set_ylabel("Channel", fontsize=8, labelpad=10)
+                tax.tick_params(axis="y", labelsize=6)
             if ci == 1 and x_key == "time":
                 tax = ax.twinx()
                 tax.set_ylim(ax.get_ylim())
@@ -535,19 +695,20 @@ def plot_gain_colormap(npz_path: Path, out: Path, antennas: Optional[List[int]],
             if ri == nrows - 1:
                 ax.set_xlabel("Antenna", fontsize=8)
             ax.tick_params(axis="both", labelsize=6)
-            if ci == 1 and x_key == "time":
+            if ci == 1 and (x_key == "time" or mode == "bandpass"):
                 ax.tick_params(axis="y", left=False, labelleft=False)
     cbar = fig.colorbar(im, cax=cax, orientation="vertical")
     cbar.ax.set_title("Percent", fontsize=8, pad=6)
     cbar.ax.yaxis.set_ticks_position("left")
     cbar.ax.tick_params(labelsize=6, labelleft=True, labelright=False)
-    ticks = cbar.get_ticks()
+    ticks = colorbar_ticks_7(vmax)
     cbar.set_ticks(ticks)
-    cbar.set_ticklabels([f"{tick:.1f}" for tick in ticks])
+    cbar.set_ticklabels([f"{tick:.0f}" for tick in ticks])
     scans = np.unique(z["scan"].astype(int))
     scan_label = str(int(scans[0])) if scans.size == 1 else "allscans"
     dt_text = f" | $\\Delta t$ = {delta_t:.2f} s" if np.isfinite(delta_t) else ""
-    fig.suptitle(f"Gain Table: {table_name} | Scan: {scan_label} [%]{dt_text}", fontsize=12)
+    dnu_text = f" | $\\Delta \\nu$ = {delta_nu_mhz * 1000.0:.2f} kHz" if mode == "bandpass" and np.isfinite(delta_nu_mhz) else ""
+    fig.suptitle(f"Gain Table: {table_name} | Scan: {scan_label}{dt_text}{dnu_text}{pchan_title_text(pchans)}", fontsize=12)
     out.parent.mkdir(parents=True, exist_ok=True)
     fig.subplots_adjust(top=0.88)
     fig.savefig(out, dpi=DEFAULT_PLOT_DPI)
@@ -599,7 +760,7 @@ def sample_stats_text(values: np.ndarray) -> str:
         kurt = np.nan
     else:
         kurt = float(np.mean(((vals - mean) / std) ** 4) - 3.0)
-    return f"mean={mean:.2f} std={std:.2f} skew={skew:.2f} kurt={kurt:.2f}"
+    return f"mean={mean:.1f} std={std:.1f} skew={skew:.1f} kurt={kurt:.1f}"
 
 
 def plot_gain_histogram(
@@ -609,9 +770,10 @@ def plot_gain_histogram(
     mode: str,
     nbin: int,
     hist_range: Optional[Tuple[float, float]],
+    pchans: Optional[Tuple[int, int]] = None,
 ) -> None:
     z = load_npz(npz_path)
-    required = {"scan", "antenna", "stokes", "real", "imag"}
+    required = {"scan", "antenna", "stokes", "channel", "real", "imag"}
     missing = required - set(z)
     if missing:
         raise ValueError(f"{npz_path} missing arrays: {sorted(missing)}")
@@ -626,6 +788,7 @@ def plot_gain_histogram(
     real_arr = z["real"].astype(float)
     imag_arr = z["imag"].astype(float)
     flagged_arr = z["flagged"].astype(bool) if "flagged" in z else np.zeros(real_arr.shape, dtype=bool)
+    pchan_mask = plot_channel_mask(z["channel"].astype(int), pchans, str(npz_path))
 
     all_values: List[np.ndarray] = []
     stokes_hist: Dict[int, Tuple[List[np.ndarray], List[np.ndarray]]] = {}
@@ -633,7 +796,7 @@ def plot_gain_histogram(
         real_by_ant: List[np.ndarray] = []
         imag_by_ant: List[np.ndarray] = []
         for ant in ant_all:
-            selector = (ant_arr == int(ant)) & (stokes_arr == int(stokes)) & ~flagged_arr
+            selector = (ant_arr == int(ant)) & (stokes_arr == int(stokes)) & pchan_mask & ~flagged_arr
             rv = (real_arr[selector] - 1.0) * 100.0
             iv = imag_arr[selector] * 100.0
             rv = rv[np.isfinite(rv)]
@@ -726,9 +889,11 @@ def plot_gain_histogram(
             ax.set_xticks(np.arange(len(ant_all)) + 0.5)
             ax.set_xticklabels([str(a) if i % 2 == 0 or i == len(ant_all) - 1 else "" for i, a in enumerate(ant_all)], fontsize=6)
             ax.tick_params(axis="both", labelsize=6)
+            if ci == 0:
+                ax.tick_params(axis="y", pad=1)
             ax.set_axisbelow(False)
             ax.grid(axis="y", linestyle=":", linewidth=0.6, color="0.35", alpha=0.65)
-            ax.set_ylabel("Gain value [%]" if ci == 0 else "", fontsize=8)
+            ax.set_ylabel("Gain value [%]" if ci == 0 else "", fontsize=8, labelpad=2)
             if ci == 1:
                 ax.tick_params(axis="y", left=False, labelleft=False)
             if ri == nrows - 1:
@@ -745,7 +910,7 @@ def plot_gain_histogram(
     table_name = Path(str(header.get("input_table", "gain table"))).name or "gain table"
     scans = np.unique(z["scan"].astype(int))
     scan_label = str(int(scans[0])) if scans.size == 1 else "allscans"
-    fig.suptitle(f"Gain Histogram: {table_name} | Scan: {scan_label} [%]", fontsize=12)
+    fig.suptitle(f"Gain Histogram: {table_name} | Scan: {scan_label}{pchan_title_text(pchans)}", fontsize=12)
     out.parent.mkdir(parents=True, exist_ok=True)
     fig.subplots_adjust(left=0.06, right=0.95, bottom=0.075, top=0.9)
     fig.savefig(out, dpi=DEFAULT_PLOT_DPI)
@@ -762,6 +927,7 @@ def plot_single_antenna_gain_products(
     out_base: Path,
     antennas: Optional[List[int]],
     mode: str,
+    pchans: Optional[Tuple[int, int]] = None,
 ) -> List[Path]:
     z = load_npz(npz_path)
     required = {"scan", "antenna", "stokes", "channel", "real", "imag"}
@@ -804,8 +970,11 @@ def plot_single_antenna_gain_products(
     imag_arr = z["imag"].astype(float)
     row_arr = z["row"].astype(float) if "row" in z else np.arange(real_arr.size, dtype=float)
     flagged_arr = z["flagged"].astype(bool) if "flagged" in z else np.zeros(real_arr.shape, dtype=bool)
+    pchan_mask = plot_channel_mask(chan_arr, pchans, str(npz_path))
     time_arr = z["time"].astype(float) if "time" in z else None
     interval_arr = z["interval"].astype(float) if "interval" in z else None
+    channel_freq_arr = z["channel_freq_hz"].astype(float) if "channel_freq_hz" in z else np.full(chan_arr.shape, np.nan)
+    channel_width_arr = z["channel_width_hz"].astype(float) if "channel_width_hz" in z else np.full(chan_arr.shape, np.nan)
 
     scans = np.unique(scan_arr)
     scan_label = str(int(scans[0])) if scans.size == 1 else "allscans"
@@ -813,18 +982,42 @@ def plot_single_antenna_gain_products(
     out_base.parent.mkdir(parents=True, exist_ok=True)
 
     for ant in ant_all:
-        antenna_panels: List[Tuple[int, np.ndarray, np.ndarray, np.ndarray, str, Optional[np.ndarray]]] = []
+        antenna_panels: List[Tuple[int, np.ndarray, np.ndarray, np.ndarray, str, Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray]]] = []
         delta_t_values: List[float] = []
+        delta_nu_values: List[float] = []
         for stokes in stokes_all:
-            selector = (ant_arr == int(ant)) & (stokes_arr == int(stokes)) & ~flagged_arr
+            selector = (ant_arr == int(ant)) & (stokes_arr == int(stokes)) & pchan_mask & ~flagged_arr
             if not np.any(selector):
                 continue
 
             time_rows: Optional[np.ndarray] = None
+            freq_mhz: Optional[np.ndarray] = None
+            channel_labels: Optional[np.ndarray] = None
             if mode == "bandpass":
                 source_axis = chan_arr.astype(float)
                 axis_values = np.unique(chan_arr[selector]).astype(float)
-                x_label = "Channel"
+                freq_mhz = np.full(axis_values.shape, np.nan, dtype=float)
+                width_hz = np.full(axis_values.shape, np.nan, dtype=float)
+                for idx, chan in enumerate(axis_values.astype(int)):
+                    chan_selector = selector & (chan_arr == int(chan))
+                    freqs = channel_freq_arr[chan_selector]
+                    widths = channel_width_arr[chan_selector]
+                    if freqs.size and np.any(np.isfinite(freqs)):
+                        freq_mhz[idx] = float(np.nanmedian(freqs) / 1.0e6)
+                    if widths.size and np.any(np.isfinite(widths)):
+                        width_hz[idx] = float(np.nanmedian(np.abs(widths)))
+                if not np.any(np.isfinite(freq_mhz)):
+                    freq_mhz = axis_values.copy()
+                finite_widths = width_hz[np.isfinite(width_hz) & (width_hz > 0)]
+                if finite_widths.size:
+                    delta_nu_values.append(float(np.nanmedian(finite_widths) / 1.0e3))
+                elif np.count_nonzero(np.isfinite(freq_mhz)) > 1:
+                    diffs = np.diff(freq_mhz[np.isfinite(freq_mhz)])
+                    finite_diffs = np.abs(diffs[np.isfinite(diffs) & (diffs != 0)])
+                    if finite_diffs.size:
+                        delta_nu_values.append(float(np.nanmedian(finite_diffs) * 1.0e3))
+                channel_labels = axis_values.astype(int)
+                x_label = r"$\nu$ (MHz)"
             else:
                 if time_arr is not None:
                     finite_times = time_arr[selector][np.isfinite(time_arr[selector])]
@@ -859,19 +1052,19 @@ def plot_single_antenna_gain_products(
                     real_series[idx] = float(np.nanmean((real_arr[m] - 1.0) * 100.0))
                     imag_series[idx] = float(np.nanmean(imag_arr[m] * 100.0))
 
-            antenna_panels.append((int(stokes), axis_values, real_series, imag_series, x_label, time_rows))
+            antenna_panels.append((int(stokes), axis_values, real_series, imag_series, x_label, time_rows, freq_mhz, channel_labels))
 
         if not antenna_panels:
-            total = int(np.count_nonzero(ant_arr == int(ant)))
-            flagged = int(np.count_nonzero((ant_arr == int(ant)) & flagged_arr))
+            total = int(np.count_nonzero((ant_arr == int(ant)) & pchan_mask))
+            flagged = int(np.count_nonzero((ant_arr == int(ant)) & pchan_mask & flagged_arr))
             print(
                 f"SKIP antenna {int(ant)}: no finite unflagged samples "
-                f"(samples={total}, flagged={flagged})"
+                f"(samples={total}, flagged={flagged}, pchans={pchans})"
             )
             continue
 
         panel_values = []
-        for _, _, real_series, imag_series, _, _ in antenna_panels:
+        for _, _, real_series, imag_series, _, _, _, _ in antenna_panels:
             panel_values.extend([real_series[np.isfinite(real_series)], imag_series[np.isfinite(imag_series)]])
         finite_values = np.concatenate([vals for vals in panel_values if vals.size]) if any(vals.size for vals in panel_values) else np.array([])
         shared_abs_limit = float(np.nanmax(np.abs(finite_values))) if finite_values.size else 1.0
@@ -881,14 +1074,23 @@ def plot_single_antenna_gain_products(
         ncols = len(antenna_panels)
         fig_width = max(6.4, 3.6 * ncols)
         fig, axs = plt.subplots(2, ncols, figsize=(fig_width, fig_width * 3.0 / 4.0), sharex="col", squeeze=False)
-        for ci, (stokes, axis_values, real_series, imag_series, x_label, time_rows) in enumerate(antenna_panels):
+        for ci, (stokes, axis_values, real_series, imag_series, x_label, time_rows, freq_mhz, channel_labels) in enumerate(antenna_panels):
             axs[0, ci].plot(axis_values, real_series, color="blue", label=f"Stokes {stokes}")
             axs[0, ci].set_ylim(-shared_abs_limit, shared_abs_limit)
             axs[0, ci].legend(loc="upper right", fontsize=8, frameon=True)
             axs[0, ci].grid(True, ls=":")
-            if time_rows is not None and axis_values.size:
+            if mode == "bandpass" and channel_labels is not None and axis_values.size:
                 nticks = min(6, axis_values.size)
-                tick_idx = np.linspace(0, axis_values.size, nticks, endpoint=False, dtype=int)
+                tick_idx = np.unique(np.linspace(0, axis_values.size - 1, nticks, dtype=int))
+                top_ax = axs[0, ci].twiny()
+                top_ax.set_xlim(axs[0, ci].get_xlim())
+                top_ax.set_xticks(axis_values[tick_idx])
+                top_ax.set_xticklabels([str(int(channel_labels[i])) for i in tick_idx], fontsize=7)
+                top_ax.set_xlabel("Channel", fontsize=8)
+                top_ax.tick_params(axis="x", labelsize=7)
+            elif time_rows is not None and axis_values.size:
+                nticks = min(6, axis_values.size)
+                tick_idx = np.unique(np.linspace(0, axis_values.size - 1, nticks, dtype=int))
                 top_ax = axs[0, ci].twiny()
                 top_ax.set_xlim(axs[0, ci].get_xlim())
                 top_ax.set_xticks(axis_values[tick_idx])
@@ -897,6 +1099,11 @@ def plot_single_antenna_gain_products(
                 top_ax.tick_params(axis="x", labelsize=7)
             axs[1, ci].plot(axis_values, imag_series, color="red", label=f"Stokes {stokes}")
             axs[1, ci].set_xlabel(x_label)
+            if mode == "bandpass" and freq_mhz is not None and axis_values.size:
+                nticks = min(6, axis_values.size)
+                tick_idx = np.unique(np.linspace(0, axis_values.size - 1, nticks, dtype=int))
+                axs[1, ci].set_xticks(axis_values[tick_idx])
+                axs[1, ci].set_xticklabels([f"{float(freq_mhz[i]):.0f}" for i in tick_idx], fontsize=7)
             axs[1, ci].set_ylim(-shared_abs_limit, shared_abs_limit)
             axs[1, ci].legend(loc="upper right", fontsize=8, frameon=True)
             axs[1, ci].grid(True, ls=":")
@@ -912,8 +1119,20 @@ def plot_single_antenna_gain_products(
             delta_t = float(np.nanmedian(np.asarray(delta_t_values, dtype=float)))
             if np.isfinite(delta_t) and delta_t > 0:
                 dt_text = f" | $\\Delta t$ = {delta_t:.2f} s"
-        fig.suptitle(f"Gain Table: {table_name} | Antenna: {int(ant)} | Scan: {scan_label} [%]{dt_text}", fontsize=12)
-        fig.tight_layout(rect=(0, 0, 1, 0.94))
+        dnu_text = ""
+        if mode == "bandpass" and delta_nu_values:
+            delta_nu = float(np.nanmedian(np.asarray(delta_nu_values, dtype=float)))
+            if np.isfinite(delta_nu) and delta_nu > 0:
+                dnu_text = f" | $\\Delta \\nu$ = {delta_nu:.2f} kHz"
+        title = (
+            f"Gain Table: {table_name} | Antenna: {int(ant)}\n"
+            f"Scan: {scan_label}{dt_text}{dnu_text}{pchan_title_text(pchans)}"
+        )
+        title_size = max(7.0, 10.0 - max(0, max(len(line) for line in title.splitlines()) - 80) * 0.035)
+        title_y = 0.965 if mode == "bandpass" else 0.98
+        fig.suptitle(title, fontsize=title_size, y=title_y)
+        top_rect = 0.95 if mode == "bandpass" else 0.88
+        fig.tight_layout(rect=(0, 0, 1, top_rect))
 
         out = derived_output_path(out_base, f"ant{int(ant)}")
         fig.savefig(out, dpi=DEFAULT_PLOT_DPI)
@@ -931,8 +1150,16 @@ def metric_index(metrics: Sequence[Any], name: str) -> Optional[int]:
     return labels.index(name) if name in labels else None
 
 
-def finite_gain_values(z: Dict[str, np.ndarray], ant: int, stokes: int, component: str) -> np.ndarray:
+def finite_gain_values(
+    z: Dict[str, np.ndarray],
+    ant: int,
+    stokes: int,
+    component: str,
+    pchans: Optional[Tuple[int, int]] = None,
+) -> np.ndarray:
     selector = (z["antenna"].astype(int) == int(ant)) & (z["stokes"].astype(int) == int(stokes))
+    if pchans is not None:
+        selector &= plot_channel_mask(z["channel"].astype(int), pchans, "gains NPZ")
     if "flagged" in z:
         selector &= ~z["flagged"].astype(bool)
     source = z["real"].astype(float) if component == "real" else z["imag"].astype(float)
@@ -944,8 +1171,16 @@ def finite_gain_values(z: Dict[str, np.ndarray], ant: int, stokes: int, componen
     return vals[np.isfinite(vals)].ravel()
 
 
-def raw_gain_values(z: Dict[str, np.ndarray], ant: int, stokes: int, component: str) -> np.ndarray:
+def raw_gain_values(
+    z: Dict[str, np.ndarray],
+    ant: int,
+    stokes: int,
+    component: str,
+    pchans: Optional[Tuple[int, int]] = None,
+) -> np.ndarray:
     selector = (z["antenna"].astype(int) == int(ant)) & (z["stokes"].astype(int) == int(stokes))
+    if pchans is not None:
+        selector &= plot_channel_mask(z["channel"].astype(int), pchans, "gains NPZ")
     if "flagged" in z:
         selector &= ~z["flagged"].astype(bool)
     source = z["real"].astype(float) if component == "real" else z["imag"].astype(float)
@@ -984,9 +1219,17 @@ def component_index(components: Sequence[Any], name: str) -> Optional[int]:
     return labels.index(name) if name in labels else None
 
 
-def plot_antenna_gain_stats_grid(npz_path: Path, out: Path, antennas: Optional[List[int]], adjust_mean: bool = False) -> None:
+def plot_antenna_gain_stats_grid(
+    npz_path: Path,
+    out: Path,
+    antennas: Optional[List[int]],
+    adjust_mean: bool = False,
+    pchans: Optional[Tuple[int, int]] = None,
+) -> None:
     z = load_npz(npz_path)
     if "stats" in z:
+        if pchans is not None:
+            raise ValueError("-pchans for stats plots requires a gains NPZ product so statistics can be recalculated.")
         if adjust_mean:
             raise ValueError("--adjust-mean for stats plots requires a gains NPZ product.")
         required = {"scan_numbers", "antennas", "stokes", "components", "metrics", "stats"}
@@ -1025,7 +1268,7 @@ def plot_antenna_gain_stats_grid(npz_path: Path, out: Path, antennas: Optional[L
                             stats[int(stokes)][comp][metric][ai] = float(np.nanmean(vals)) if np.any(np.isfinite(vals)) else np.nan
         scans = z["scan_numbers"].astype(int)
     else:
-        required = {"antenna", "stokes", "real", "imag"}
+        required = {"antenna", "stokes", "channel", "real", "imag"}
         missing = required - set(z)
         if missing:
             raise ValueError(f"{npz_path} missing arrays: {sorted(missing)}")
@@ -1039,7 +1282,7 @@ def plot_antenna_gain_stats_grid(npz_path: Path, out: Path, antennas: Optional[L
             for stokes in stokes_all:
                 for comp in ("real", "imag"):
                     combined = [
-                        raw_gain_values(z, int(ant), int(stokes), comp)
+                        raw_gain_values(z, int(ant), int(stokes), comp, pchans)
                         for ant in ant_all
                     ]
                     vals = np.concatenate([item for item in combined if item.size]) if any(item.size for item in combined) else np.array([])
@@ -1054,7 +1297,7 @@ def plot_antenna_gain_stats_grid(npz_path: Path, out: Path, antennas: Optional[L
             }
             for ai, ant in enumerate(ant_all):
                 for comp in ("real", "imag"):
-                    vals = raw_gain_values(z, int(ant), int(stokes), comp)
+                    vals = raw_gain_values(z, int(ant), int(stokes), comp, pchans)
                     if vals.size == 0:
                         continue
                     if adjust_mean:
@@ -1115,7 +1358,7 @@ def plot_antenna_gain_stats_grid(npz_path: Path, out: Path, antennas: Optional[L
     header = gain_product_header(z)
     table_name = Path(str(header.get("input_table", "gain table"))).name or "gain table"
     adjust_text = " | adjust-mean" if adjust_mean else ""
-    fig.suptitle(f"Gain Table: {table_name} | Scan: {scan_label} [%]{adjust_text}", fontsize=12)
+    fig.suptitle(f"Gain Table: {table_name} | Scan: {scan_label}{adjust_text}{pchan_title_text(pchans)}", fontsize=12)
     out.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out, dpi=DEFAULT_PLOT_DPI)
     plt.close(fig)
@@ -1244,7 +1487,7 @@ def plot_antenna_gain_ks_grid(npz_path: Path, out: Path, antennas: Optional[List
     scan_label = str(int(scans[0])) if scans.size == 1 else "allscans"
     header = gain_product_header(z)
     table_name = Path(str(header.get("input_table", "gain table"))).name or "gain table"
-    fig.suptitle(f"Gain Table: {table_name} | Scan: {scan_label} [%]", fontsize=12)
+    fig.suptitle(f"Gain Table: {table_name} | Scan: {scan_label}", fontsize=12)
     if y_values:
         ymax = float(np.nanmax(np.asarray(y_values, dtype=float)))
         upper = ymax * 1.08 if ymax > 0 else ymax + 1.0
@@ -1511,11 +1754,15 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--gain-table", default=None, help="Gain table passed to gdp-stats when gain products are missing.")
     p.add_argument("--bandpass-table", default=None, help="Bandpass table passed to gdp-stats when bandpass products are missing.")
     p.add_argument("--setup-file", default=None, help="Setup JSON file to use. Relative names are resolved under the active runtime directory.")
+    p.add_argument("--npz-path", default=None, help="Use this NPZ file directly for the selected plot mode instead of discovering or creating the default GDP product.")
     p.add_argument("--scan", default=None, help="Comma-separated scans. Must match or create the corresponding GDP products.")
     p.add_argument("--combine-scans", action="store_true", help="Plot one combined allscans-style product. Default: false, make one plot per scan.")
-    p.add_argument("--antenna", nargs="+", default=None, help="Antenna list or inclusive range. Examples: --antenna 1,2,3,13 ; --antenna 1 2 3 13 ; --antenna '(0,9)'. The same list is passed to gdp-stats if missing products must be created.")
+    p.add_argument("--antenna", nargs="+", default=None, help="Antenna list or inclusive range. Examples: --antenna [0,9] for antennas 0 through 9; --antenna 2,3,4,31 or --antenna 2 3 4 31 for explicit antenna IDs. The same list is passed to gdp-stats if missing products must be created.")
     p.add_argument("--bchan", type=int, default=None, help="Bandpass start channel passed to gdp-stats when needed.")
     p.add_argument("--echan", type=int, default=None, help="Bandpass end channel passed to gdp-stats when needed.")
+    p.add_argument("-pchans", "--pchans", nargs="+", default=None, help="Plot channel window as '[start,end)'. Limits gains-based plots and subplot statistics without changing NPZ product discovery.")
+    p.add_argument("--range", dest="plot_range", type=float, default=None, help="Colormap saturation half-range in percent for gain or bandpass -pmode gain-colormap. The value is rounded up to a multiple of 5 for colorbar labels.")
+    p.add_argument("--flag-chans", nargs="+", default=None, help="Pass-through to gdp-stats: original data-channel window covered by a shorter FLAG channel axis, as '[start,end)'.")
     p.add_argument("--gain-colormap", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--gain-hist", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--antenna-plot", action="store_true", help=argparse.SUPPRESS)
@@ -1543,30 +1790,33 @@ def main() -> None:
     activate_config(args.setup_file)
     scans = parse_int_list(args.scan)
     hist_range = parse_float_range(args.hist_range)
+    pchans = parse_channel_pair(args.pchans, "-pchans")
     scan_label = scan_text(scans)
     plot_dir = Path(args.plot_dir).expanduser().resolve() if args.plot_dir else default_plot_dir(args.format)
     tasks = selected_tasks(args)
     antenna_text = antenna_from_pmode_values(args, tasks)
     args.antenna = antenna_text
-    ants = parse_antenna_list(antenna_text)
+    ants = parse_antenna_list(antenna_text, "--antenna")
 
     for mode in modes_from_arg(args.mode):
+        validate_channel_options_for_mode(mode, args, pchans)
         for task in tasks:
             products = ensure_npzs(task, mode, args, scans)
             if args.dry_run:
                 continue
             for label, npz in products:
                 t0 = time.perf_counter()
-                out = stats_output_path(plot_dir, mode, label, args.format, args.adjust_mean) if task == "stats" else output_path(plot_dir, task, mode, label, args.format)
+                plot_label = label_with_plot_channels(label, pchans if task in {"gain_colormap", "gain_hist", "antenna", "stats"} else None)
+                out = stats_output_path(plot_dir, mode, plot_label, args.format, args.adjust_mean) if task == "stats" else output_path(plot_dir, task, mode, plot_label, args.format)
                 print(f"START plot {task} mode={mode} scan={label}")
                 if task == "gain_colormap":
-                    plot_gain_colormap(npz, out, ants, mode)
+                    plot_gain_colormap(npz, out, ants, mode, pchans, args.plot_range)
                 elif task == "gain_hist":
-                    plot_gain_histogram(npz, out, ants, mode, args.hist_bins, hist_range)
+                    plot_gain_histogram(npz, out, ants, mode, args.hist_bins, hist_range, pchans)
                 elif task == "antenna":
-                    plot_single_antenna_gain_products(npz, out, ants, mode)
+                    plot_single_antenna_gain_products(npz, out, ants, mode, pchans)
                 elif task == "stats":
-                    plot_antenna_gain_stats_grid(npz, out, ants, args.adjust_mean)
+                    plot_antenna_gain_stats_grid(npz, out, ants, args.adjust_mean, pchans)
                 elif task == "ks":
                     plot_antenna_gain_ks_grid(npz, out, ants)
                 elif task == "self_corr_colormap":

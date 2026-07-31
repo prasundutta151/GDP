@@ -101,18 +101,82 @@ def normalize_list_text(text: object) -> str:
     return str(text)
 
 
-def parse_antenna_list(text: object) -> Optional[List[int]]:
+def parse_antenna_list(text: object, option_name: str = "--antennas") -> Optional[List[int]]:
     if text is None or normalize_list_text(text).strip() == "":
         return None
     value = normalize_list_text(text).strip()
     if (value.startswith("(") and value.endswith(")")) or (value.startswith("[") and value.endswith("]")):
         parts = [part.strip() for part in value[1:-1].split(",") if part.strip()]
         if len(parts) != 2:
-            raise SystemExit("--antennas range form must be two numbers, for example --antennas '(0,9)'")
+            raise SystemExit(f"{option_name} range form must be two numbers, for example {option_name} [0,9]")
         start, end = (int(parts[0]), int(parts[1]))
         step = 1 if end >= start else -1
         return list(range(start, end + step, step))
     return sorted({int(part) for part in value.replace(",", " ").split() if part.strip()})
+
+
+def antenna_flag_set(antenna_flags: Optional[List[int]]) -> set[int]:
+    return {int(ant) for ant in antenna_flags or []}
+
+
+def parse_channel_pair(text: object, option_name: str = "-pchans") -> Optional[Tuple[int, int]]:
+    if text is None or normalize_list_text(text).strip() == "":
+        return None
+    value = normalize_list_text(text).strip()
+    if (value.startswith("[") and value.endswith("]")) or (value.startswith("(") and value.endswith(")")):
+        value = value[1:-1]
+    parts = [part.strip() for part in value.replace(",", " ").split() if part.strip()]
+    if len(parts) != 2:
+        raise SystemExit(f"{option_name} must be two channel numbers, for example {option_name} '[0,128]'")
+    start, end = int(parts[0]), int(parts[1])
+    if end <= start:
+        raise SystemExit(f"{option_name} end channel must be greater than start channel.")
+    return start, end
+
+
+def plot_channel_tag(pchans: Optional[Tuple[int, int]]) -> str:
+    if pchans is None:
+        return ""
+    return f"pchan_{int(pchans[0])}_{int(pchans[1])}"
+
+
+def label_with_plot_channels(scan_label: str, pchans: Optional[Tuple[int, int]]) -> str:
+    tag = plot_channel_tag(pchans)
+    return f"{scan_label}-{tag}" if tag else scan_label
+
+
+def colorbar_ticks_7(limit: float) -> np.ndarray:
+    limit = float(limit)
+    if not np.isfinite(limit) or limit <= 0:
+        limit = 15.0
+    limit = float(max(15, int(math.ceil(limit / 5.0)) * 5))
+    candidates = [value for value in range(5, int(limit), 5)]
+    if len(candidates) >= 2:
+        inner = [candidates[len(candidates) // 3], candidates[(2 * len(candidates)) // 3]]
+    elif len(candidates) == 1:
+        inner = [candidates[0], candidates[0]]
+    else:
+        inner = [limit, limit]
+    return np.asarray([-limit, -inner[1], -inner[0], 0.0, inner[0], inner[1], limit], dtype=float)
+
+
+def validate_channel_options_for_mode(mode: str, args: argparse.Namespace) -> None:
+    if mode != "gain":
+        return
+    used = []
+    if args.bchan is not None:
+        used.append("--bchan")
+    if args.echan is not None:
+        used.append("--echan")
+    if args.pchans is not None:
+        used.append("-pchans/--pchans")
+    if args.flag_chans is not None:
+        used.append("--flag-chans")
+    if used:
+        raise SystemExit(
+            "Channel options are valid only in bandpass mode. "
+            f"Remove {', '.join(used)} or run with --mode bandpass."
+        )
 
 
 def parse_smode(text: Optional[str]) -> List[str]:
@@ -172,6 +236,17 @@ def build_default_output(input_table: Path, scan_text: str, mode: str, product: 
     return default_output_dir(product, kind) / f"gdp-{product_name}-{mode}-{scan_text}.{suffix}"
 
 
+def channel_tag(mode: str, bchan: Optional[int], echan: Optional[int]) -> str:
+    if mode == "bandpass" and bchan is not None and echan is not None:
+        return f"chan_{int(bchan)}_{int(echan)}"
+    return ""
+
+
+def label_with_channel(scan_label: str, mode: str, bchan: Optional[int], echan: Optional[int]) -> str:
+    tag = channel_tag(mode, bchan, echan)
+    return f"{scan_label}-{tag}" if tag else scan_label
+
+
 def default_plot_dir(fmt: str) -> Path:
     configured = config_path(f"plots_{fmt}_dir")
     if configured is not None:
@@ -186,6 +261,30 @@ def build_default_plot(scan_text: str, mode: str, plot_name: str, fmt: str) -> P
 def default_log_path(input_table: Path) -> Path:
     logs_dir = config_path("logs_dir") or (project_root() / "rundir" / "logs")
     return logs_dir / f"{input_table.name.rstrip('/')}_gdp-stats_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+
+
+def spectral_window_info(input_table: Path) -> Dict[str, np.ndarray]:
+    spw_path = input_table / "SPECTRAL_WINDOW"
+    if not spw_path.exists():
+        return {}
+    casatable = casatable_factory()
+    tb = casatable()
+    try:
+        tb.open(str(spw_path))
+        cols = list(tb.colnames())
+        info: Dict[str, np.ndarray] = {}
+        if "CHAN_FREQ" in cols and tb.nrows() > 0:
+            info["channel_freq_hz"] = np.asarray(tb.getcell("CHAN_FREQ", 0), dtype=float)
+        if "CHAN_WIDTH" in cols and tb.nrows() > 0:
+            info["channel_width_hz"] = np.asarray(tb.getcell("CHAN_WIDTH", 0), dtype=float)
+        return info
+    except Exception:
+        return {}
+    finally:
+        try:
+            tb.close()
+        except Exception:
+            pass
 
 
 class TaskLogger:
@@ -218,7 +317,12 @@ def choose_data_column(columns: Sequence[str], mode: str) -> str:
     raise RuntimeError(f"No supported gain/bandpass data column found. Columns: {list(columns)}")
 
 
-def normalize_flag(flag: np.ndarray, data_shape: Sequence[int]) -> np.ndarray:
+def normalize_flag(
+    flag: np.ndarray,
+    data_shape: Sequence[int],
+    data_ch0: int = 0,
+    flag_chans: Optional[Tuple[int, int]] = None,
+) -> np.ndarray:
     flag = np.asarray(flag, dtype=bool)
     if flag.shape == tuple(data_shape):
         return flag
@@ -226,6 +330,30 @@ def normalize_flag(flag: np.ndarray, data_shape: Sequence[int]) -> np.ndarray:
         npol, nchan, nrow = data_shape
         if flag.shape == (npol, nrow):
             return np.broadcast_to(flag[:, None, :], (npol, nchan, nrow)).copy()
+    if flag.ndim == 3 and len(data_shape) == 3:
+        npol, nchan, nrow = data_shape
+        if flag.shape[0] == npol and flag.shape[2] == nrow:
+            flag_nchan = int(flag.shape[1])
+            if flag_chans is None:
+                f0, f1 = int(data_ch0), int(data_ch0) + flag_nchan
+            else:
+                f0, f1 = int(flag_chans[0]), int(flag_chans[1])
+                if f1 - f0 != flag_nchan:
+                    raise ValueError(
+                        f"--flag-chans [{f0},{f1}] describes {f1 - f0} channels, "
+                        f"but FLAG has {flag_nchan} channels."
+                    )
+            full = np.ones((npol, nchan, nrow), dtype=bool)
+            data_ch1 = int(data_ch0) + nchan
+            overlap0 = max(int(data_ch0), f0)
+            overlap1 = min(data_ch1, f1)
+            if overlap1 > overlap0:
+                dst0 = overlap0 - int(data_ch0)
+                dst1 = overlap1 - int(data_ch0)
+                src0 = overlap0 - f0
+                src1 = overlap1 - f0
+                full[:, dst0:dst1, :] = flag[:, src0:src1, :]
+            return full
     raise ValueError(f"Unexpected FLAG shape {flag.shape}; expected compatible with data shape {tuple(data_shape)}")
 
 
@@ -397,10 +525,12 @@ def compute_stats(
     mode: str,
     scans: Optional[List[int]],
     antennas: Optional[List[int]],
+    antenna_flags: Optional[List[int]],
     use_flags: bool,
     subtract_mean: bool,
     bchan: Optional[int],
     echan: Optional[int],
+    flag_chans: Optional[Tuple[int, int]],
 ) -> Dict[str, Any]:
     tb, cols, data_col, all_ant, all_scan, selected_scans, selected_antennas, ch0, ch1 = open_context(
         input_table, mode, scans, antennas, bchan, echan
@@ -408,6 +538,7 @@ def compute_stats(
     try:
         if use_flags:
             require_flag_column(cols, input_table)
+        forced_flag_antennas = antenna_flag_set(antenna_flags)
         stokes_count: Optional[int] = None
         stats = valid_count = total_count = flagged_count = None
         for s_idx, scan in enumerate(selected_scans):
@@ -426,7 +557,7 @@ def compute_stats(
             ant = all_ant[row_ids]
             if data.ndim == 2:
                 data = data[:, None, :]
-            flag = normalize_flag(flag_raw, data.shape)
+            flag = normalize_flag(flag_raw, data.shape, 0, flag_chans)
             data = data[:, ch0:ch1, :]
             flag = flag[:, ch0:ch1, :]
             npol = data.shape[0]
@@ -443,11 +574,15 @@ def compute_stats(
                     continue
                 arr = data[:, :, a_rows].astype(np.complex128, copy=True)
                 flg = flag[:, :, a_rows]
+                if int(antenna) in forced_flag_antennas:
+                    flg = np.ones(flg.shape, dtype=bool)
                 if use_flags:
                     arr[flg] = np.nan + 1j * np.nan
+                elif int(antenna) in forced_flag_antennas:
+                    arr[:] = np.nan + 1j * np.nan
                 for p_idx in range(npol):
                     z = arr[p_idx].ravel()
-                    flagged = int(np.count_nonzero(flg[p_idx].ravel())) if use_flags else 0
+                    flagged = int(np.count_nonzero(flg[p_idx].ravel())) if (use_flags or int(antenna) in forced_flag_antennas) else 0
                     r = np.real(z) - 1.0
                     i = np.imag(z)
                     if subtract_mean:
@@ -472,10 +607,12 @@ def compute_stats(
                 "mode": mode,
                 "data_column": data_col,
                 "use_flags": bool(use_flags),
+                "antenna_flags": sorted(forced_flag_antennas),
                 "subtract_mean": bool(subtract_mean),
                 "statistics_convention": "AntStat-style: real samples are real(gain)-1, imag samples are imag(gain); mean/std/median/mad/min/max are saved in percent, skew/kurtosis are dimensionless.",
                 "bchan": bchan,
                 "echan": echan,
+                "flag_chans": flag_chans,
                 "axes": {"stats": ["scan", "antenna", "stokes", "component", "metric"]},
             },
             "scan_numbers": np.asarray(selected_scans, dtype=int),
@@ -492,14 +629,44 @@ def compute_stats(
         tb.close()
 
 
-def compute_gains(input_table: Path, mode: str, scans: Optional[List[int]], antennas: Optional[List[int]], use_flags: bool, bchan: Optional[int], echan: Optional[int]) -> Dict[str, Any]:
+def compute_gains(
+    input_table: Path,
+    mode: str,
+    scans: Optional[List[int]],
+    antennas: Optional[List[int]],
+    antenna_flags: Optional[List[int]],
+    use_flags: bool,
+    bchan: Optional[int],
+    echan: Optional[int],
+    flag_chans: Optional[Tuple[int, int]],
+) -> Dict[str, Any]:
     tb, cols, data_col, all_ant, all_scan, selected_scans, selected_antennas, ch0, ch1 = open_context(input_table, mode, scans, antennas, bchan, echan)
     try:
         if use_flags:
             require_flag_column(cols, input_table)
+        forced_flag_antennas = antenna_flag_set(antenna_flags)
         all_time = np.asarray(tb.getcol("TIME"), dtype=float) if "TIME" in cols else np.arange(tb.nrows(), dtype=float)
         all_interval = np.asarray(tb.getcol("INTERVAL"), dtype=float) if "INTERVAL" in cols else np.full(tb.nrows(), np.nan, dtype=float)
-        rows: Dict[str, List[Any]] = {k: [] for k in ["scan", "antenna", "stokes", "channel", "row", "time", "interval", "real", "imag", "flagged"]}
+        spw_info = spectral_window_info(input_table) if mode == "bandpass" else {}
+        channel_freq_hz = spw_info.get("channel_freq_hz")
+        channel_width_hz = spw_info.get("channel_width_hz")
+        rows: Dict[str, List[Any]] = {
+            k: []
+            for k in [
+                "scan",
+                "antenna",
+                "stokes",
+                "channel",
+                "row",
+                "time",
+                "interval",
+                "channel_freq_hz",
+                "channel_width_hz",
+                "real",
+                "imag",
+                "flagged",
+            ]
+        }
         for rid in range(tb.nrows()):
             scan = int(all_scan[rid])
             ant = int(all_ant[rid])
@@ -508,14 +675,19 @@ def compute_gains(input_table: Path, mode: str, scans: Optional[List[int]], ante
             data = np.asarray(tb.getcol(data_col, startrow=rid, nrow=1))
             if data.ndim == 2:
                 data = data[:, None, :]
-            data = data[:, ch0:ch1, 0].astype(np.complex128, copy=True)
+            data_full = data
+            data = data_full[:, ch0:ch1, 0].astype(np.complex128, copy=True)
             if use_flags:
                 raw_flag = np.asarray(tb.getcol("FLAG", startrow=rid, nrow=1))
-                flag = normalize_flag(raw_flag, (data.shape[0], data.shape[1], 1))[:, :, 0]
+                flag = normalize_flag(raw_flag, data_full.shape, 0, flag_chans)[:, ch0:ch1, 0]
             else:
                 flag = np.zeros(data.shape, dtype=bool)
+            if ant in forced_flag_antennas:
+                flag = np.ones(flag.shape, dtype=bool)
             if use_flags:
                 data[flag] = np.nan + 1j * np.nan
+            elif ant in forced_flag_antennas:
+                data[:] = np.nan + 1j * np.nan
             for pol in range(data.shape[0]):
                 for chan in range(data.shape[1]):
                     rows["scan"].append(scan)
@@ -525,6 +697,17 @@ def compute_gains(input_table: Path, mode: str, scans: Optional[List[int]], ante
                     rows["row"].append(rid)
                     rows["time"].append(float(all_time[rid]))
                     rows["interval"].append(float(all_interval[rid]))
+                    abs_chan = ch0 + chan
+                    rows["channel_freq_hz"].append(
+                        float(channel_freq_hz[abs_chan])
+                        if channel_freq_hz is not None and abs_chan < channel_freq_hz.size
+                        else np.nan
+                    )
+                    rows["channel_width_hz"].append(
+                        float(channel_width_hz[abs_chan])
+                        if channel_width_hz is not None and abs_chan < channel_width_hz.size
+                        else np.nan
+                    )
                     rows["real"].append(float(np.real(data[pol, chan])))
                     rows["imag"].append(float(np.imag(data[pol, chan])))
                     rows["flagged"].append(bool(flag[pol, chan]))
@@ -537,11 +720,23 @@ def compute_gains(input_table: Path, mode: str, scans: Optional[List[int]], ante
                 "mode": mode,
                 "data_column": data_col,
                 "use_flags": bool(use_flags),
+                "antenna_flags": sorted(forced_flag_antennas),
                 "bchan": bchan,
                 "echan": echan,
+                "flag_chans": flag_chans,
                 "columns": list(rows.keys()),
             },
-            **{k: np.asarray(v, dtype=bool if k == "flagged" else float if k in {"real", "imag", "time", "interval"} else int) for k, v in rows.items()},
+            **{
+                k: np.asarray(
+                    v,
+                    dtype=bool
+                    if k == "flagged"
+                    else float
+                    if k in {"real", "imag", "time", "interval", "channel_freq_hz", "channel_width_hz"}
+                    else int,
+                )
+                for k, v in rows.items()
+            },
         }
     finally:
         tb.close()
@@ -552,9 +747,11 @@ def compute_ks(
     mode: str,
     scans: Optional[List[int]],
     antennas: Optional[List[int]],
+    antenna_flags: Optional[List[int]],
     use_flags: bool,
     bchan: Optional[int],
     echan: Optional[int],
+    flag_chans: Optional[Tuple[int, int]],
 ) -> Dict[str, Any]:
     tb, cols, data_col, all_ant, all_scan, selected_scans, selected_antennas, ch0, ch1 = open_context(
         input_table, mode, scans, antennas, bchan, echan
@@ -562,6 +759,7 @@ def compute_ks(
     try:
         if use_flags:
             require_flag_column(cols, input_table)
+        forced_flag_antennas = antenna_flag_set(antenna_flags)
         stokes_count: Optional[int] = None
         ks = sample_count = None
         for s_idx, scan in enumerate(selected_scans):
@@ -580,7 +778,7 @@ def compute_ks(
             ant = all_ant[row_ids]
             if data.ndim == 2:
                 data = data[:, None, :]
-            flag = normalize_flag(flag_raw, data.shape)
+            flag = normalize_flag(flag_raw, data.shape, 0, flag_chans)
             data = data[:, ch0:ch1, :]
             flag = flag[:, ch0:ch1, :]
             npol = data.shape[0]
@@ -595,8 +793,12 @@ def compute_ks(
                     continue
                 arr = data[:, :, a_rows].astype(np.complex128, copy=True)
                 flg = flag[:, :, a_rows]
+                if int(antenna) in forced_flag_antennas:
+                    flg = np.ones(flg.shape, dtype=bool)
                 if use_flags:
                     arr[flg] = np.nan + 1j * np.nan
+                elif int(antenna) in forced_flag_antennas:
+                    arr[:] = np.nan + 1j * np.nan
                 for p_idx in range(npol):
                     if mode == "bandpass":
                         real_vals = nanmean_no_warning(np.real(arr[p_idx]), axis=1)
@@ -625,9 +827,11 @@ def compute_ks(
                 "mode": mode,
                 "data_column": data_col,
                 "use_flags": bool(use_flags),
+                "antenna_flags": sorted(forced_flag_antennas),
                 "ks_convention": "AntStat-style fitted-normal Kolmogorov-Smirnov D statistic, saved as percent. Gain mode uses all finite raw real/imag samples; bandpass mode uses finite channel means over time.",
                 "bchan": bchan,
                 "echan": echan,
+                "flag_chans": flag_chans,
                 "axes": {"ks": ["scan", "antenna", "stokes", "component", "metric"]},
             },
             "scan_numbers": np.asarray(selected_scans, dtype=int),
@@ -771,9 +975,11 @@ def read_series(
     mode: str,
     scans: Optional[List[int]],
     antennas: Optional[List[int]],
+    antenna_flags: Optional[List[int]],
     use_flags: bool,
     bchan: Optional[int],
     echan: Optional[int],
+    flag_chans: Optional[Tuple[int, int]],
 ) -> Tuple[Dict[int, Dict[int, Dict[int, Dict[str, Tuple[np.ndarray, np.ndarray]]]]], Dict[str, Any]]:
     tb, cols, data_col, all_ant, all_scan, selected_scans, selected_antennas, ch0, ch1 = open_context(
         input_table, mode, scans, antennas, bchan, echan
@@ -781,6 +987,7 @@ def read_series(
     try:
         if use_flags:
             require_flag_column(cols, input_table)
+        forced_flag_antennas = antenna_flag_set(antenna_flags)
         times = np.asarray(tb.getcol("TIME"), dtype=float) if "TIME" in cols else np.arange(tb.nrows(), dtype=float)
         out: Dict[int, Dict[int, Dict[int, Dict[str, Tuple[np.ndarray, np.ndarray]]]]] = {}
         stokes_count = 0
@@ -797,11 +1004,15 @@ def read_series(
                 if use_flags:
                     flag_full = np.asarray(tb.getcol("FLAG"))
                     flag_full = flag_full[:, None, :] if flag_full.ndim == 2 else flag_full
-                    flag = normalize_flag(flag_full[:, ch0:ch1, :][:, :, row_ids], data.shape)
+                    flag = normalize_flag(flag_full[:, :, row_ids], data_full[:, :, row_ids].shape, 0, flag_chans)[:, ch0:ch1, :]
                 else:
                     flag = np.zeros(data.shape, dtype=bool)
+                if int(antenna) in forced_flag_antennas:
+                    flag = np.ones(flag.shape, dtype=bool)
                 if use_flags:
                     data[flag] = np.nan + 1j * np.nan
+                elif int(antenna) in forced_flag_antennas:
+                    data[:] = np.nan + 1j * np.nan
                 stokes_count = max(stokes_count, data.shape[0])
                 out[int(scan)][int(antenna)] = {}
                 for pol in range(data.shape[0]):
@@ -823,7 +1034,9 @@ def read_series(
             "stokes": np.arange(stokes_count, dtype=int),
             "bchan": bchan,
             "echan": echan,
+            "flag_chans": flag_chans,
             "use_flags": bool(use_flags),
+            "antenna_flags": sorted(forced_flag_antennas),
         }
         return out, meta
     finally:
@@ -845,14 +1058,16 @@ def compute_self_corr(
     mode: str,
     scans: Optional[List[int]],
     antennas: Optional[List[int]],
+    antenna_flags: Optional[List[int]],
     use_flags: bool,
     bchan: Optional[int],
     echan: Optional[int],
+    flag_chans: Optional[Tuple[int, int]],
     nbin: int,
     bintype: str,
     njack: int,
 ) -> Dict[str, Any]:
-    series, meta = read_series(input_table, mode, scans, antennas, use_flags, bchan, echan)
+    series, meta = read_series(input_table, mode, scans, antennas, antenna_flags, use_flags, bchan, echan, flag_chans)
     rows = {k: [] for k in ["scan", "antenna", "stokes", "component", "tau", "s2", "err", "count"]}
     skipped: List[Dict[str, Any]] = []
     scan_values = [int(v) for v in np.asarray(meta.get("scan_numbers", []), dtype=int)]
@@ -932,15 +1147,17 @@ def compute_cross_corr(
     mode: str,
     scans: Optional[List[int]],
     antennas: Optional[List[int]],
+    antenna_flags: Optional[List[int]],
     use_flags: bool,
     bchan: Optional[int],
     echan: Optional[int],
+    flag_chans: Optional[Tuple[int, int]],
     nbin: int,
     bintype: str,
     njack: int,
     threshold: float,
 ) -> List[Dict[str, Any]]:
-    series, _meta = read_series(input_table, mode, scans, antennas, use_flags, bchan, echan)
+    series, _meta = read_series(input_table, mode, scans, antennas, antenna_flags, use_flags, bchan, echan, flag_chans)
     rows: List[Dict[str, Any]] = []
     for scan, by_ant in series.items():
         ant_list = sorted(by_ant)
@@ -981,7 +1198,14 @@ def write_npz(path: Path, result: Dict[str, Any], array_name: str = "stats") -> 
     np.savez_compressed(path, header_json=json.dumps(json_safe(result["header"]), indent=2, sort_keys=True), **payload)
 
 
-def plot_gain_colormap(path: Path, gains: Dict[str, Any], mode: str, antennas: Optional[List[int]]) -> None:
+def plot_gain_colormap(
+    path: Path,
+    gains: Dict[str, Any],
+    mode: str,
+    antennas: Optional[List[int]],
+    pchans: Optional[Tuple[int, int]] = None,
+    plot_range: Optional[float] = None,
+) -> None:
     try:
         import matplotlib
 
@@ -1001,6 +1225,15 @@ def plot_gain_colormap(path: Path, gains: Dict[str, Any], mode: str, antennas: O
     stokes_all = np.unique(np.asarray(gains["stokes"], dtype=int))
     if ant_all.size == 0 or stokes_all.size == 0:
         raise ValueError("No selected antennas/stokes available for gain colormap.")
+    chan_arr_all = np.asarray(gains["channel"], dtype=int)
+    if pchans is None:
+        plot_channel_mask = np.ones(chan_arr_all.shape, dtype=bool)
+    else:
+        plot_channel_mask = (chan_arr_all >= int(pchans[0])) & (chan_arr_all < int(pchans[1]))
+        if not np.any(plot_channel_mask):
+            raise ValueError(
+                f"No channels in gains product match -pchans [{int(pchans[0])}, {int(pchans[1])})."
+            )
 
     header = gains.get("header", {}) if isinstance(gains.get("header", {}), dict) else {}
     table_name = Path(str(header.get("input_table", "gain table"))).name
@@ -1009,9 +1242,42 @@ def plot_gain_colormap(path: Path, gains: Dict[str, Any], mode: str, antennas: O
 
     if mode == "bandpass":
         x_key = "channel"
-        x_values = np.unique(np.asarray(gains[x_key], dtype=int))
-        y_labels = [str(int(v)) for v in x_values]
-        x_label = "Channel"
+        x_values = np.unique(np.asarray(gains[x_key], dtype=int)[plot_channel_mask])
+        chan_freq_arr = np.asarray(gains.get("channel_freq_hz", np.full(chan_arr_all.shape, np.nan)), dtype=float)
+        chan_width_arr = np.asarray(gains.get("channel_width_hz", np.full(chan_arr_all.shape, np.nan)), dtype=float)
+        freq_by_chan = np.full(x_values.shape, np.nan, dtype=float)
+        width_by_chan = np.full(x_values.shape, np.nan, dtype=float)
+        for idx, chan in enumerate(x_values):
+            selector = (chan_arr_all == int(chan)) & plot_channel_mask
+            freqs = chan_freq_arr[selector]
+            widths = chan_width_arr[selector]
+            if freqs.size and np.any(np.isfinite(freqs)):
+                freq_by_chan[idx] = float(np.nanmedian(freqs))
+            if widths.size and np.any(np.isfinite(widths)):
+                width_by_chan[idx] = float(np.nanmedian(np.abs(widths)))
+        if np.any(np.isfinite(freq_by_chan)):
+            y_centers = freq_by_chan / 1.0e6
+            finite_widths = width_by_chan[np.isfinite(width_by_chan) & (width_by_chan > 0)]
+            delta_nu_mhz = float(np.nanmedian(finite_widths) / 1.0e6) if finite_widths.size else np.nan
+            if not np.isfinite(delta_nu_mhz) or delta_nu_mhz <= 0:
+                diffs = np.diff(y_centers[np.isfinite(y_centers)])
+                delta_nu_mhz = float(np.nanmedian(np.abs(diffs[diffs != 0]))) if diffs.size else 1.0
+            y_centers[~np.isfinite(y_centers)] = np.arange(np.count_nonzero(~np.isfinite(y_centers)), dtype=float)
+        else:
+            y_centers = np.arange(len(x_values), dtype=float)
+            delta_nu_mhz = np.nan
+        y_edges = np.empty(len(x_values) + 1, dtype=float)
+        if len(x_values) == 1:
+            half = 0.5 * (delta_nu_mhz if np.isfinite(delta_nu_mhz) and delta_nu_mhz > 0 else 1.0)
+            y_edges[0] = y_centers[0] - half
+            y_edges[1] = y_centers[0] + half
+        else:
+            y_edges[1:-1] = 0.5 * (y_centers[:-1] + y_centers[1:])
+            y_edges[0] = y_centers[0] - 0.5 * (y_centers[1] - y_centers[0])
+            y_edges[-1] = y_centers[-1] + 0.5 * (y_centers[-1] - y_centers[-2])
+        y_labels = [f"{float(v):.0f}" for v in y_centers]
+        channel_row_labels = [str(int(v)) for v in x_values]
+        x_label = r"$\nu$ (MHz)"
     elif "time" in gains:
         x_key = "time"
         raw_times = np.asarray(gains[x_key], dtype=float)
@@ -1048,7 +1314,6 @@ def plot_gain_colormap(path: Path, gains: Dict[str, Any], mode: str, antennas: O
         delta_t = np.nan
         x_label = "Table row"
     if mode == "bandpass":
-        y_edges = None
         time_row_labels = []
         delta_t = np.nan
     if x_values.size == 0:
@@ -1057,7 +1322,7 @@ def plot_gain_colormap(path: Path, gains: Dict[str, Any], mode: str, antennas: O
     nrows = len(stokes_all)
     fig_height = max(6.0, 3.0 * nrows)
     fig = plt.figure(figsize=(fig_height * 4.0 / 3.0, fig_height))
-    grid = fig.add_gridspec(nrows, 4, width_ratios=[1.0, 1.0, 0.32, 0.055], wspace=0.05, hspace=0.34)
+    grid = fig.add_gridspec(nrows, 4, width_ratios=[1.0, 1.0, 0.32, 0.055], wspace=0.10, hspace=0.34)
     axes = np.asarray([[fig.add_subplot(grid[row, col]) for col in range(2)] for row in range(nrows)])
     cax = fig.add_subplot(grid[:, 3])
     cmap = plt.get_cmap("coolwarm").copy()
@@ -1081,7 +1346,7 @@ def plot_gain_colormap(path: Path, gains: Dict[str, Any], mode: str, antennas: O
                 selector = (ant_arr == ant) & (stokes_arr == stokes) & (x_arr == xv)
                 if not np.any(selector):
                     continue
-                valid = selector & ~flagged_arr
+                valid = selector & plot_channel_mask & ~flagged_arr
                 rvals = (real_arr[valid] - 1.0) * 100.0
                 ivals = imag_arr[valid] * 100.0
                 if rvals.size or ivals.size:
@@ -1097,18 +1362,21 @@ def plot_gain_colormap(path: Path, gains: Dict[str, Any], mode: str, antennas: O
             scale_values.append(np.abs(imag_masked.compressed()))
 
     if scale_values:
-        vmax = float(np.nanpercentile(np.concatenate(scale_values), 99.0))
+        vmax = float(np.nanmax(np.concatenate(scale_values)))
     else:
         vmax = 1.0
+    if plot_range is not None:
+        vmax = float(plot_range)
     if not np.isfinite(vmax) or vmax <= 0:
         vmax = 1.0
+    vmax = float(max(15, int(math.ceil(vmax / 5.0)) * 5))
     vmin = -vmax
 
     def stats_text(values: np.ma.MaskedArray) -> str:
         vals = values.compressed()
         if vals.size == 0:
             return "mean=nan std=nan skew=nan kurt=nan"
-        return f"mean={np.nanmean(vals):.2f} std={np.nanstd(vals):.2f} skew={nan_skew(vals):.2f} kurt={nan_kurtosis(vals):.2f}"
+        return f"mean={np.nanmean(vals):.1f} std={np.nanstd(vals):.1f} skew={nan_skew(vals):.1f} kurt={nan_kurtosis(vals):.1f}"
 
     for ri, stokes in enumerate(stokes_all):
         real_masked, imag_masked = stokes_data[int(stokes)]
@@ -1124,10 +1392,17 @@ def plot_gain_colormap(path: Path, gains: Dict[str, Any], mode: str, antennas: O
             ax.set_xticks(np.arange(len(ant_all)) + 0.5)
             ax.set_xticklabels([str(a) if i % 2 == 0 or i == len(ant_all) - 1 else "" for i, a in enumerate(ant_all)], fontsize=6)
             nticks = min(6, len(x_values))
-            tick_idx = np.linspace(0, len(x_values), nticks, endpoint=False, dtype=int)
+            tick_idx = np.unique(np.linspace(0, len(x_values) - 1, nticks, dtype=int))
             ax.set_yticks(y_centers[tick_idx] if y_edges is not None else tick_idx + 0.5)
             ax.set_yticklabels([y_labels[i] for i in tick_idx], fontsize=6)
             ax.set_ylabel(x_label if ci == 0 else "", fontsize=8)
+            if ci == 1 and mode == "bandpass":
+                tax = ax.twinx()
+                tax.set_ylim(ax.get_ylim())
+                tax.set_yticks(y_centers[tick_idx])
+                tax.set_yticklabels([channel_row_labels[i] for i in tick_idx], fontsize=6)
+                tax.set_ylabel("Channel", fontsize=8, labelpad=10)
+                tax.tick_params(axis="y", labelsize=6)
             if ci == 1 and x_key == "time":
                 tax = ax.twinx()
                 tax.set_ylim(ax.get_ylim())
@@ -1138,19 +1413,21 @@ def plot_gain_colormap(path: Path, gains: Dict[str, Any], mode: str, antennas: O
             if ri == nrows - 1:
                 ax.set_xlabel("Antenna", fontsize=8)
             ax.tick_params(axis="both", labelsize=6)
-            if ci == 1 and x_key == "time":
+            if ci == 1 and (x_key == "time" or mode == "bandpass"):
                 ax.tick_params(axis="y", left=False, labelleft=False)
     cbar = fig.colorbar(im, cax=cax, orientation="vertical")
     cbar.ax.set_title("Percent", fontsize=8, pad=6)
     cbar.ax.yaxis.set_ticks_position("left")
     cbar.ax.tick_params(labelsize=6, labelleft=True, labelright=False)
-    ticks = cbar.get_ticks()
+    ticks = colorbar_ticks_7(vmax)
     cbar.set_ticks(ticks)
-    cbar.set_ticklabels([f"{tick:.1f}" for tick in ticks])
+    cbar.set_ticklabels([f"{tick:.0f}" for tick in ticks])
     scans = np.unique(np.asarray(gains["scan"], dtype=int))
     scan_label = str(int(scans[0])) if scans.size == 1 else "allscans"
     dt_text = f" | $\\Delta t$ = {delta_t:.2f} s" if np.isfinite(delta_t) else ""
-    fig.suptitle(f"Gain Table: {table_name} | Scan: {scan_label} [%]{dt_text}", fontsize=12)
+    dnu_text = f" | $\\Delta \\nu$ = {delta_nu_mhz * 1000.0:.2f} kHz" if mode == "bandpass" and np.isfinite(delta_nu_mhz) else ""
+    pchan_text = f" | PChans: {int(pchans[0])}-{int(pchans[1]) - 1}" if pchans is not None else ""
+    fig.suptitle(f"Gain Table: {table_name} | Scan: {scan_label}{dt_text}{dnu_text}{pchan_text}", fontsize=12)
 
     path.parent.mkdir(parents=True, exist_ok=True)
     fig.subplots_adjust(top=0.88)
@@ -1219,9 +1496,13 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--mode", choices=["auto", "gain", "bandpass"], default="auto", help="Statistics mode. Default: auto.")
     p.add_argument("--scan", default=None, help="Comma-separated scans to process. Default: all scans.")
     p.add_argument("--combine-scans", action="store_true", help="Combine selected scans into one allscans-style product. Default: false, write one product per scan.")
-    p.add_argument("--antennas", nargs="+", default=None, help="Antenna list or inclusive range. Examples: --antennas 1,2,3,13 ; --antennas 1 2 3 13 ; --antennas '(0,9)'. Default: all antennas.")
+    p.add_argument("--antennas", nargs="+", default=None, help="Antenna list or inclusive range. Examples: --antennas [0,9] for antennas 0 through 9; --antennas 2,3,4,31 or --antennas 2 3 4 31 for explicit antenna IDs. Default: all antennas.")
+    p.add_argument("--antenna-flag", nargs="+", default=None, help="Antenna list or inclusive range to force-flag. These antennas remain in outputs but all their samples are treated as flagged/non-finite.")
     p.add_argument("--bchan", type=int, default=None, help="Start channel, inclusive.")
     p.add_argument("--echan", type=int, default=None, help="End channel, exclusive.")
+    p.add_argument("-pchans", "--pchans", nargs="+", default=None, help="Plot channel window as '[start,end)' for --smode gain-colormap. Limits displayed channels and subplot-title statistics without changing NPZ products.")
+    p.add_argument("--range", dest="plot_range", type=float, default=None, help="Colormap saturation half-range in percent for gain or bandpass --smode gain-colormap. The value is rounded up to a multiple of 5 for colorbar labels.")
+    p.add_argument("--flag-chans", nargs="+", default=None, help="Original data-channel window covered by a shorter FLAG channel axis, as '[start,end)'. Channels outside this window are treated as flagged.")
     p.add_argument("--use-flags", action="store_true", help="Apply the CASA FLAG mask. Default: false. If requested and the table has no FLAG column, GDP stops with a warning.")
     p.add_argument(
         "--smode",
@@ -1305,40 +1586,45 @@ def run_batch(
     mode: str,
     scans: Optional[List[int]],
     antennas: Optional[List[int]],
+    antenna_flags: Optional[List[int]],
     scan_label: str,
     logger: TaskLogger,
 ) -> None:
     logger.write(f"gdp-stats batch={scan_label}")
+    if antenna_flags:
+        logger.write("force-flag antennas: " + ",".join(str(ant) for ant in antenna_flags))
     stats_result: Optional[Dict[str, Any]] = None
+    output_label = label_with_channel(scan_label, mode, args.bchan, args.echan)
 
     if args.gains:
         t0 = logger.start(f"gains {scan_label}")
-        gains = compute_gains(input_table, mode, scans, antennas, args.use_flags, args.bchan, args.echan)
-        out = Path(args.output_gains_npz).expanduser().resolve() if args.output_gains_npz else build_default_output(input_table, scan_label, mode, "gains", "npz")
+        gains = compute_gains(input_table, mode, scans, antennas, antenna_flags, args.use_flags, args.bchan, args.echan, args.flag_chans)
+        out = Path(args.output_gains_npz).expanduser().resolve() if args.output_gains_npz else build_default_output(input_table, output_label, mode, "gains", "npz")
         write_npz(out, gains)
         logger.write(f"Wrote gains NPZ: {out}")
         if args.gain_colormap:
-            plot_out = Path(args.output_gain_colormap).expanduser().resolve() if args.output_gain_colormap else build_default_plot(scan_label, mode, "gain-colormap", args.plot_format)
-            plot_gain_colormap(plot_out, gains, mode, antennas)
+            plot_label = label_with_plot_channels(output_label, args.pchans)
+            plot_out = Path(args.output_gain_colormap).expanduser().resolve() if args.output_gain_colormap else build_default_plot(plot_label, mode, "gain-colormap", args.plot_format)
+            plot_gain_colormap(plot_out, gains, mode, antennas, args.pchans, args.plot_range)
             logger.write(f"Wrote gain colormap plot: {plot_out}")
         logger.done(f"gains {scan_label}", t0)
 
     if args.stats:
         t0 = logger.start(f"stats {scan_label}")
-        stats_result = compute_stats(input_table, mode, scans, antennas, args.use_flags, False, args.bchan, args.echan)
-        out = Path(args.output_npz).expanduser().resolve() if args.output_npz else build_default_output(input_table, scan_label, mode, "stats", "npz")
+        stats_result = compute_stats(input_table, mode, scans, antennas, antenna_flags, args.use_flags, False, args.bchan, args.echan, args.flag_chans)
+        out = Path(args.output_npz).expanduser().resolve() if args.output_npz else build_default_output(input_table, output_label, mode, "stats", "npz")
         write_npz(out, stats_result)
         logger.write(f"Wrote stats NPZ: {out}")
         if args.csv or args.output_csv:
-            csv_out = Path(args.output_csv).expanduser().resolve() if args.output_csv else build_default_output(input_table, scan_label, mode, "stats", "csv")
+            csv_out = Path(args.output_csv).expanduser().resolve() if args.output_csv else build_default_output(input_table, output_label, mode, "stats", "csv")
             write_stats_csv(csv_out, stats_result)
             logger.write(f"Wrote stats CSV: {csv_out}")
         logger.done(f"stats {scan_label}", t0)
 
     if args.ks:
         t0 = logger.start(f"ks {scan_label}")
-        ks = compute_ks(input_table, mode, scans, antennas, args.use_flags, args.bchan, args.echan)
-        out = Path(args.output_ks_npz).expanduser().resolve() if args.output_ks_npz else build_default_output(input_table, scan_label, mode, "ks", "npz")
+        ks = compute_ks(input_table, mode, scans, antennas, antenna_flags, args.use_flags, args.bchan, args.echan, args.flag_chans)
+        out = Path(args.output_ks_npz).expanduser().resolve() if args.output_ks_npz else build_default_output(input_table, output_label, mode, "ks", "npz")
         write_npz(out, ks)
         logger.write(f"Wrote KS NPZ: {out}")
         logger.done(f"ks {scan_label}", t0)
@@ -1350,14 +1636,16 @@ def run_batch(
             mode,
             scans,
             antennas,
+            antenna_flags,
             args.use_flags,
             args.bchan,
             args.echan,
+            args.flag_chans,
             args.corr_nbin,
             args.corr_bintype,
             args.corr_njack,
         )
-        out = Path(args.output_self_corr_npz).expanduser().resolve() if args.output_self_corr_npz else build_default_output(input_table, scan_label, mode, "self_corr", "npz")
+        out = Path(args.output_self_corr_npz).expanduser().resolve() if args.output_self_corr_npz else build_default_output(input_table, output_label, mode, "self_corr", "npz")
         write_npz(out, self_corr)
         logger.write(f"Wrote self-corr NPZ: {out}")
         logger.done(f"self-corr {scan_label}", t0)
@@ -1382,7 +1670,11 @@ def main() -> None:
         raise FileNotFoundError(f"Input table not found: {input_table}")
     scans = parse_int_list(args.scan)
     validate_requested_scans(input_table, mode, scans)
-    antennas = parse_antenna_list(args.antennas)
+    antennas = parse_antenna_list(args.antennas, "--antennas")
+    antenna_flags = parse_antenna_list(args.antenna_flag, "--antenna-flag")
+    args.pchans = parse_channel_pair(args.pchans, "-pchans")
+    args.flag_chans = parse_channel_pair(args.flag_chans, "--flag-chans")
+    validate_channel_options_for_mode(mode, args)
     if not any([args.gains, args.stats, args.ks, args.self_corr, args.cross_corr, args.gain_colormap]):
         args.stats = True
     logger = TaskLogger(default_log_path(input_table))
@@ -1395,7 +1687,7 @@ def main() -> None:
             f"Use --combine-scans or remove: {names}"
         )
     for batch_scans, batch_label in batches:
-        run_batch(args, input_table, mode, batch_scans, antennas, batch_label, logger)
+        run_batch(args, input_table, mode, batch_scans, antennas, antenna_flags, batch_label, logger)
     logger.write(f"Log file: {logger.path}")
 
 

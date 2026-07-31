@@ -1416,3 +1416,308 @@ Changes Made
 - Updated `gdp-plot` missing-product forwarding to use `--use-flags` instead
   of the removed `--no-use-flags`.
 - Updated the `gdp-stats` and `gdp-plot` HTML documentation.
+
+## 2026-07-31 14:25:41 IST
+
+Prompt / Request
+- Begin bandpass-mode work.
+- When both `--bchan` and `--echan` are provided for `gdp-stats` or
+  `gdp-plot`, include that channel range in output product names for NPZ, CSV,
+  and plot files, using a channel tag such as `chan_0_128`.
+
+Changes Made
+- Added channel-tag helpers in `gdp-stats` and `gdp-plot`.
+- Updated default `gdp-stats` output names so bandpass products with both
+  `--bchan` and `--echan` append `-chan_<bchan>_<echan>` after the scan label.
+  This applies to gains NPZ, stats NPZ/CSV, KS NPZ, self-corr NPZ, and direct
+  gain-colormap plot output.
+- Updated `gdp-plot` product lookup and output plot naming so bandpass plotting
+  with both channel bounds uses the same channel-tagged NPZ and plot names.
+- Updated `gdp-stats`, `gdp-plot`, and the gains/stats/KS/self-corr product
+  format HTML documentation.
+
+## 2026-07-31 14:38:20 IST
+
+Prompt / Request
+- Add a `gdp-stats --antenna-flag` option that accepts a list of antennas to
+  consider flagged.
+
+Changes Made
+- Added `--antenna-flag LIST` to `gdp-stats`, using the same explicit-list and
+  inclusive-range syntax as `--antennas`.
+- Applied forced antenna flags in gains, stats, KS, self-correlation, and the
+  internal series reader. Forced antennas remain present in output axes, but
+  their samples are treated as flagged or non-finite.
+- Recorded forced antenna flags in product `header_json` metadata as
+  `antenna_flags`.
+- Updated `gdp-stats` and the affected product-format HTML documentation.
+
+## 2026-07-31 14:46:16 IST
+
+Prompt / Request
+- Add a `-pchans "[pbchan, pechan]"` option in `gdp-stats` and `gdp-plot`.
+- When provided, plots should be limited to those channels and subplot-title
+  statistics should be calculated from only those channels.
+
+Changes Made
+- Added `-pchans` / `--pchans` parsing as a plot-channel window with start
+  channel inclusive and end channel exclusive.
+- Updated `gdp-stats --smode gain-colormap` so `-pchans` limits the displayed
+  channels and the mean/std/skew/kurtosis shown in each subplot title without
+  changing the gains NPZ product.
+- Updated `gdp-plot` gains-based plot modes (`gain-colormap`, `gain-hist`,
+  `antenna`, and `stats`) so `-pchans` filters the channels used for plotting
+  and for plot-time statistics.
+- Added `pchan_<start>_<end>` to default plot filenames when `-pchans` is used.
+- Updated the main README, step-by-step guide, and the `gdp-stats` /
+  `gdp-plot` HTML documentation.
+
+## 2026-07-31 15:07:00 IST
+
+Prompt / Request
+- Handle tables where the FLAG array has fewer channels than the data array.
+- Provide an option so channels outside the known FLAG coverage are treated as
+  flagged and processing can continue.
+- Stop with a clear text error if channel options are used in gain mode.
+
+Changes Made
+- Added `gdp-stats --flag-chans [START,END]` for shorter FLAG channel axes.
+  The option declares which original data channels the shorter FLAG array
+  covers; all channels outside that coverage are treated as flagged.
+- Expanded FLAG normalization so stats, gains, KS, and self-correlation can
+  process shorter FLAG arrays against larger data-channel axes.
+- Recorded `flag_chans` in NPZ product headers.
+- Added `gdp-plot --flag-chans` as a pass-through when missing NPZ products are
+  created by `gdp-plot`.
+- Added gain-mode validation so `--bchan`, `--echan`, `-pchans`, and
+  `--flag-chans` stop with a clear message when used with `--mode gain`.
+- Updated README, step-by-step, `gdp-stats`, `gdp-plot`, and product-format
+  HTML documentation.
+
+## 2026-07-31 15:07:28 IST
+
+Prompt / Request
+- Standardize gain and bandpass colormap plot appearance.
+- For bandpass colormaps, add channel width as `Delta nu` in MHz to the title,
+  show `Delta nu` in MHz on left-column left axes, show channel numbers on the
+  right axes of right-column panels, remove duplicate left-axis labels from
+  right-column panels, keep a symmetric percentage colorbar, and preserve a 4:3
+  overall aspect ratio.
+
+Changes Made
+- Added `SPECTRAL_WINDOW` channel frequency and channel width extraction to
+  gains NPZ products as `channel_freq_hz` and `channel_width_hz`.
+- Updated direct `gdp-stats --smode gain-colormap` plotting and
+  `gdp-plot -pmode gain-colormap` plotting to use frequency-offset MHz axes
+  for bandpass colormaps when channel metadata is available.
+- Added right-side channel-number axes to the right-column bandpass colormap
+  panels and removed duplicate left-axis labels there.
+- Changed gain/bandpass colormap color scaling to use the maximum absolute
+  percentage value, with symmetric limits from `-xx` to `+xx` and two-decimal
+  colorbar labels.
+- Updated README, step-by-step, `gdp-stats`, `gdp-plot`, and gains product
+  format HTML documentation.
+
+## 2026-07-31 15:11:12 IST
+
+Prompt / Request
+- Make antenna range examples match the bracket style used by `-pchans`, while
+  keeping explicit antenna lists such as `--antennas 2,3,4,31`.
+
+Changes Made
+- Updated `gdp-stats` and `gdp-plot` CLI help/error text to use bracketed
+  antenna range examples such as `--antennas [0,9]` and `--antenna [0,9]`.
+- Kept explicit antenna-list parsing for comma-separated and space-separated
+  values, including `--antennas 2,3,4,31`.
+- Updated README, step-by-step, `gdp-stats`, and `gdp-plot` HTML examples.
+
+## 2026-07-31 15:15:14 IST
+
+Prompt / Request
+- For gain/bandpass colormap plots, show `nu` in MHz on the left axes of
+  left-column bandpass panels.
+- Add a `--range` option to set the colormap percentage saturation range.
+- Use seven colorbar labels at multiples of 5, including `0`, with no decimal
+  places.
+
+Changes Made
+- Added `--range` to `gdp-stats --smode gain-colormap` and
+  `gdp-plot -pmode gain-colormap`. The value is used as the requested
+  saturation half-range in percent and is rounded upward to a multiple of 5.
+- Updated bandpass colormap axes to show absolute `nu` in MHz on the left
+  column while keeping channel numbers on the right axes of right-column
+  panels.
+- Updated colormap colorbar ticks to seven integer labels at multiples of 5,
+  centered on zero.
+- Updated README, step-by-step, `gdp-stats`, and `gdp-plot` HTML
+  documentation.
+
+## 2026-07-31 15:17:53 IST
+
+Prompt / Request
+- Ensure `--range` is available for gain-mode colormap plots as well.
+
+Changes Made
+- Confirmed the shared colormap implementation applies `--range` to both gain
+  and bandpass modes.
+- Updated CLI help and HTML usage examples to make gain-mode `--range` support
+  explicit for both `gdp-stats` and `gdp-plot`.
+
+## 2026-07-31 15:20:03 IST
+
+Prompt / Request
+- Format bandpass colormap `nu` axis labels with no decimal places.
+- Show `Delta nu` in the title in kHz with two decimal places.
+- Keep channel indices ordered from the bottom upward, even when frequency
+  decreases upward.
+
+Changes Made
+- Updated direct `gdp-stats --smode gain-colormap` and
+  `gdp-plot -pmode gain-colormap` bandpass plotting to keep the saved channel
+  order instead of sorting by frequency.
+- Changed bandpass left-axis `nu` labels to whole-MHz labels.
+- Changed bandpass colormap title text to report `Delta nu` in kHz with two
+  decimal places.
+
+## 2026-07-31 15:24:24 IST
+
+Prompt / Request
+- Keep the extreme end labels on the left-column and right-column bandpass
+  colormap y axes, rounded to the nearest integer.
+
+Changes Made
+- Updated gain/bandpass colormap tick selection in both `gdp-stats` and
+  `gdp-plot` so the first and last y-axis rows are always labeled.
+- This keeps the bandpass left-axis whole-MHz end labels and the right-axis
+  integer channel end labels visible.
+
+## 2026-07-31 15:36:47 IST
+
+Prompt / Request
+- Increase the spacing between the two colormap subplot columns by a factor of
+  two for both gain and bandpass colormap plots.
+
+Changes Made
+- Updated the shared gain/bandpass colormap GridSpec layout in both
+  `gdp-stats` and `gdp-plot`, increasing `wspace` from `0.05` to `0.10`.
+
+## 2026-07-31 15:47:46 IST
+
+Prompt / Request
+- Add a `--npz-path` option to `gdp-plot` so a specific NPZ product can be
+  selected directly.
+
+Changes Made
+- Added `gdp-plot --npz-path PATH`.
+- When supplied, `gdp-plot` uses the given NPZ file for the selected `-pmode`
+  and skips default product discovery or missing-product creation through
+  `gdp-stats`.
+- Output labels are inferred from standard GDP NPZ filenames where possible,
+  otherwise the NPZ filename stem is used.
+- Updated README and `gdp-plot` HTML usage/options documentation.
+
+## 2026-07-31 15:50:21 IST
+
+Prompt / Request
+- For both gain and bandpass colormap plots, show subplot mean/std/skew/kurtosis
+  values to one decimal place.
+
+Changes Made
+- Updated the colormap subplot summary formatter in both
+  `gdp-stats --smode gain-colormap` and `gdp-plot -pmode gain-colormap`.
+- Updated `gdp-stats` and `gdp-plot` HTML documentation.
+
+## 2026-07-31 15:54:23 IST
+
+Prompt / Request
+- Bring the gain-hist left-column y-axis percentage levels closer to the plot
+  axes.
+
+Changes Made
+- Reduced the left-column y tick padding and `Gain value [%]` label padding in
+  `gdp-plot -pmode gain-hist`.
+
+## 2026-07-31 15:57:01 IST
+
+Prompt / Request
+- Show all gain-hist subplot summary statistics, including mean/std/skew/kurt,
+  to one decimal place.
+
+Changes Made
+- Updated the `gdp-plot -pmode gain-hist` summary-statistic formatter to use
+  one decimal place.
+- Updated the `gdp-plot` HTML documentation.
+
+## 2026-07-31 16:02:28 IST
+
+Prompt / Request
+- For `gdp-plot --mode bandpass -pmode antenna`, add `Delta nu` in kHz to the
+  title and adjust the title font to fit.
+- Add top channel-number axes to the upper-row panels, with the leftmost tick as
+  the lowest channel number.
+- Label the bottom axes of the lower-row panels as `nu` in MHz, with integer
+  frequency labels and endpoint ticks included.
+
+Changes Made
+- Updated bandpass antenna plots to read `channel_freq_hz` and
+  `channel_width_hz` from the gains NPZ when available.
+- Added top channel axes for bandpass antenna upper panels and integer-MHz
+  frequency labels on lower-panel bottom axes.
+- Added bandpass `Delta nu` title text in kHz with two decimal places and
+  adaptive title font sizing.
+- Updated `gdp-plot` HTML documentation.
+
+## 2026-07-31 16:04:35 IST
+
+Prompt / Request
+- Make the `gdp-plot -pmode antenna` title use two rows and a smaller font.
+
+Changes Made
+- Split the antenna plot figure title into a table/antenna row and a scan/detail
+  row.
+- Reduced the adaptive title font range and left more top margin for the
+  two-line title.
+- Updated the `gdp-plot` HTML documentation.
+
+## 2026-07-31 16:06:52 IST
+
+Prompt / Request
+- Remove `[%]` from all plot titles.
+- For bandpass `gdp-plot -pmode antenna`, reduce the large gap between the
+  two-line title and the subplots.
+
+Changes Made
+- Removed title-level `[%]` text from gain/bandpass colormap, gain histogram,
+  antenna, stats, and KS figure titles in `gdp-plot`.
+- Removed title-level `[%]` text from direct `gdp-stats --smode gain-colormap`
+  figure titles.
+- Kept percent units on axes, colorbars, and subplot labels where they describe
+  the plotted data.
+- Tightened the top layout rectangle for bandpass antenna plots so subplots sit
+  closer to the two-line title.
+- Updated `gdp-plot` HTML documentation.
+
+## 2026-07-31 16:09:33 IST
+
+Prompt / Request
+- Further reduce the gap between the bandpass antenna plot title and the
+  subplots.
+
+Changes Made
+- Lowered the bandpass antenna plot suptitle position and increased the
+  `tight_layout` top rectangle so the panels sit closer to the two-line title.
+
+## 2026-07-31 16:15:09 IST
+
+Prompt / Request
+- Check that README and related documentation are updated before pushing a new
+  version.
+
+Changes Made
+- Audited the HTML documentation for recent `gdp-stats` and `gdp-plot` changes,
+  including `--range`, `--npz-path`, bandpass `Delta nu`, antenna plot axes,
+  one-decimal summary statistics, and title-unit cleanup.
+- Updated `doc/README.md` so it matches the current command examples and
+  version target.
+- Added a `.gitignore` rule for `casa-*.log` so generated CASA logs remain out
+  of release commits when the git-push utility stages GDP directories.
