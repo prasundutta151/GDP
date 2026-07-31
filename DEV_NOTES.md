@@ -1721,3 +1721,16 @@ Changes Made
   version target.
 - Added a `.gitignore` rule for `casa-*.log` so generated CASA logs remain out
   of release commits when the git-push utility stages GDP directories.
+
+## 2026-07-31 17:25:30 IST
+
+Prompt / Request
+- Add `all` as a `-pmode` value in `gdp-plot`.
+- `-pmode all` should run only `gain-colormap`, `gain-hist`, `stats`, and `ks`.
+
+Changes Made
+- Added `all` to `gdp-plot -pmode`.
+- `-pmode all` expands to `gain_colormap`, `gain_hist`, `stats`, and `ks` only.
+- Kept antenna, self-correlation, and cross-correlation plot modes out of the
+  `all` expansion.
+- Updated README and `gdp-plot` documentation.

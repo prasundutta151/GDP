@@ -36,8 +36,10 @@ PRODUCTS = {
     "self_corr_antenna": ("self_corr", "self_corr_npz_dir", "self-corr"),
     "cross_corr_colormap": ("cross_corr", "cross_corr_npz_dir", "cross-corr"),
 }
+ALL_PMODE_TASKS = ["gain_colormap", "gain_hist", "stats", "ks"]
 
 PMODE_ALIASES = {
+    "all": "all",
     "gain-colormap": "gain_colormap",
     "gain_colormap": "gain_colormap",
     "gain-hist": "gain_hist",
@@ -171,7 +173,11 @@ def parse_pmode(text: Optional[str]) -> List[str]:
             valid = ", ".join(sorted(k for k in PMODE_ALIASES if "-" in k or k in {"antenna", "stats", "ks"}))
             raise ValueError(f"Unknown pmode '{key}'. Valid modes: {valid}")
         task = PMODE_ALIASES[key]
-        if task not in modes:
+        if task == "all":
+            for expanded in ALL_PMODE_TASKS:
+                if expanded not in modes:
+                    modes.append(expanded)
+        elif task not in modes:
             modes.append(task)
     return modes
 
@@ -1715,7 +1721,7 @@ def selected_tasks(args: argparse.Namespace) -> List[str]:
 
     tasks: List[str] = []
     if args.all:
-        tasks.extend(["gain_colormap", "gain_hist", "stats", "ks"])
+        tasks.extend(ALL_PMODE_TASKS)
     for flag, task in [
         (args.gain_colormap, "gain_colormap"),
         (args.gain_hist, "gain_hist"),
@@ -1745,9 +1751,10 @@ def parse_args() -> argparse.Namespace:
         "--pmode",
         default=None,
         help=(
-            "Plot mode(s), comma or space separated: gain-colormap, gain-hist, "
-            "antenna, stats, ks, self-corr-colormap, self-corr-antenna, "
-            "cross-corr-colormap."
+            "Plot mode(s), comma or space separated: all, gain-colormap, "
+            "gain-hist, antenna, stats, ks, self-corr-colormap, "
+            "self-corr-antenna, cross-corr-colormap. all expands to "
+            "gain-colormap, gain-hist, stats, and ks."
         ),
     )
     p.add_argument("--input-table", default=None, help="Input CASA table passed to gdp-stats when products are missing.")

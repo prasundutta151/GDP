@@ -100,7 +100,10 @@ Plot AntStat-style gain histograms from the gains NPZ product:
 
 ```bash
 script/gdp-plot --mode gain -pmode gain-hist
+script/gdp-plot --mode gain -pmode all
 ```
+
+`-pmode all` runs only `gain-colormap`, `gain-hist`, `stats`, and `ks`.
 
 Plot a selected NPZ directly:
 
