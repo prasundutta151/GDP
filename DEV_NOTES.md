@@ -2171,3 +2171,23 @@ Follow-up Validation
 - If `--mode gain --fmode man-chann` is requested, GDP now prints a concise
   `ERROR:` terminal message and exits before reading CASA table rows.
 - In `--mode auto`, `--fmode man-chann` now infers bandpass mode.
+
+## 2026-08-05 18:28:21 IST
+
+Prompt / Request
+- Update the step-by-step guide in all help files.
+
+Changes Made
+- Refreshed `doc/gdp-step-by-step.html` to show the current recommended GDP
+  workflow: setup, table inspection, gains/stats/KS products, flag-version
+  management, self-correlation products, plots, plan execution, and release.
+- Added current `gdp-flag` examples for CASA flags, manual antenna flags,
+  manual bandpass channel flags, explicit output flag versions, new-only flag
+  writes, and flag-version removal.
+- Added expected terminal-output patterns for flag carry-forward, missing
+  requested flag versions, and invalid gain-mode channel flag requests.
+- Added a step-by-step guide link block to every HTML help page and linked the
+  guide from every documentation tree.
+- Updated `doc/README.md`, `doc/README.html`, and `pipelines/sample_stats.plan`
+  so quick-start and dry-run examples match the current `gdp-stats`,
+  `gdp-flag`, `gdp-plot`, and `gdp-plan-run` behavior.

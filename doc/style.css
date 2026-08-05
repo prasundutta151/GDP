@@ -30,6 +30,7 @@ a {
 }
 .doc-tree,
 .product-formats,
+.step-guide,
 .sample-plots,
 .format-reader {
   margin: 0 0 28px;
@@ -43,6 +44,7 @@ a {
 }
 .doc-tree h2,
 .product-formats h2,
+.step-guide h2,
 .sample-plots h2,
 .format-reader h2 {
   margin-top: 0;

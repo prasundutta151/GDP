@@ -9,6 +9,8 @@ flag-product generation.
 ## Documentation Tree
 
 - `README.html`: main browser entry point.
+- `gdp-step-by-step.html`: recommended workflow from setup through products,
+  flag versions, plots, plans, and release steps.
 - `gdp-setup.html`: setup command for runtime, gain-table, and bandpass-table configuration.
 - `gdp-util.html`: utility command for reading metadata from CASA tables.
 - `gdp-stats.html`: statistics command and GDP data-product formats.
@@ -91,7 +93,7 @@ script/gdp-util --bandpass-table --header
 Compute GDP statistics:
 
 ```bash
-script/gdp-stats --smode stats,ks
+casa --nogui --nologger --nologfile --log2term -c script/gdp-stats --smode gains,stats,ks
 script/gdp-stats --smode all
 script/gdp-stats --mode gain --scan 17 --smode gains
 script/gdp-plot --mode gain --scan 17 -pmode colormap --range 20
@@ -109,8 +111,17 @@ Create GDP flag versions:
 ```bash
 script/gdp-flag --mode gain --scan 17 --fmode casa-flags
 script/gdp-flag --mode gain --scan 17 --fmode man-antenna --man-antenna 3,4 --use-flags
+script/gdp-flag --mode gain --scan 17 --fmode man-antenna 9 --new-flags
+script/gdp-flag --mode gain --scan 17 --fmode man-antenna --man-antenna 9 --out-fver 5
 script/gdp-flag --mode bandpass --scan 18 --bchan 800 --echan 3000 --fmode man-chann --man-chann "[900,1200]" --new-flags
+script/gdp-flag --mode gain --scan 17 --fmode remove-version
+script/gdp-flag --mode gain --scan 17 --fmode remove-version 3
 ```
+
+Manual flag commands carry the highest previous flag version by default. Use
+`--new-flags` to write only the newly requested flags. `man-chann` is valid only
+for bandpass mode; requested flag versions that do not exist are reported as
+terminal `ERROR:` messages and the command exits without a Python traceback.
 
 Plot AntStat-style gain histograms from the gains NPZ product:
 
@@ -158,3 +169,5 @@ Run a plan:
 ```bash
 script/gdp-plan-run pipelines/sample_stats.plan --dry-run
 ```
+
+For the full recommended order, open `doc/gdp-step-by-step.html`.

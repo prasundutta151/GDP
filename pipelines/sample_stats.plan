@@ -17,11 +17,11 @@ variables:
   plot_png_dir: ${project_root}/rundir/plots/png
 
 intent: gdp-stats
-  #name: gain statistics with csv
+  name: gain samples for plotting
   mode: gain
   combine-scans: false
   smode: gains
-  scan: 2
+  scan: 17
 #  output-npz: ${stats_npz}
 #  csv: true
 #  output-csv: ${stats_csv}
@@ -36,10 +36,10 @@ end
 #  use-flags: true
 #end
 
-#intent: gdp-plot
-#  name: plot gain statistics
-#  mode: gain
-#  combine-scans: true
-#  pmode: stats
-#  plot-dir: ${plot_png_dir}
-#end
+intent: gdp-plot
+  name: plot gain colormap
+  mode: gain
+  scan: 17
+  pmode: colormap
+  plot-dir: ${plot_png_dir}
+end
