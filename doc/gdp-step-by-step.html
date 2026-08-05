@@ -92,7 +92,8 @@ antennas: [...]</code></pre>
       <p>Run these in a CASA-enabled shell because table reading uses <code>casatools</code>.</p>
       <pre><code>casa --nogui --nologger --nologfile --log2term -c script/gdp-stats --mode gain --scan 2 --smode stats,ks</code></pre>
       <pre><code>casa --nogui --nologger --nologfile --log2term -c script/gdp-stats --mode gain --scan 2 --antennas [0,9] --smode stats,ks
-casa --nogui --nologger --nologfile --log2term -c script/gdp-stats --mode gain --scan 2 --antennas 2,3,4,31 --smode stats</code></pre>
+casa --nogui --nologger --nologfile --log2term -c script/gdp-stats --mode gain --scan 2 --antennas 2,3,4,31 --smode stats
+casa --nogui --nologger --nologfile --log2term -c script/gdp-stats --mode gain --scan 2 --antennas "(1,5)" 6 "(9-12)" 15 16 19 --smode stats</code></pre>
       <p>Expected runtime output pattern:</p>
       <pre><code>START stats scan2
 Wrote stats NPZ: .../data-product/stats/npz/gdp-stats-gain-scan2.npz

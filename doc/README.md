@@ -93,6 +93,7 @@ script/gdp-stats --mode gain --smode colormap --range 20
 script/gdp-stats --mode bandpass --smode colormap -pchans "[16,64]" --range 20
 script/gdp-stats --antennas [0,9] --smode stats
 script/gdp-stats --antennas 1 2 3 4 13 --smode stats
+script/gdp-stats --antennas "(1,5)" 6 "(9-12)" 15 16 19 --smode stats
 script/gdp-stats --smode stats --csv
 ```
 

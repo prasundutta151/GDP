@@ -1810,8 +1810,9 @@ Changes Made
 ## 2026-08-05 12:06:18 IST
 
 Prompt / Request
-- Make the `reim` density colorbar show point counts in factor-of-two steps,
-  with seven values and count labels in multiples of 50.
+- Make the `reim` density colorbar show point counts in factor-of-two steps.
+  This intermediate request was later revised to seven log-spaced levels
+  starting at 5 counts.
 
 Changes Made
 - Added a seven-level factor-of-two count scale for `gdp-plot -pmode reim`
@@ -1837,14 +1838,17 @@ Changes Made
 ## 2026-08-05 12:26:44 IST
 
 Prompt / Request
-- For `reim`, start the color scale at the lowest colorbar label (5 counts), and use seven log-spaced count labels starting at 5.
+- For `reim`, start the color scale at the lowest colorbar label and use seven
+  evenly distributed count labels. This intermediate request was later revised
+  to seven log-spaced levels starting at 5 counts.
 - Increase the vertical size of the individual subplots while keeping the full
   figure aspect ratio at 4:3, so the whitespace below the main title is
   reduced.
 
 Changes Made
 - Replaced the factor-of-two `reim` count colorbar labels with seven evenly
-  spaced labels, all multiples of 50.
+  spaced labels. This was later revised to log-spaced labels starting at 5
+  counts.
 - The colorbar range now starts at the first displayed count label and extends
   to an adjusted upper label that covers the maximum density-bin count.
 - Tightened the `reim` figure layout under the main title and slightly reduced
@@ -1865,3 +1869,101 @@ Changes Made
   density-bin count.
 - Updated documentation wording to remove the older multiples-of-50
   description.
+
+## 2026-08-05 12:46:31 IST
+
+Prompt / Request
+- Preserve antenna range notation in `reim` output filenames. For example,
+  `--antenna "(1,4)"` should use `1-4` in the filename, while explicit antenna
+  lists should name only the selected antennas.
+
+Changes Made
+- Added range-form detection for `gdp-plot -pmode reim` antenna naming.
+- Range inputs such as `(1,4)` and `[1,4]` now produce pooled output suffixes
+  such as `-ants1-4`.
+- Explicit selections such as `--antenna 1,2,4` continue to produce suffixes
+  such as `-ants1_2_4`.
+- Updated the `gdp-plot` documentation for the naming convention.
+
+## 2026-08-05 13:01:22 IST
+
+Prompt / Request
+- Allow antenna selections to mix inclusive ranges and individual antenna
+  numbers, for example `"(1,5)" 6 "(9-12)" 15 16 19`.
+
+Changes Made
+- Updated `gdp-plot --antenna`, `gdp-stats --antennas`, and
+  `gdp-stats --antenna-flag` parsing to accept mixed range/list tokens.
+- Supported range token forms include `(1,5)`, `[1,5]`, `(9-12)`, and `9-12`.
+- Pooled `gdp-plot -pmode reim` filenames preserve mixed selections with
+  suffixes such as `-ants1-5_6_9-12_15_16_19`.
+- Updated CLI help and documentation examples.
+
+## 2026-08-05 13:09:43 IST
+
+Prompt / Request
+- Put the antenna selection line on the second line of the `reim` plot title.
+
+Changes Made
+- Updated the pooled `gdp-plot -pmode reim` figure title to show the gain table
+  and scan on the first line, and the antenna selection on the second line.
+- Updated the `gdp-plot` documentation.
+
+## 2026-08-05 13:18:47 IST
+
+Prompt / Request
+- For `reim` plots, keep both horizontal and vertical axes fixed from `-100`
+  to `+100`, and show how many points are outside that box inside the subplot.
+
+Changes Made
+- Added a fixed `-100` to `+100` percent display box for both Real-1 and Imag
+  axes in all `gdp-plot -pmode reim` panels.
+- Added an in-panel outside-count annotation to both scatter and density panels
+  for each Stokes column.
+- The density histogram is computed from points inside the displayed box, while
+  outside counts are computed from all finite pooled points.
+- Updated the `gdp-plot` documentation.
+
+## 2026-08-05 13:27:58 IST
+
+Prompt / Request
+- In the `reim` plot title, show mixed antenna selections in the same grouped
+  style as the input, for example `Antennas: [0-13] 15 [19-22] 26 27`.
+
+Changes Made
+- Added a display formatter for pooled `reim` antenna titles.
+- Range tokens are shown as bracketed ranges, and individual antennas are shown
+  as space-separated values on the second title line.
+- Filename suffix formatting is unchanged.
+- Updated the `gdp-plot` documentation.
+
+## 2026-08-05 13:39:26 IST
+
+Prompt / Request
+- Replace the fixed `-100` to `+100` `reim` plot limits with a shared x/y
+  range derived from the red dashed Gaussian ellipse radius, and count points
+  outside the red ellipse.
+
+Changes Made
+- `gdp-plot -pmode reim` now uses the same symmetric x and y limits for all
+  four panels.
+- The shared limit is derived from twice the largest red-ellipse radius across
+  the Stokes panels, with safeguards to keep each ellipse visible.
+- The in-panel annotation now reports `Outside ellipse: n/N` for each Stokes
+  panel, using that panel's red Gaussian ellipse.
+- Density histograms are computed from points inside the shared displayed
+  range; the outside count is computed from all finite pooled points.
+- Updated the `gdp-plot` documentation.
+
+## 2026-08-05 13:48:02 IST
+
+Prompt / Request
+- For `reim`, choose the shared plot box size as the lower of `100` or
+  `1.5` times the red ellipse radius.
+
+Changes Made
+- Updated the shared `gdp-plot -pmode reim` x/y half-range to
+  `min(100, 1.5 * max_red_ellipse_radius)`.
+- Removed the previous `2 * radius` range rule.
+- Kept outside counts defined relative to each panel's red ellipse.
+- Updated the `gdp-plot` documentation.

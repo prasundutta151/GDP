@@ -7,6 +7,7 @@ import argparse
 import csv
 import json
 import math
+import re
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -102,18 +103,46 @@ def normalize_list_text(text: object) -> str:
     return str(text)
 
 
+def antenna_tokens(text: object) -> List[str]:
+    value = normalize_list_text(text).strip()
+    raw_tokens = re.findall(r"[\(\[][^\)\]]+[\)\]]|[^\s]+", value)
+    tokens: List[str] = []
+    for raw in raw_tokens:
+        if (raw.startswith("(") and raw.endswith(")")) or (raw.startswith("[") and raw.endswith("]")):
+            tokens.append(raw)
+        else:
+            tokens.extend(part for part in raw.split(",") if part)
+    return [token.strip() for token in tokens if token.strip()]
+
+
+def parse_antenna_token(token: str, option_name: str) -> List[int]:
+    value = token.strip()
+    if (value.startswith("(") and value.endswith(")")) or (value.startswith("[") and value.endswith("]")):
+        value = value[1:-1].strip()
+    if "," in value:
+        parts = [part.strip() for part in value.split(",") if part.strip()]
+        if len(parts) != 2:
+            raise SystemExit(f"{option_name} range form must be two numbers, for example {option_name} [0,9]")
+        start, end = int(parts[0]), int(parts[1])
+        step = 1 if end >= start else -1
+        return list(range(start, end + step, step))
+    if "-" in value and not value.startswith("-"):
+        parts = [part.strip() for part in value.split("-", 1) if part.strip()]
+        if len(parts) != 2:
+            raise SystemExit(f"{option_name} range form must be two numbers, for example {option_name} 0-9")
+        start, end = int(parts[0]), int(parts[1])
+        step = 1 if end >= start else -1
+        return list(range(start, end + step, step))
+    return [int(value)]
+
+
 def parse_antenna_list(text: object, option_name: str = "--antennas") -> Optional[List[int]]:
     if text is None or normalize_list_text(text).strip() == "":
         return None
-    value = normalize_list_text(text).strip()
-    if (value.startswith("(") and value.endswith(")")) or (value.startswith("[") and value.endswith("]")):
-        parts = [part.strip() for part in value[1:-1].split(",") if part.strip()]
-        if len(parts) != 2:
-            raise SystemExit(f"{option_name} range form must be two numbers, for example {option_name} [0,9]")
-        start, end = (int(parts[0]), int(parts[1]))
-        step = 1 if end >= start else -1
-        return list(range(start, end + step, step))
-    return sorted({int(part) for part in value.replace(",", " ").split() if part.strip()})
+    antennas: List[int] = []
+    for token in antenna_tokens(text):
+        antennas.extend(parse_antenna_token(token, option_name))
+    return sorted(set(antennas))
 
 
 def antenna_flag_set(antenna_flags: Optional[List[int]]) -> set[int]:
@@ -1497,8 +1526,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--mode", choices=["auto", "gain", "bandpass"], default="auto", help="Statistics mode. Default: auto.")
     p.add_argument("--scan", default=None, help="Comma-separated scans to process. Default: all scans.")
     p.add_argument("--combine-scans", action="store_true", help="Combine selected scans into one allscans-style product. Default: false, write one product per scan.")
-    p.add_argument("--antennas", nargs="+", default=None, help="Antenna list or inclusive range. Examples: --antennas [0,9] for antennas 0 through 9; --antennas 2,3,4,31 or --antennas 2 3 4 31 for explicit antenna IDs. Default: all antennas.")
-    p.add_argument("--antenna-flag", nargs="+", default=None, help="Antenna list or inclusive range to force-flag. These antennas remain in outputs but all their samples are treated as flagged/non-finite.")
+    p.add_argument("--antennas", nargs="+", default=None, help="Antenna list, inclusive range, or mixed selection. Examples: --antennas [0,9] for antennas 0 through 9; --antennas 2,3,4,31 or --antennas 2 3 4 31 for explicit antenna IDs; --antennas \"(1,5)\" 6 \"(9-12)\" 15 16 19 for mixed ranges and single antennas. Default: all antennas.")
+    p.add_argument("--antenna-flag", nargs="+", default=None, help="Antenna list, inclusive range, or mixed selection to force-flag. These antennas remain in outputs but all their samples are treated as flagged/non-finite.")
     p.add_argument("--bchan", type=int, default=None, help="Start channel, inclusive.")
     p.add_argument("--echan", type=int, default=None, help="End channel, exclusive.")
     p.add_argument("-pchans", "--pchans", nargs="+", default=None, help="Plot channel window as '[start,end)' for --smode colormap. Limits displayed channels and subplot-title statistics without changing NPZ products.")

@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import re
 import subprocess
 import sys
 import time
@@ -130,18 +131,46 @@ def normalize_list_text(text: object) -> str:
     return str(text)
 
 
+def antenna_tokens(text: object) -> List[str]:
+    value = normalize_list_text(text).strip()
+    raw_tokens = re.findall(r"[\(\[][^\)\]]+[\)\]]|[^\s]+", value)
+    tokens: List[str] = []
+    for raw in raw_tokens:
+        if (raw.startswith("(") and raw.endswith(")")) or (raw.startswith("[") and raw.endswith("]")):
+            tokens.append(raw)
+        else:
+            tokens.extend(part for part in raw.split(",") if part)
+    return [token.strip() for token in tokens if token.strip()]
+
+
+def parse_antenna_token(token: str, option_name: str) -> List[int]:
+    value = token.strip()
+    if (value.startswith("(") and value.endswith(")")) or (value.startswith("[") and value.endswith("]")):
+        value = value[1:-1].strip()
+    if "," in value:
+        parts = [part.strip() for part in value.split(",") if part.strip()]
+        if len(parts) != 2:
+            raise SystemExit(f"{option_name} range form must be two numbers, for example {option_name} [0,9]")
+        start, end = int(parts[0]), int(parts[1])
+        step = 1 if end >= start else -1
+        return list(range(start, end + step, step))
+    if "-" in value and not value.startswith("-"):
+        parts = [part.strip() for part in value.split("-", 1) if part.strip()]
+        if len(parts) != 2:
+            raise SystemExit(f"{option_name} range form must be two numbers, for example {option_name} 0-9")
+        start, end = int(parts[0]), int(parts[1])
+        step = 1 if end >= start else -1
+        return list(range(start, end + step, step))
+    return [int(value)]
+
+
 def parse_antenna_list(text: object, option_name: str = "--antenna") -> Optional[List[int]]:
     if text is None or normalize_list_text(text).strip() == "":
         return None
-    value = normalize_list_text(text).strip()
-    if (value.startswith("(") and value.endswith(")")) or (value.startswith("[") and value.endswith("]")):
-        parts = [part.strip() for part in value[1:-1].split(",") if part.strip()]
-        if len(parts) != 2:
-            raise SystemExit(f"{option_name} range form must be two numbers, for example {option_name} [0,9]")
-        start, end = (int(parts[0]), int(parts[1]))
-        step = 1 if end >= start else -1
-        return list(range(start, end + step, step))
-    return sorted({int(part) for part in value.replace(",", " ").split() if part.strip()})
+    antennas: List[int] = []
+    for token in antenna_tokens(text):
+        antennas.extend(parse_antenna_token(token, option_name))
+    return sorted(set(antennas))
 
 
 def parse_float_range(text: Optional[str]) -> Optional[Tuple[float, float]]:
@@ -836,24 +865,6 @@ def add_gaussian_one_point_ellipse(ax: Any, ellipse_spec: Optional[Tuple[float, 
     )
 
 
-def axis_limit_pair_with_ellipse(
-    real: np.ndarray,
-    imag: np.ndarray,
-    ellipse_spec: Optional[Tuple[float, float, float, float]],
-) -> Tuple[float, float, float, float]:
-    xmin, xmax, ymin, ymax = axis_limit_pair(real, imag)
-    if ellipse_spec is None:
-        return xmin, xmax, ymin, ymax
-    xmean, ymean, width, height = ellipse_spec
-    xmin = min(xmin, xmean - 0.5 * width)
-    xmax = max(xmax, xmean + 0.5 * width)
-    ymin = min(ymin, ymean - 0.5 * height)
-    ymax = max(ymax, ymean + 0.5 * height)
-    xpad = 0.03 * (xmax - xmin) if xmax > xmin else 1.0
-    ypad = 0.03 * (ymax - ymin) if ymax > ymin else 1.0
-    return xmin - xpad, xmax + xpad, ymin - ypad, ymax + ypad
-
-
 def log_count_levels(max_count: float, nlevels: int = 7, start: float = 5.0) -> np.ndarray:
     if not np.isfinite(max_count) or max_count <= 0:
         max_count = start
@@ -874,16 +885,122 @@ def count_tick_label(value: float) -> str:
     return f"{value:.1f}".rstrip("0").rstrip(".")
 
 
-def antenna_selection_tag(antennas: Optional[List[int]], selected: np.ndarray) -> str:
+def points_outside_ellipse(
+    real: np.ndarray,
+    imag: np.ndarray,
+    ellipse_spec: Optional[Tuple[float, float, float, float]],
+) -> np.ndarray:
+    if ellipse_spec is None:
+        return np.zeros(np.asarray(real).shape, dtype=bool)
+    xmean, ymean, width, height = ellipse_spec
+    xrad = 0.5 * width
+    yrad = 0.5 * height
+    if xrad <= 0.0 or yrad <= 0.0:
+        return np.zeros(np.asarray(real).shape, dtype=bool)
+    return (((real - xmean) / xrad) ** 2 + ((imag - ymean) / yrad) ** 2) > 1.0
+
+
+def ellipse_radius(ellipse_spec: Optional[Tuple[float, float, float, float]]) -> float:
+    if ellipse_spec is None:
+        return 0.0
+    _, _, width, height = ellipse_spec
+    return 0.5 * max(float(width), float(height))
+
+
+def shared_reim_axis_limit(panel_specs: Sequence[Tuple[int, np.ndarray, np.ndarray, Optional[Tuple[float, float, float, float]]]]) -> float:
+    radii = [ellipse_radius(spec) for _, _, _, spec in panel_specs]
+    limit = 1.5 * max(radii, default=0.0)
+    if not np.isfinite(limit) or limit <= 0.0:
+        finite_values: List[np.ndarray] = []
+        for _, real, imag, _ in panel_specs:
+            if real.size:
+                finite_values.append(np.abs(real[np.isfinite(real)]))
+            if imag.size:
+                finite_values.append(np.abs(imag[np.isfinite(imag)]))
+        limit = float(np.nanmax(np.concatenate(finite_values))) if finite_values else 1.0
+    return max(1.0, min(100.0, float(limit)))
+
+
+def add_outside_ellipse_text(ax: Any, outside_count: int, total_count: int) -> None:
+    ax.text(
+        0.03,
+        0.94,
+        f"Outside ellipse: {outside_count}/{total_count}",
+        transform=ax.transAxes,
+        ha="left",
+        va="top",
+        fontsize=7,
+        color="black",
+        bbox={"facecolor": "white", "edgecolor": "0.65", "alpha": 0.78, "pad": 2.0},
+    )
+
+
+def antenna_range_pair(text: Optional[str]) -> Optional[Tuple[int, int]]:
+    if text is None:
+        return None
+    value = normalize_list_text(text).strip()
+    if not ((value.startswith("(") and value.endswith(")")) or (value.startswith("[") and value.endswith("]"))):
+        return None
+    parts = [part.strip() for part in value[1:-1].split(",") if part.strip()]
+    if len(parts) != 2:
+        return None
+    try:
+        return int(parts[0]), int(parts[1])
+    except ValueError:
+        return None
+
+
+def antenna_selection_tag_parts(text: Optional[str]) -> Optional[List[str]]:
+    if text is None or normalize_list_text(text).strip() == "":
+        return None
+    parts: List[str] = []
+    for token in antenna_tokens(text):
+        value = token.strip()
+        if (value.startswith("(") and value.endswith(")")) or (value.startswith("[") and value.endswith("]")):
+            value = value[1:-1].strip()
+        if "," in value:
+            range_parts = [part.strip() for part in value.split(",") if part.strip()]
+            if len(range_parts) == 2:
+                parts.append(f"{int(range_parts[0])}-{int(range_parts[1])}")
+                continue
+        if "-" in value and not value.startswith("-"):
+            range_parts = [part.strip() for part in value.split("-", 1) if part.strip()]
+            if len(range_parts) == 2:
+                parts.append(f"{int(range_parts[0])}-{int(range_parts[1])}")
+                continue
+        parts.append(str(int(value)))
+    return parts
+
+
+def antenna_selection_title_parts(text: Optional[str]) -> Optional[List[str]]:
+    tag_parts = antenna_selection_tag_parts(text)
+    if not tag_parts:
+        return None
+    title_parts: List[str] = []
+    for part in tag_parts:
+        if "-" in part and not part.startswith("-"):
+            title_parts.append(f"[{part}]")
+        else:
+            title_parts.append(part)
+    return title_parts
+
+
+def antenna_selection_tag(antennas: Optional[List[int]], selected: np.ndarray, antenna_text: Optional[str] = None) -> str:
     if antennas is None:
         return "allants"
+    parts = antenna_selection_tag_parts(antenna_text)
+    if parts:
+        return "ants" + "_".join(parts)
     return "ants" + "_".join(str(int(ant)) for ant in selected)
 
 
-def antenna_selection_title(antennas: Optional[List[int]], selected: np.ndarray) -> str:
+def antenna_selection_title(antennas: Optional[List[int]], selected: np.ndarray, antenna_text: Optional[str] = None) -> str:
     if antennas is None:
         return f"all antennas ({len(selected)})"
-    return ",".join(str(int(ant)) for ant in selected)
+    parts = antenna_selection_title_parts(antenna_text)
+    if parts:
+        return " ".join(parts)
+    return " ".join(str(int(ant)) for ant in selected)
 
 
 def plot_reim_products(
@@ -892,6 +1009,7 @@ def plot_reim_products(
     antennas: Optional[List[int]],
     mode: str,
     pchans: Optional[Tuple[int, int]] = None,
+    antenna_text: Optional[str] = None,
 ) -> List[Path]:
     z = load_npz(npz_path)
     required = {"scan", "antenna", "stokes", "channel", "real", "imag"}
@@ -937,11 +1055,17 @@ def plot_reim_products(
         print("SKIP reim plot: selected antennas/stokes have no finite unflagged real/imag pairs.")
         return []
 
+    panel_specs = [
+        (stokes, real_vals, imag_vals, gaussian_one_point_ellipse(real_vals, imag_vals) if real_vals.size else None)
+        for stokes, real_vals, imag_vals in panels
+    ]
+    axis_limit = shared_reim_axis_limit(panel_specs)
+
     out_base.parent.mkdir(parents=True, exist_ok=True)
-    ncols = len(panels)
+    ncols = len(panel_specs)
     fig_width = max(7.2, 3.6 * ncols)
     fig, axes = plt.subplots(2, ncols, figsize=(fig_width, fig_width * 3.0 / 4.0), squeeze=False)
-    for ci, (stokes, real_vals, imag_vals) in enumerate(panels):
+    for ci, (stokes, real_vals, imag_vals, ellipse_spec) in enumerate(panel_specs):
         ax_scatter = axes[0, ci]
         ax_density = axes[1, ci]
         if real_vals.size == 0:
@@ -952,8 +1076,10 @@ def plot_reim_products(
         else:
             xmean = float(np.nanmean(real_vals))
             ymean = float(np.nanmean(imag_vals))
-            ellipse_spec = gaussian_one_point_ellipse(real_vals, imag_vals)
-            xmin, xmax, ymin, ymax = axis_limit_pair_with_ellipse(real_vals, imag_vals, ellipse_spec)
+            xmin, xmax, ymin, ymax = -axis_limit, axis_limit, -axis_limit, axis_limit
+            visible = (real_vals >= xmin) & (real_vals <= xmax) & (imag_vals >= ymin) & (imag_vals <= ymax)
+            outside_ellipse = points_outside_ellipse(real_vals, imag_vals, ellipse_spec)
+            outside_count = int(np.count_nonzero(outside_ellipse))
             title = (
                 f"Stokes {stokes}\n"
                 f"Re-1: {sample_stats_text(real_vals)}\n"
@@ -969,10 +1095,11 @@ def plot_reim_products(
             ax.set_ylim(ymin, ymax)
             ax.set_title(title, fontsize=7)
             ax.grid(True, linestyle=":", linewidth=0.6, alpha=0.55)
+            add_outside_ellipse_text(ax, outside_count, int(real_vals.size))
 
             ax = ax_density
             bins = 48
-            counts, xedges, yedges = np.histogram2d(real_vals, imag_vals, bins=bins, range=[[xmin, xmax], [ymin, ymax]])
+            counts, xedges, yedges = np.histogram2d(real_vals[visible], imag_vals[visible], bins=bins, range=[[xmin, xmax], [ymin, ymax]])
             density = counts.T
             count_ticks = log_count_levels(float(np.nanmax(density)) if density.size else 0.0)
             log_vmin = float(np.log10(count_ticks[0]))
@@ -996,6 +1123,7 @@ def plot_reim_products(
             ax.set_xlim(xmin, xmax)
             ax.set_ylim(ymin, ymax)
             ax.grid(False)
+            add_outside_ellipse_text(ax, outside_count, int(real_vals.size))
             cbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.025)
             cbar.ax.tick_params(labelsize=6)
             cbar.set_ticks(np.log10(count_ticks))
@@ -1012,10 +1140,10 @@ def plot_reim_products(
         axes[0, ci].tick_params(axis="both", labelsize=7)
         axes[1, ci].tick_params(axis="both", labelsize=7)
 
-    ant_title = antenna_selection_title(antennas, ant_all)
-    fig.suptitle(f"Gain Table: {table_name} | Antennas: {ant_title} | Scan: {scan_label}{pchan_title_text(pchans)}", fontsize=10, y=0.965)
+    ant_title = antenna_selection_title(antennas, ant_all, antenna_text)
+    fig.suptitle(f"Gain Table: {table_name} | Scan: {scan_label}{pchan_title_text(pchans)}\nAntennas: {ant_title}", fontsize=10, y=0.975)
     fig.tight_layout(rect=(0, 0.015, 1, 0.985), h_pad=0.55, w_pad=0.65)
-    out = derived_output_path(out_base, antenna_selection_tag(antennas, ant_all))
+    out = derived_output_path(out_base, antenna_selection_tag(antennas, ant_all, antenna_text))
     fig.savefig(out, dpi=DEFAULT_PLOT_DPI)
     plt.close(fig)
     print(f"Wrote plot: {out}")
@@ -2018,7 +2146,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--npz-path", default=None, help="Use this NPZ file directly for the selected plot mode instead of discovering or creating the default GDP product.")
     p.add_argument("--scan", default=None, help="Comma-separated scans. Must match or create the corresponding GDP products.")
     p.add_argument("--combine-scans", action="store_true", help="Plot one combined allscans-style product. Default: false, make one plot per scan.")
-    p.add_argument("--antenna", nargs="+", default=None, help="Antenna list or inclusive range. Examples: --antenna [0,9] for antennas 0 through 9; --antenna 2,3,4,31 or --antenna 2 3 4 31 for explicit antenna IDs. The same list is passed to gdp-stats if missing products must be created.")
+    p.add_argument("--antenna", nargs="+", default=None, help="Antenna list, inclusive range, or mixed selection. Examples: --antenna [0,9] for antennas 0 through 9; --antenna 2,3,4,31 or --antenna 2 3 4 31 for explicit antenna IDs; --antenna \"(1,5)\" 6 \"(9-12)\" 15 16 19 for mixed ranges and single antennas. The same list is passed to gdp-stats if missing products must be created.")
     p.add_argument("--bchan", type=int, default=None, help="Bandpass start channel passed to gdp-stats when needed.")
     p.add_argument("--echan", type=int, default=None, help="Bandpass end channel passed to gdp-stats when needed.")
     p.add_argument("-pchans", "--pchans", nargs="+", default=None, help="Plot channel window as '[start,end)'. Limits gains-based plots and subplot statistics without changing NPZ product discovery.")
@@ -2075,7 +2203,7 @@ def main() -> None:
                 elif task == "gain_hist":
                     plot_gain_histogram(npz, out, ants, mode, args.hist_bins, hist_range, pchans)
                 elif task == "reim":
-                    plot_reim_products(npz, out, ants, mode, pchans)
+                    plot_reim_products(npz, out, ants, mode, pchans, antenna_text)
                 elif task == "antenna":
                     plot_single_antenna_gain_products(npz, out, ants, mode, pchans)
                 elif task == "stats":

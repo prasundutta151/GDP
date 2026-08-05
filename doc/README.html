@@ -68,6 +68,7 @@ script/gdp-stats --smode stats,ks  [compute stats and KS products from the saved
 script/gdp-stats --smode all  [run gains, colormap, stats, KS, and self-corr]
 script/gdp-stats --antennas [0,9] --smode stats  [compute stats for antennas 0 through 9]
 script/gdp-stats --antennas 2,3,4,31 --smode stats  [compute stats for explicit antenna IDs]
+script/gdp-stats --antennas "(1,5)" 6 "(9-12)" 15 16 19 --smode stats  [compute stats for mixed antenna ranges and explicit IDs]
 script/gdp-stats --smode stats --csv  [compute stats and optional CSV from the saved input]
 script/gdp-stats --smode stats --combine-scans  [write one combined allscans stats product]
 script/gdp-stats --mode gain --smode colormap --range 20  [create gains NPZ and Real-1/Imag colormap plots with fixed percent saturation]

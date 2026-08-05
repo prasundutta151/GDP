@@ -55,6 +55,7 @@ script/gdp-stats /path/to/table.b --mode bandpass --bchan 0 --echan 128 --smode 
 script/gdp-stats --scan 1,2 --antennas 0,1,2 --smode all  [run every implemented stats subtask for selected antennas]
 script/gdp-stats --antennas [0,9] --smode stats  [use antennas 0 through 9 inclusively]
 script/gdp-stats --antennas 1 2 3 4 13 --smode stats  [use only antennas 1, 2, 3, 4, and 13]
+script/gdp-stats --antennas "(1,5)" 6 "(9-12)" 15 16 19 --smode stats  [use mixed antenna ranges and single antennas]
 script/gdp-stats --smode all --antenna-flag 3,4  [force antennas 3 and 4 to be treated as flagged/non-finite while keeping them in product axes]</code></pre>
     </section>
 
@@ -70,8 +71,8 @@ script/gdp-stats --smode all --antenna-flag 3,4  [force antennas 3 and 4 to be t
         <tr><td><code>--mode {auto,gain,bandpass}</code></td><td>Statistics mode. Default: <code>auto</code>.</td></tr>
         <tr><td><code>--scan LIST</code></td><td>Comma-separated scans. Default: all scans.</td></tr>
         <tr><td><code>--combine-scans</code></td><td>Combine selected scans into one <code>allscans</code>-style product. Default: false, so GDP writes one product per scan.</td></tr>
-        <tr><td><code>--antennas LIST</code></td><td>Antenna selection. Use <code>--antennas [0,9]</code> for an inclusive range. Use <code>--antennas 2,3,4,31</code> or <code>--antennas 2 3 4 31</code> for explicit antenna numbers. Default: all antennas.</td></tr>
-        <tr><td><code>--antenna-flag LIST</code></td><td>Force selected antennas to be treated as flagged. Uses the same list/range syntax as <code>--antennas</code>. Forced antennas remain in output axes, but their gains, stats, KS, and correlation samples are saved as flagged or non-finite.</td></tr>
+        <tr><td><code>--antennas LIST</code></td><td>Antenna selection. Use <code>--antennas [0,9]</code> for an inclusive range. Use <code>--antennas 2,3,4,31</code> or <code>--antennas 2 3 4 31</code> for explicit antenna numbers. Mixed selections are allowed, for example <code>--antennas "(1,5)" 6 "(9-12)" 15 16 19</code>. Default: all antennas.</td></tr>
+        <tr><td><code>--antenna-flag LIST</code></td><td>Force selected antennas to be treated as flagged. Uses the same list/range/mixed syntax as <code>--antennas</code>. Forced antennas remain in output axes, but their gains, stats, KS, and correlation samples are saved as flagged or non-finite.</td></tr>
         <tr><td><code>--bchan INT</code></td><td>Start channel, inclusive. In bandpass mode, when both <code>--bchan</code> and <code>--echan</code> are supplied, default product names include <code>chan_&lt;bchan&gt;_&lt;echan&gt;</code>.</td></tr>
         <tr><td><code>--echan INT</code></td><td>End channel, exclusive. In bandpass mode, when both <code>--bchan</code> and <code>--echan</code> are supplied, default product names include <code>chan_&lt;bchan&gt;_&lt;echan&gt;</code>.</td></tr>
         <tr><td><code>-pchans [START,END]</code></td><td>Plot-only channel window for <code>--smode colormap</code>. The start channel is inclusive and the end channel is exclusive. The gains NPZ is still created from the normal <code>--bchan</code>/<code>--echan</code> selection, but the colormap display and subplot-title mean/std/skew/kurtosis use only the selected plot channels. Default plot names append <code>pchan_&lt;start&gt;_&lt;end&gt;</code>.</td></tr>
