@@ -12,9 +12,11 @@ flag-product generation.
 - `gdp-setup.html`: setup command for runtime, gain-table, and bandpass-table configuration.
 - `gdp-util.html`: utility command for reading metadata from CASA tables.
 - `gdp-stats.html`: statistics command and GDP data-product formats.
+- `gdp-flag.html`: flag sidecar creation and versioning command.
 - `gdp-plot.html`: plotting command for GDP NPZ products.
 - `gdp-plan-run.html`: plan-file runner for repeatable GDP workflows.
 - `gdp-product-gains.html`: gains NPZ product format.
+- `gdp-product-flags.html`: versioned `.flg` flag sidecar format.
 - `gdp-product-stats.html`: stats NPZ product format.
 - `gdp-product-ks.html`: KS NPZ product format.
 - `gdp-product-self-corr.html`: self-correlation NPZ product format.
@@ -31,6 +33,8 @@ flag-product generation.
   antenna-wise statistics, KS products, and self-correlation products, with
   optional CSV output. By default it writes one product per scan; use
   `--combine-scans` for one combined `allscans` product.
+- `script/gdp-flag`: creates versioned `.flg` flag sidecar files from CASA
+  table flags, manual antenna flags, or manual bandpass channel flags.
 - `script/gdp-plot`: plots GDP NPZ products and runs `gdp-stats` first when a
   requested product is missing. By default it writes one plot per scan; use
   `--combine-scans` for one combined `allscans` plot, or `--npz-path` to plot
@@ -79,7 +83,7 @@ script/gdp-setup --show
 Read a CASA table header:
 
 ```bash
-script/gdp-util /path/to/table.g --header
+script/gdp-util --input-table /path/to/table.g --header
 script/gdp-util --gain-table --header
 script/gdp-util --bandpass-table --header
 ```
@@ -89,12 +93,23 @@ Compute GDP statistics:
 ```bash
 script/gdp-stats --smode stats,ks
 script/gdp-stats --smode all
-script/gdp-stats --mode gain --smode colormap --range 20
-script/gdp-stats --mode bandpass --smode colormap -pchans "[16,64]" --range 20
+script/gdp-stats --mode gain --scan 17 --smode gains
+script/gdp-plot --mode gain --scan 17 -pmode colormap --range 20
+script/gdp-plot --mode bandpass -pmode colormap -pchans "[16,64]" --range 20
+script/gdp-stats --mode gain --scan 17 --smode gains --flagver 1
+script/gdp-stats --mode gain --scan 17 --smode stats,ks --use-flags --flagver 1
 script/gdp-stats --antennas [0,9] --smode stats
 script/gdp-stats --antennas 1 2 3 4 13 --smode stats
 script/gdp-stats --antennas "(1,5)" 6 "(9-12)" 15 16 19 --smode stats
 script/gdp-stats --smode stats --csv
+```
+
+Create GDP flag versions:
+
+```bash
+script/gdp-flag --mode gain --scan 17 --fmode casa-flags
+script/gdp-flag --mode gain --scan 17 --fmode man-antenna --man-antenna 3,4 --use-flags
+script/gdp-flag --mode bandpass --scan 18 --bchan 800 --echan 3000 --fmode man-chann --man-chann "[900,1200]" --new-flags
 ```
 
 Plot AntStat-style gain histograms from the gains NPZ product:
@@ -129,7 +144,7 @@ script/gdp-plot --mode bandpass --scan 18 --bchan 800 --echan 3000 -pmode antenn
 Read table date and channel-width metadata as JSON:
 
 ```bash
-script/gdp-util /path/to/table.ms --date --channel-width --json
+script/gdp-util --input-table /path/to/table.ms --date --channel-width --json
 ```
 
 Create a version archive, commit, and push:

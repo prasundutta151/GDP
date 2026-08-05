@@ -27,6 +27,8 @@ except Exception as exc:
 
 CONFIG_NAME = ".gdp-config.json"
 ACTIVE_CONFIG: Optional[Dict[str, Any]] = None
+ACTIVE_FLAGVER: Optional[int] = None
+APPLY_FLAG_FILES: bool = False
 DEFAULT_PLOT_DPI = 320
 PRODUCTS = {
     "gain_colormap": ("gains", "gains_npz_dir", "gains"),
@@ -264,8 +266,6 @@ def validate_channel_options_for_mode(mode: str, args: argparse.Namespace, pchan
         used.append("--echan")
     if pchans is not None:
         used.append("-pchans/--pchans")
-    if args.flag_chans is not None:
-        used.append("--flag-chans")
     if used:
         raise SystemExit(
             "Channel options are valid only in bandpass mode. "
@@ -376,10 +376,10 @@ def ensure_npz(product: str, mode: str, args: argparse.Namespace, scans: Optiona
         cmd.extend(["--bchan", str(args.bchan)])
     if args.echan is not None:
         cmd.extend(["--echan", str(args.echan)])
-    if args.flag_chans:
-        cmd.extend(["--flag-chans", normalize_list_text(args.flag_chans)])
     if args.use_flags:
         cmd.append("--use-flags")
+    if args.flagver is not None:
+        cmd.extend(["--flagver", str(args.flagver)])
 
     print("Creating missing NPZ with gdp-stats:")
     print("$ " + " ".join(cmd))
@@ -442,10 +442,10 @@ def ensure_npzs(product: str, mode: str, args: argparse.Namespace, scans: Option
         cmd.extend(["--bchan", str(args.bchan)])
     if args.echan is not None:
         cmd.extend(["--echan", str(args.echan)])
-    if args.flag_chans:
-        cmd.extend(["--flag-chans", normalize_list_text(args.flag_chans)])
     if args.use_flags:
         cmd.append("--use-flags")
+    if args.flagver is not None:
+        cmd.extend(["--flagver", str(args.flagver)])
 
     print("Creating missing per-scan NPZ products with gdp-stats:")
     print("$ " + " ".join(cmd))
@@ -467,7 +467,81 @@ def ensure_npzs(product: str, mode: str, args: argparse.Namespace, scans: Option
 
 def load_npz(path: Path) -> Dict[str, np.ndarray]:
     with np.load(path, allow_pickle=True) as data:
-        return {key: data[key] for key in data.files}
+        loaded = {key: data[key] for key in data.files}
+    if APPLY_FLAG_FILES and path.suffix != ".flg" and {"real", "imag", "row", "stokes", "channel"}.issubset(loaded):
+        return apply_flag_file_to_gains(loaded, path, ACTIVE_FLAGVER)
+    return loaded
+
+
+def parse_flag_version(value: Optional[str]) -> Optional[int]:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if text.lower().startswith("v"):
+        text = text[1:]
+    if not text.isdigit() or int(text) < 1:
+        raise SystemExit("--flagver must be a positive integer version number.")
+    return int(text)
+
+
+def flag_file_for_npz(npz_path: Path, version: int) -> Path:
+    return npz_path.with_name(f"{npz_path.stem}_V{int(version)}.flg")
+
+
+def flag_file_versions(npz_path: Path) -> List[Tuple[int, Path]]:
+    versions: List[Tuple[int, Path]] = []
+    for path in npz_path.parent.glob(f"{npz_path.stem}_V*.flg"):
+        match = re.fullmatch(rf"{re.escape(npz_path.stem)}_V(\d+)\.flg", path.name)
+        if match:
+            versions.append((int(match.group(1)), path))
+    return sorted(versions, key=lambda item: item[0])
+
+
+def resolve_flag_file(npz_path: Path, flagver: Optional[int]) -> Tuple[int, Path]:
+    if flagver is not None:
+        path = flag_file_for_npz(npz_path, flagver)
+        if not path.exists():
+            raise SystemExit(f"ERROR: requested flag version V{int(flagver)} does not exist: {path}")
+        return flagver, path
+    versions = flag_file_versions(npz_path)
+    if not versions:
+        raise SystemExit(f"ERROR: no flag versions found for {npz_path}. Run gdp-stats --smode gains first.")
+    return versions[-1]
+
+
+def apply_flag_file_to_gains(z: Dict[str, np.ndarray], npz_path: Path, flagver: Optional[int]) -> Dict[str, np.ndarray]:
+    required = {"row", "stokes", "channel"}
+    if not required.issubset(z):
+        return z
+    version, flag_path = resolve_flag_file(npz_path, flagver)
+    flag_data = load_npz(flag_path)
+    missing = {"row", "stokes", "channel", "flag"} - set(flag_data)
+    if missing:
+        raise RuntimeError(f"{flag_path} missing arrays: {sorted(missing)}")
+    lookup = {
+        (int(row), int(pol), int(chan)): bool(flag)
+        for row, pol, chan, flag in zip(
+            np.asarray(flag_data["row"], dtype=int),
+            np.asarray(flag_data["stokes"], dtype=int),
+            np.asarray(flag_data["channel"], dtype=int),
+            np.asarray(flag_data["flag"], dtype=bool),
+        )
+    }
+    flags = np.asarray(
+        [
+            lookup.get((int(row), int(pol), int(chan)), False)
+            for row, pol, chan in zip(
+                np.asarray(z["row"], dtype=int),
+                np.asarray(z["stokes"], dtype=int),
+                np.asarray(z["channel"], dtype=int),
+            )
+        ],
+        dtype=bool,
+    )
+    out = dict(z)
+    out["flagged"] = flags
+    print(f"Using flag file V{version}: {flag_path}")
+    return out
 
 
 def filter_antennas(values: np.ndarray, antennas: Optional[List[int]]) -> np.ndarray:
@@ -2151,7 +2225,6 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--echan", type=int, default=None, help="Bandpass end channel passed to gdp-stats when needed.")
     p.add_argument("-pchans", "--pchans", nargs="+", default=None, help="Plot channel window as '[start,end)'. Limits gains-based plots and subplot statistics without changing NPZ product discovery.")
     p.add_argument("--range", dest="plot_range", type=float, default=None, help="Colormap saturation half-range in percent for gain or bandpass -pmode colormap. The value is rounded up to a multiple of 5 for colorbar labels.")
-    p.add_argument("--flag-chans", nargs="+", default=None, help="Pass-through to gdp-stats: original data-channel window covered by a shorter FLAG channel axis, as '[start,end)'.")
     p.add_argument("--gain-colormap", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--gain-hist", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--antenna-plot", action="store_true", help=argparse.SUPPRESS)
@@ -2170,13 +2243,18 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--recompute", action="store_true", help="Run gdp-stats even if the matching NPZ product already exists.")
     p.add_argument("--dry-run", action="store_true", help="Print gdp-stats commands for missing products without plotting.")
     p.add_argument("--use-flags", action="store_true", help="Pass --use-flags to gdp-stats when creating missing products. Default: false.")
+    p.add_argument("--flagver", default=None, help="Flag sidecar version to use with --use-flags. If omitted, the highest NAME_V<version>.flg file is used.")
     p.add_argument("pmode_values", nargs="*", help=argparse.SUPPRESS)
     return p.parse_args()
 
 
 def main() -> None:
+    global ACTIVE_FLAGVER, APPLY_FLAG_FILES
     args = parse_args()
     activate_config(args.setup_file)
+    args.flagver = parse_flag_version(args.flagver)
+    ACTIVE_FLAGVER = args.flagver
+    APPLY_FLAG_FILES = bool(args.use_flags)
     scans = parse_int_list(args.scan)
     hist_range = parse_float_range(args.hist_range)
     pchans = parse_channel_pair(args.pchans, "-pchans")

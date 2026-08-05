@@ -19,6 +19,7 @@
         <li><a href="gdp-setup.html">gdp-setup</a>: initialize and remember runtime, gain-table, and bandpass-table locations.</li>
         <li><a href="gdp-util.html">gdp-util</a>: read metadata from CASA gain, bandpass, or MeasurementSet tables.</li>
         <li><a href="gdp-stats.html">gdp-stats</a>: compute antenna-wise gain and bandpass products.</li>
+        <li><a href="gdp-flag.html">gdp-flag</a>: create versioned GDP flag sidecar files.</li>
         <li><a href="gdp-plot.html">gdp-plot</a>: plot GDP NPZ products and create missing products with gdp-stats.</li>
         <li><a href="gdp-plan-run.html">gdp-plan-run</a>: run GDP command intents from a plan file.</li>
       </ul>
@@ -27,6 +28,7 @@
       <h2 id="product-formats">Product Formats</h2>
       <ul>
         <li><a href="gdp-product-gains.html">gains NPZ</a></li>
+        <li><a href="gdp-product-flags.html">flag FLG</a></li>
         <li><a href="gdp-product-stats.html">stats NPZ</a></li>
         <li><a href="gdp-product-ks.html">KS NPZ</a></li>
         <li><a href="gdp-product-self-corr.html">self-corr NPZ</a></li>
@@ -36,7 +38,7 @@
 
     <section>
       <h2>Purpose</h2>
-      <p><code>gdp-plot</code> reads the NPZ products created by <code>gdp-stats</code> and saves diagnostic plots under the configured runtime plot directory. If a requested NPZ product is missing, it first runs <code>gdp-stats</code> with the matching <code>--smode</code> task and then plots the newly created file. For the gain/bandpass colormap only, <code>gdp-stats --smode colormap</code> can also create the plot directly while producing the gains NPZ.</p>
+      <p><code>gdp-plot</code> reads the NPZ products created by <code>gdp-stats</code> and saves diagnostic plots under the configured runtime plot directory. If a requested NPZ product is missing, it first runs <code>gdp-stats</code> with the matching data-product <code>--smode</code> task and then plots the newly created file. Colormap plots are produced here from the gains NPZ product.</p>
     </section>
 
     <section>
@@ -48,7 +50,7 @@ script/gdp-plot --mode gain -pmode colormap --range 20  [plot gain Real-1/Imag p
 script/gdp-plot --mode gain --scan 17 -pmode colormap --npz-path /path/to/gdp-gains-gain-scan17.npz  [plot directly from a selected gain scan-17 NPZ]
 script/gdp-plot --mode bandpass --scan 18 --bchan 800 --echan 3000 -pmode colormap  [plot bandpass Real-1/Imag percent colormaps by channel]
 script/gdp-plot --mode bandpass --scan 18 --bchan 800 --echan 3000 -pmode colormap -pchans "[800,1200]" --range 20  [display channels 800 through 1199 and saturate the colormap at +/-20 percent]
-script/gdp-plot --mode bandpass -pmode stats --use-flags --flag-chans "[0,3000]"  [when creating a missing NPZ, pass the shorter-FLAG channel coverage to gdp-stats]
+script/gdp-flag --mode bandpass --scan 18 --bchan 800 --echan 3000 --fmode man-chann --man-chann "[900,1200]" --use-flags  [create a new bandpass flag version before plotting flagged products]
 script/gdp-plot --mode gain -pmode hist --hist-bins 64  [plot AntStat-style per-antenna Real-1/Imag histograms from gains NPZ]
 script/gdp-plot --mode gain --scan 17 -pmode reim --antenna "[0,29]"  [plot pooled Real-1 versus Imag scatter and log10-count density panels for antennas 0 through 29]
 script/gdp-plot --mode gain --scan 17 -pmode antenna --antenna "[0,29]"  [make one AntStat-style gain-time plot per antenna, with Stokes side by side]
@@ -90,8 +92,8 @@ script/gdp-plot -pmode cross-corr-colormap --antenna 0,1,2  [plot selected anten
         <tr><td><code>--bchan INT</code>, <code>--echan INT</code></td><td>Bandpass channel selection passed to <code>gdp-stats</code> when needed. When both are supplied in bandpass mode, GDP looks for and writes default filenames with <code>-chan_&lt;bchan&gt;_&lt;echan&gt;</code>.</td></tr>
         <tr><td><code>-pchans [START,END]</code></td><td>Plot-only channel window for gains-based plot modes: <code>colormap</code>, <code>hist</code>, <code>reim</code>, <code>antenna</code>, and <code>stats</code>. The start channel is inclusive and the end channel is exclusive. Existing or newly created NPZ products still use <code>--bchan</code>/<code>--echan</code>; <code>-pchans</code> only limits displayed channels and any subplot-title statistics calculated during plotting. Default plot filenames append <code>pchan_&lt;start&gt;_&lt;end&gt;</code>.</td></tr>
         <tr><td><code>--range FLOAT</code></td><td>Colormap saturation half-range in percent for gain or bandpass <code>-pmode colormap</code>. For example, <code>--range 20</code> uses <code>-20</code> to <code>+20</code> percent. Values are rounded up to a multiple of 5, with seven colorbar labels that include <code>0</code> and use no decimal places.</td></tr>
-        <tr><td><code>--flag-chans [START,END]</code></td><td>Pass-through to <code>gdp-stats</code> when <code>gdp-plot</code> creates a missing NPZ with <code>--use-flags</code>. It declares which original data channels a shorter FLAG channel axis covers; all other channels are treated as flagged.</td></tr>
-        <tr><td><code>--use-flags</code></td><td>Pass <code>--use-flags</code> to <code>gdp-stats</code> when missing products must be created. Default: disabled, so missing products are created without flag masking unless this option is set.</td></tr>
+        <tr><td><code>--use-flags</code></td><td>Use the matching versioned <code>.flg</code> sidecar for gains-based plot modes and pass <code>--use-flags</code> to <code>gdp-stats</code> when missing products must be created. Default: disabled.</td></tr>
+        <tr><td><code>--flagver VERSION</code></td><td>Use <code>NAME_V&lt;VERSION&gt;.flg</code> with <code>--use-flags</code>. If omitted, GDP uses the highest available version and reports it in terminal output. If the requested version does not exist, GDP prints an <code>ERROR</code> message and stops.</td></tr>
         <tr><td><code>--s2-thr FLOAT</code></td><td>Threshold used for self-correlation reference lines and colormap markers. Default: <code>0.9</code>.</td></tr>
         <tr><td><code>--plot-dir PATH</code></td><td>Output plot directory. Default: configured <code>plots/&lt;format&gt;</code> runtime directory.</td></tr>
         <tr><td><code>--format {png,pdf,eps}</code></td><td>Plot file format. Default: <code>png</code>. PNG files are written at <code>320 dpi</code>.</td></tr>

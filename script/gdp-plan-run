@@ -269,7 +269,7 @@ def run_plan(plan_path: Path, dry_run: bool = False, only: Optional[str] = None,
             continue
         exe = command_path(command)
         intent_args = normalize_intent_args(command, intent["args"])
-        if selected_setup_file and command in {"gdp-stats", "gdp-plot"} and "setup-file" not in intent_args and "setup_file" not in intent_args:
+        if selected_setup_file and command in {"gdp-stats", "gdp-plot", "gdp-flag"} and "setup-file" not in intent_args and "setup_file" not in intent_args:
             intent_args["setup-file"] = selected_setup_file
         cli = args_to_cli(intent_args, variables)
         cmd = [str(exe), *cli]

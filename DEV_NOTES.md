@@ -2019,3 +2019,155 @@ Changes Made
 - Updated the repeated HTML sample tables to include gain scan-17 and bandpass
   scan-18 rows, with antenna 0 linked as the representative per-antenna sample.
 - Removed leftover scan-2 and scan-4 sample PNGs from `doc/sample_plots`.
+
+## 2026-08-05 17:10:00 IST
+
+Prompt / Request
+- Add versioned `.flg` flag sidecar files matching GDP gains NPZ names, and
+  use selected/latest flag versions for flagged stats and plots.
+
+Changes Made
+- Added `--flagver` to `gdp-stats` and `gdp-plot`.
+- `gdp-stats --smode gains` now writes a matching
+  `NAME_V<version>.flg` sidecar containing sample-level flag arrays from the
+  CASA gain or bandpass table.
+- If no `--flagver` is supplied while writing gains, GDP writes the next flag
+  version number; if `--flagver` is supplied, it writes that exact version.
+- For `colormap`, `stats`, `ks`, and `self-corr` with `--use-flags`, GDP now
+  loads flags from the matching `.flg` file. If `--flagver` is omitted, the
+  highest available flag version is selected and logged.
+- `gdp-plot --use-flags` applies the selected `.flg` file to gains-based plots
+  and passes `--flagver` through when it creates missing products.
+- Added `doc/gdp-product-flags.html` and linked the new flag product format in
+  the documentation tree.
+
+## 2026-08-05 17:20:00 IST
+
+Prompt / Request
+- If a requested flag version does not exist, mention it in the terminal and
+  quit.
+
+Changes Made
+- Changed missing requested `--flagver` handling in both `gdp-stats` and
+  `gdp-plot` to stop with a concise `ERROR:` terminal message instead of a
+  Python traceback.
+- Preserved the `--smode all --use-flags` bootstrap behavior where the gains
+  step can create the first `.flg` file when no version exists yet and no
+  explicit `--flagver` was requested.
+- Updated the flag-related HTML documentation.
+
+## 2026-08-05 17:45:00 IST
+
+Prompt / Request
+- Move manual flag writing into a dedicated `gdp-flag` command.
+- Add a `flag-intent` header to every `.flg` file, with CASA table flags
+  recorded as `CASA FLAGS`.
+- Keep placeholder flagging modes for later threshold and automatic flagging
+  development.
+
+Changes Made
+- Added `script/gdp-flag` for creating versioned GDP `.flg` sidecars from the
+  setup-selected gain or bandpass table, or from an explicitly supplied table.
+- `gdp-flag` supports `--mode`, `--setup-file`, `--scan`,
+  `--combine-scans`, `--antennas`, `--bchan`, `--echan`, `--use-flags
+  [VERSION]`, `--new-flags`, `--out-fver`, and `--fmode`.
+- Implemented `--fmode casa-flags`, `--fmode man-antenna`, and
+  `--fmode man-chann`; kept `all-thrsld`, `ante-thrsld`, `ks-thrsld`,
+  `auto-ante`, and `auto-chan` as logged placeholders.
+- Removed the user-facing `gdp-stats --antenna-flag` and `--flag-chans`
+  options so manual flag creation is centralized in `gdp-flag`.
+- Updated the HTML and Markdown documentation, added `doc/gdp-flag.html`, and
+  added a commented `gdp-flag` intent to the sample pipeline plan.
+
+Follow-up Fix
+- Fixed `gdp-flag --fmode man-antenna 9` and similar trailing manual values so
+  they are not misread as the optional input table path.
+- Added `--antenna` as an explicit alias for `--antennas` in `gdp-flag`.
+- Changed missing CASA/casatools execution to print a concise terminal message
+  rather than a Python traceback.
+
+Follow-up Simplification
+- Removed legacy optional positional input-table arguments from `gdp-stats`,
+  `gdp-util`, and `gdp-flag`.
+- GDP table inputs should now be supplied explicitly with `--input-table`,
+  `--gain-table`, or `--bandpass-table`, or read from the active `gdp-setup`
+  configuration.
+- Kept the hidden trailing values in `gdp-plot` because those are used for plot
+  mode values such as selected antennas, not for table paths.
+
+## 2026-08-05 18:10:00 IST
+
+Prompt / Request
+- Remove the `--smode colormap` option from `gdp-stats`.
+
+Changes Made
+- Removed `colormap`, `gain-colormap`, and `gain_colormap` from
+  `gdp-stats --smode` parsing.
+- Changed `gdp-stats --smode all` to run data-product tasks only:
+  `gains`, `stats`, `ks`, and `self-corr`.
+- Removed the direct colormap plotting path and related CLI options from
+  `gdp-stats`: `-pchans`, `--range`, `--output-colormap`, and
+  `--plot-format`.
+- Kept colormap plotting in `gdp-plot -pmode colormap`; when a gains NPZ is
+  missing, `gdp-plot` already asks `gdp-stats` to create it with
+  `--smode gains`.
+- Updated the README, `gdp-stats` HTML, and sample plan to use
+  `gdp-plot -pmode colormap` for plotting.
+
+## 2026-08-05 18:20:00 IST
+
+Prompt / Request
+- `gdp-flag --fmode man-antenna 9` should copy flags from the last flag
+  version by default.
+
+Changes Made
+- Changed `gdp-flag` so, unless `--new-flags` is set, it automatically carries
+  the highest existing `NAME_V<version>.flg` file into the new output version.
+- Kept `--use-flags VERSION` as the way to choose a specific prior flag version.
+- If no previous flag version exists, `gdp-flag` now logs that it is writing
+  only the newly requested flags.
+- Updated flag documentation to describe the default carry-forward behavior.
+
+## 2026-08-05 18:30:00 IST
+
+Prompt / Request
+- Add `gdp-flag --fmode remove-version <version>`; if no version is supplied,
+  remove the highest available flag version.
+
+Changes Made
+- Added `remove-version` aliases to `gdp-flag --fmode`.
+- `gdp-flag --fmode remove-version VERSION` removes
+  `NAME_V<VERSION>.flg` for the selected mode/scan/channel product base.
+- `gdp-flag --fmode remove-version` removes the highest available matching
+  version.
+- This removal mode works from product naming metadata and does not read CASA
+  table rows.
+- Updated the flag command and flag product documentation.
+
+## 2026-08-05 18:40:00 IST
+
+Prompt / Request
+- If a required flag version is not present for any flag-version argument,
+  print an error message in the terminal log and exit gracefully.
+
+Changes Made
+- Added logged error handling in `gdp-flag` for missing versions requested by
+  `--use-flags VERSION` and `--fmode remove-version VERSION`.
+- Missing matching flag versions now write an `ERROR:` line to the `gdp-flag`
+  task log before exiting with `SystemExit`.
+- Added task-log error reporting in `gdp-stats` when a requested `--flagver`
+  cannot be found for flagged stats/KS/self-correlation processing.
+- Updated flag documentation to state that missing required versions are logged
+  and exit without a Python traceback.
+
+Follow-up Rename
+- Renamed the `gdp-flag` output flag-version option from `--fver VERSION` to
+  `--out-fver VERSION` for clarity.
+- The input/carry flag-version selector remains `--use-flags [VERSION]`, and
+  the remove target remains `--fmode remove-version [VERSION]`.
+
+Follow-up Validation
+- Tightened `gdp-flag --fmode man-chann` so it works only in bandpass mode.
+- If `--mode gain --fmode man-chann` is requested, GDP now prints a concise
+  `ERROR:` terminal message and exits before reading CASA table rows.
+- In `--mode auto`, `--fmode man-chann` now infers bandpass mode.

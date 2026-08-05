@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>gdp-flag</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>gdp-flag</h1>
+    <p>Create versioned GDP flag sidecar files for gain and bandpass products.</p>
+  </header>
+  <main>
+    <section class="doc-tree" aria-labelledby="documentation-tree">
+      <h2 id="documentation-tree">Documentation Tree</h2>
+      <ul>
+        <li><a href="README.html">Main documentation</a></li>
+        <li><a href="gdp-setup.html">gdp-setup</a>: initialize and remember runtime, gain-table, and bandpass-table locations.</li>
+        <li><a href="gdp-util.html">gdp-util</a>: read metadata from CASA gain, bandpass, or MeasurementSet tables.</li>
+        <li><a href="gdp-stats.html">gdp-stats</a>: compute antenna-wise gain and bandpass products.</li>
+        <li><a href="gdp-flag.html">gdp-flag</a>: create versioned GDP flag sidecar files.</li>
+        <li><a href="gdp-plot.html">gdp-plot</a>: plot GDP NPZ products and create missing products with gdp-stats.</li>
+        <li><a href="gdp-plan-run.html">gdp-plan-run</a>: run GDP command intents from a plan file.</li>
+      </ul>
+    </section>
+    <section class="product-formats" aria-labelledby="product-formats">
+      <h2 id="product-formats">Product Formats</h2>
+      <ul>
+        <li><a href="gdp-product-gains.html">gains NPZ</a></li>
+        <li><a href="gdp-product-flags.html">flag FLG</a></li>
+        <li><a href="gdp-product-stats.html">stats NPZ</a></li>
+        <li><a href="gdp-product-ks.html">KS NPZ</a></li>
+        <li><a href="gdp-product-self-corr.html">self-corr NPZ</a></li>
+        <li><a href="gdp-product-cross-corr.html">cross-corr NPZ</a></li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Purpose</h2>
+      <p><code>gdp-flag</code> creates <code>NAME_V&lt;version&gt;.flg</code> sidecar files beside the matching GDP gains NPZ. It can write flags from the original CASA gain/bandpass table, add manual antenna or channel flags, or reserve a version for later threshold-based flagging modes.</p>
+    </section>
+
+    <section>
+      <h2>Usage</h2>
+      <pre><code>script/gdp-flag --mode gain --scan 17 --fmode casa-flags  [write CASA table flags to the next flag version]
+script/gdp-flag --mode gain --scan 17 --fmode man-antenna --man-antenna 3,4  [carry the highest old flag version by default and add antennas 3 and 4]
+script/gdp-flag --mode gain --scan 17 --fmode man-antenna 3,4 --new-flags  [write only the new manual antenna flags]
+script/gdp-flag --mode bandpass --scan 18 --bchan 800 --echan 3000 --fmode man-chann --man-chann "[900,1200]" --use-flags 2  [carry V2 and flag channels 900 through 1200]
+script/gdp-flag --mode gain --scan 17 --fmode remove-version 3  [remove flag version V3 for the matching gain product]
+script/gdp-flag --mode gain --scan 17 --fmode remove-version  [remove the highest flag version for the matching gain product]
+script/gdp-flag --setup-file project-a-setup.json --mode bandpass --scan 18 --fmode casa-flags  [use a named setup file from the active runtime directory]</code></pre>
+    </section>
+
+    <section>
+      <h2>Options</h2>
+      <table>
+        <tr><th>Option</th><th>Description</th></tr>
+        <tr><td><code>--input-table PATH</code></td><td>Explicit CASA gain/bandpass table path.</td></tr>
+        <tr><td><code>--gain-table PATH</code></td><td>Named gain table path. Defaults to saved <code>gain_table</code> in gain mode.</td></tr>
+        <tr><td><code>--bandpass-table PATH</code></td><td>Named bandpass table path. Defaults to saved <code>bandpass_table</code> in bandpass mode.</td></tr>
+        <tr><td><code>--setup-file NAME</code></td><td>Setup JSON file to use. Relative names are resolved under the active runtime directory.</td></tr>
+        <tr><td><code>--mode {auto,gain,bandpass}</code></td><td>Flagging mode. Default: <code>auto</code>.</td></tr>
+        <tr><td><code>--scan LIST</code></td><td>Comma-separated scans. Default: all scans.</td></tr>
+        <tr><td><code>--combine-scans</code></td><td>Combine selected scans into one <code>allscans</code>-style flag product.</td></tr>
+        <tr><td><code>--antennas LIST</code>, <code>--antenna LIST</code></td><td>Antenna selection used to define the output flag product dimensions. Mixed ranges and explicit lists follow the same syntax as <code>gdp-stats --antennas</code>.</td></tr>
+        <tr><td><code>--bchan INT</code></td><td>Start channel, inclusive. Bandpass mode only.</td></tr>
+        <tr><td><code>--echan INT</code></td><td>End channel, exclusive. Bandpass mode only.</td></tr>
+        <tr><td><code>--use-flags [VERSION]</code></td><td>Choose an existing GDP <code>.flg</code> file to carry into the output. If the version is omitted, GDP uses the highest available version beside the matching gains NPZ. If this option is omitted entirely, GDP still carries the highest previous version when one exists.</td></tr>
+        <tr><td><code>--new-flags</code></td><td>Write only the new flags from the selected <code>--fmode</code>; do not carry any previous GDP flag version.</td></tr>
+        <tr><td><code>--out-fver VERSION</code></td><td>Output flag version. Default: next version beside the matching gains NPZ.</td></tr>
+        <tr class="smode-option"><td><code>--fmode casa-flags</code></td><td>Write flags already present in the CASA gain or bandpass table. The <code>flag-intent</code> header records <code>CASA FLAGS</code>.</td></tr>
+        <tr class="smode-option"><td><code>--fmode man-antenna</code></td><td>Flag manually selected antennas. Supply values with <code>--man-antenna LIST</code> or as trailing values after the mode.</td></tr>
+        <tr class="smode-option"><td><code>--fmode man-chann</code></td><td>Flag manually selected bandpass channels. Supply values with <code>--man-chann LIST</code> or as trailing values after the mode. If used with <code>--mode gain</code>, GDP prints an <code>ERROR:</code> message and exits before reading table rows.</td></tr>
+        <tr class="smode-option"><td><code>--fmode remove-version [VERSION]</code></td><td>Remove a matching <code>.flg</code> sidecar version. If <code>VERSION</code> is omitted, GDP removes the highest available version for the selected mode, scan, and channel naming base.</td></tr>
+        <tr class="smode-option"><td><code>all-thrsld</code>, <code>ante-thrsld</code>, <code>ks-thrsld</code>, <code>auto-ante</code>, <code>auto-chan</code></td><td>Reserved placeholders for later threshold and automatic flagging algorithms.</td></tr>
+        <tr><td><code>--output-gains-npz PATH</code></td><td>Matching gains NPZ path used as the filename base for the <code>.flg</code> file.</td></tr>
+        <tr><td><code>--write-gains-npz</code></td><td>Rewrite the matching gains NPZ even if it already exists.</td></tr>
+      </table>
+      <p>If a required flag version is requested but not present, <code>gdp-flag</code> writes an <code>ERROR:</code> line to the terminal and the task log, then exits without a Python traceback.</p>
+    </section>
+  </main>
+</body>
+</html>

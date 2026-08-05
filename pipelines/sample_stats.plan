@@ -20,12 +20,21 @@ intent: gdp-stats
   #name: gain statistics with csv
   mode: gain
   combine-scans: false
-  smode: colormap
+  smode: gains
   scan: 2
 #  output-npz: ${stats_npz}
 #  csv: true
 #  output-csv: ${stats_csv}
 end
+
+#intent: gdp-flag
+#  name: manual antenna flags
+#  mode: gain
+#  scan: 17
+#  fmode: man-antenna
+#  man-antenna: 3,4
+#  use-flags: true
+#end
 
 #intent: gdp-plot
 #  name: plot gain statistics

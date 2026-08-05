@@ -19,6 +19,7 @@
         <li><a href="gdp-setup.html">gdp-setup</a>: initialize and remember runtime, gain-table, and bandpass-table locations.</li>
         <li><a href="gdp-util.html">gdp-util</a>: read metadata from CASA gain, bandpass, or MeasurementSet tables.</li>
         <li><a href="gdp-stats.html">gdp-stats</a>: compute antenna-wise gain and bandpass products.</li>
+        <li><a href="gdp-flag.html">gdp-flag</a>: create versioned GDP flag sidecar files.</li>
         <li><a href="gdp-plot.html">gdp-plot</a>: plot GDP NPZ products and create missing products with gdp-stats.</li>
         <li><a href="gdp-plan-run.html">gdp-plan-run</a>: run GDP command intents from a plan file.</li>
       </ul>
@@ -27,6 +28,7 @@
       <h2 id="product-formats">Product Formats</h2>
       <ul>
         <li><a href="gdp-product-gains.html">gains NPZ</a></li>
+        <li><a href="gdp-product-flags.html">flag FLG</a></li>
         <li><a href="gdp-product-stats.html">stats NPZ</a></li>
         <li><a href="gdp-product-ks.html">KS NPZ</a></li>
         <li><a href="gdp-product-self-corr.html">self-corr NPZ</a></li>
@@ -41,13 +43,13 @@
 
     <section>
       <h2>Usage</h2>
-      <pre><code>script/gdp-util /path/to/table.g --header  [show table rows, columns, IDs, and data-column descriptions]
+      <pre><code>script/gdp-util --input-table /path/to/table.g --header  [show table rows, columns, IDs, and data-column descriptions]
 script/gdp-util --gain-table --header  [show header metadata from the saved gain table]
 script/gdp-util --bandpass-table --header --date  [show header and date metadata from the saved bandpass table]
 script/gdp-util --gain-table /path/to/other.g --header --json  [show metadata from an explicit gain table path]
-script/gdp-util /path/to/table.g --header --keywords --json  [write header and keyword metadata as JSON]
-script/gdp-util /path/to/table.g --date  [show observing date and time span]
-script/gdp-util /path/to/table.ms --channel-width  [show channel-width statistics in MHz]
+script/gdp-util --input-table /path/to/table.g --header --keywords --json  [write header and keyword metadata as JSON]
+script/gdp-util --input-table /path/to/table.g --date  [show observing date and time span]
+script/gdp-util --input-table /path/to/table.ms --channel-width  [show channel-width statistics in MHz]
 script/gdp-util --config  [print the saved GDP setup configuration]
 script/gdp-util --version  [bump the lower/patch version number]
 script/gdp-util --version main  [bump the main/major version number and reset lower numbers]
@@ -60,8 +62,7 @@ script/gdp-util --git-push -m "Describe the change"  [build the version archive,
       <h2>Options</h2>
       <table>
         <tr><th>Option</th><th>Description</th></tr>
-        <tr><td><code>input_table</code></td><td>Optional positional CASA table or MeasurementSet path.</td></tr>
-        <tr><td><code>--input-table PATH</code></td><td>Named input path. Overrides the positional path.</td></tr>
+        <tr><td><code>--input-table PATH</code></td><td>Explicit CASA table or MeasurementSet path.</td></tr>
         <tr><td><code>--gain-table [PATH]</code></td><td>Use a gain table for <code>--header</code>, <code>--date</code>, or <code>--channel-width</code>. Without <code>PATH</code>, use the saved <code>gain_table</code> from <code>gdp-setup</code>.</td></tr>
         <tr><td><code>--bandpass-table [PATH]</code></td><td>Use a bandpass table for <code>--header</code>, <code>--date</code>, or <code>--channel-width</code>. Without <code>PATH</code>, use the saved <code>bandpass_table</code> from <code>gdp-setup</code>.</td></tr>
         <tr><td><code>--header</code></td><td>Print row count, columns, common IDs, data columns, and column descriptions.</td></tr>

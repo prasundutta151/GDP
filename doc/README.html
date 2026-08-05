@@ -19,6 +19,7 @@
         <li><a href="gdp-setup.html">gdp-setup</a>: initialize and remember runtime, gain-table, and bandpass-table locations.</li>
         <li><a href="gdp-util.html">gdp-util</a>: read metadata from CASA gain, bandpass, or MeasurementSet tables.</li>
         <li><a href="gdp-stats.html">gdp-stats</a>: compute antenna-wise gain and bandpass products.</li>
+        <li><a href="gdp-flag.html">gdp-flag</a>: create versioned GDP flag sidecar files.</li>
         <li><a href="gdp-plot.html">gdp-plot</a>: plot GDP NPZ products and create missing products with gdp-stats.</li>
         <li><a href="gdp-plan-run.html">gdp-plan-run</a>: run GDP command intents from a plan file.</li>
         <li><a href="gdp-step-by-step.html">Step-by-step guide</a>: run GDP from setup through products, plots, and release steps.</li>
@@ -28,6 +29,7 @@
       <h2 id="product-formats">Product Formats</h2>
       <ul>
         <li><a href="gdp-product-gains.html">gains NPZ</a></li>
+        <li><a href="gdp-product-flags.html">flag FLG</a></li>
         <li><a href="gdp-product-stats.html">stats NPZ</a></li>
         <li><a href="gdp-product-ks.html">KS NPZ</a></li>
         <li><a href="gdp-product-self-corr.html">self-corr NPZ</a></li>
@@ -61,20 +63,24 @@
       <pre><code>script/gdp-setup --gain-table /path/to/gain/table.g --bandpass-table /path/to/bandpass/table.b --rundir /path/to/rundir  [save separate gain and bandpass defaults plus runtime directory]
 script/gdp-setup --setup-file project-a-setup.json --gain-table /path/to/table.g --rundir /path/to/rundir  [write a named setup file under the runtime directory]
 script/gdp-setup --show  [print the saved GDP setup]
-script/gdp-util /path/to/table.g --header  [inspect table metadata]
+script/gdp-util --input-table /path/to/table.g --header  [inspect table metadata]
 script/gdp-util --gain-table --header  [inspect the saved gain table]
 script/gdp-util --bandpass-table --header  [inspect the saved bandpass table]
 script/gdp-stats --smode stats,ks  [compute stats and KS products from the saved input]
-script/gdp-stats --smode all  [run gains, colormap, stats, KS, and self-corr]
+script/gdp-stats --smode all  [run gains, stats, KS, and self-corr]
 script/gdp-stats --antennas [0,9] --smode stats  [compute stats for antennas 0 through 9]
 script/gdp-stats --antennas 2,3,4,31 --smode stats  [compute stats for explicit antenna IDs]
 script/gdp-stats --antennas "(1,5)" 6 "(9-12)" 15 16 19 --smode stats  [compute stats for mixed antenna ranges and explicit IDs]
 script/gdp-stats --smode stats --csv  [compute stats and optional CSV from the saved input]
 script/gdp-stats --smode stats --combine-scans  [write one combined allscans stats product]
-script/gdp-stats --mode gain --smode colormap --range 20  [create gains NPZ and Real-1/Imag colormap plots with fixed percent saturation]
+script/gdp-stats --mode gain --scan 17 --smode gains  [create the gains NPZ for plotting]
+script/gdp-plot --mode gain --scan 17 -pmode colormap --range 20  [plot gain Real-1/Imag colormaps with fixed percent saturation]
+script/gdp-stats --mode gain --scan 17 --smode gains --flagver 1  [write gains NPZ and matching V1 flag sidecar]
+script/gdp-flag --mode gain --scan 17 --fmode man-antenna --man-antenna 3,4 --use-flags  [create the next flag version by carrying the highest old version and adding antennas 3 and 4]
+script/gdp-flag --mode bandpass --scan 18 --bchan 800 --echan 3000 --fmode man-chann --man-chann "[900,1200]" --new-flags  [write only new manual channel flags]
+script/gdp-stats --mode gain --scan 17 --smode stats,ks --use-flags --flagver 1  [compute flagged products using V1 .flg flags]
 script/gdp-plot --mode gain --scan 17 -pmode colormap --npz-path /path/to/gdp-gains-gain-scan17.npz  [plot directly from a selected gain scan-17 NPZ file]
 script/gdp-plot --mode bandpass --scan 18 --bchan 800 --echan 3000 -pmode colormap -pchans "[800,1200]" --range 20  [plot a channel window from a wider bandpass scan-18 gains NPZ with fixed percent saturation]
-script/gdp-stats --mode bandpass --smode stats --use-flags --flag-chans "[0,3000]"  [use a shorter FLAG channel axis and flag channels outside that coverage]
 script/gdp-plot --mode gain -pmode hist  [plot AntStat-style gain histograms from gains NPZ]
 script/gdp-plot --mode gain --scan 17 -pmode antenna --antenna "[0,29]"  [plot antennas 0 through 29 with Stokes side by side]
 script/gdp-plot --mode gain -pmode stats  [plot stats from the gains NPZ, creating the gains NPZ first if needed]

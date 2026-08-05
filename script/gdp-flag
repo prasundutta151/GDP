@@ -1,0 +1,499 @@
+#!/usr/bin/env python3
+"""Create and version GDP flag sidecar files."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import time
+from datetime import datetime, timezone
+from importlib.machinery import SourceFileLoader
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Sequence, Tuple
+
+import numpy as np
+
+
+CONFIG_NAME = ".gdp-config.json"
+FMODE_ALIASES = {
+    "casa": "casa",
+    "casa-flags": "casa",
+    "casa_flags": "casa",
+    "man-antenna": "man_antenna",
+    "man_antenna": "man_antenna",
+    "man-ant": "man_antenna",
+    "man-chann": "man_chann",
+    "man-chan": "man_chann",
+    "man-channel": "man_chann",
+    "man_chann": "man_chann",
+    "all-thrsld": "all_thrsld",
+    "all-threshold": "all_thrsld",
+    "ante-thrsld": "ante_thrsld",
+    "ante-threshold": "ante_thrsld",
+    "ks-thrsld": "ks_thrsld",
+    "ks-threshold": "ks_thrsld",
+    "auto-ante": "auto_ante",
+    "auto-ant": "auto_ante",
+    "auto-chan": "auto_chan",
+    "auto-chann": "auto_chan",
+    "remove-version": "remove_version",
+    "remove_version": "remove_version",
+    "remove-ver": "remove_version",
+    "rm-version": "remove_version",
+}
+PLACEHOLDER_FMODES = {"all_thrsld", "ante_thrsld", "ks_thrsld", "auto_ante", "auto_chan"}
+
+
+def project_root() -> Path:
+    return Path(__file__).resolve().parents[1]
+
+
+def load_gdp_stats_module() -> Any:
+    path = project_root() / "script" / "gdp-stats"
+    return SourceFileLoader("gdp_stats_impl", str(path)).load_module()
+
+
+GSTATS = load_gdp_stats_module()
+
+
+def load_project_config() -> Dict[str, Any]:
+    path = project_root() / CONFIG_NAME
+    if not path.exists():
+        return {}
+    with path.open("r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def resolve_setup_file_path(setup_file: Optional[str], base_config: Dict[str, Any]) -> Optional[Path]:
+    if setup_file:
+        path = Path(setup_file).expanduser()
+        if path.is_absolute():
+            return path.resolve()
+        rundir = Path(str(base_config.get("rundir") or (project_root() / "rundir"))).expanduser().resolve()
+        return (rundir / path).resolve()
+    configured = base_config.get("setup_file")
+    return Path(str(configured)).expanduser().resolve() if configured else None
+
+
+def activate_config(setup_file: Optional[str] = None) -> Dict[str, Any]:
+    base = load_project_config()
+    setup_path = resolve_setup_file_path(setup_file, base)
+    if setup_path and setup_path.exists():
+        with setup_path.open("r", encoding="utf-8") as f:
+            config = json.load(f)
+    else:
+        if setup_file:
+            raise FileNotFoundError(f"Setup file not found: {setup_path}")
+        config = base
+    GSTATS.ACTIVE_CONFIG = config
+    return config
+
+
+def parse_flag_version(value: Optional[str], option_name: str = "--out-fver") -> Optional[int]:
+    if value is None or str(value).strip().lower() == "highest":
+        return None
+    text = str(value).strip()
+    if text.lower().startswith("v"):
+        text = text[1:]
+    if not text.isdigit() or int(text) < 1:
+        raise SystemExit(f"{option_name} must be a positive integer version number.")
+    return int(text)
+
+
+def parse_fmode(text: Optional[str]) -> str:
+    key = "casa" if text is None or str(text).strip() == "" else str(text).strip()
+    if key not in FMODE_ALIASES:
+        valid = ", ".join(
+            [
+                "casa-flags",
+                "man-antenna",
+                "man-chann",
+                "all-thrsld",
+                "ante-thrsld",
+                "ks-thrsld",
+                "auto-ante",
+                "auto-chan",
+                "remove-version",
+            ]
+        )
+        raise SystemExit(f"Unknown fmode '{key}'. Valid modes: {valid}")
+    return FMODE_ALIASES[key]
+
+
+def normalize_list_text(text: object) -> str:
+    if isinstance(text, (list, tuple)):
+        return " ".join(str(item) for item in text)
+    return str(text)
+
+
+def parse_int_selection(text: object, option_name: str) -> Optional[List[int]]:
+    return GSTATS.parse_antenna_list(text, option_name)
+
+
+def parse_scan_list(text: Optional[str]) -> Optional[List[int]]:
+    return GSTATS.parse_int_list(text)
+
+
+def flag_file_for_npz(npz_path: Path, version: int) -> Path:
+    return GSTATS.flag_file_for_npz(npz_path, int(version))
+
+
+def flag_file_versions(npz_path: Path) -> List[Tuple[int, Path]]:
+    return GSTATS.flag_file_versions(npz_path)
+
+
+def resolve_input(value: Optional[str], mode: str) -> Path:
+    return GSTATS.resolve_input(value, mode)
+
+
+def infer_mode(args: argparse.Namespace) -> str:
+    mode = args.mode
+    if mode != "auto":
+        return mode
+    if getattr(args, "fmode_resolved", None) == "man_chann":
+        return "bandpass"
+    if args.bandpass_table or args.bchan is not None or args.echan is not None or args.man_chann:
+        return "bandpass"
+    return "gain"
+
+
+def build_gains_output(input_table: Path, scan_label: str, mode: str, args: argparse.Namespace) -> Path:
+    label = GSTATS.label_with_channel(scan_label, mode, args.bchan, args.echan)
+    return Path(args.output_gains_npz).expanduser().resolve() if args.output_gains_npz else GSTATS.build_default_output(
+        input_table, label, mode, "gains", "npz"
+    )
+
+
+def write_npz_exact_suffix(path: Path, payload: Dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("wb") as handle:
+        np.savez_compressed(handle, **payload)
+
+
+def json_safe(value: Any) -> Any:
+    return GSTATS.json_safe(value)
+
+
+def load_flag_file(flag_path: Path, gains: Dict[str, Any]) -> Tuple[np.ndarray, Dict[str, Any]]:
+    lookup, header = GSTATS.load_flag_lookup(flag_path)
+    rows = np.asarray(gains["row"], dtype=int)
+    stokes = np.asarray(gains["stokes"], dtype=int)
+    channels = np.asarray(gains["channel"], dtype=int)
+    flags = np.asarray(
+        [lookup.get((int(row), int(pol), int(chan)), False) for row, pol, chan in zip(rows, stokes, channels)],
+        dtype=bool,
+    )
+    return flags, header
+
+
+def manual_antenna_mask(gains: Dict[str, Any], antennas: Optional[Sequence[int]]) -> np.ndarray:
+    mask = np.zeros(np.asarray(gains["antenna"]).shape, dtype=bool)
+    selected = {int(ant) for ant in antennas or []}
+    if selected:
+        mask = np.isin(np.asarray(gains["antenna"], dtype=int), sorted(selected))
+    return mask
+
+
+def manual_channel_mask(gains: Dict[str, Any], channels: Optional[Sequence[int]]) -> np.ndarray:
+    mask = np.zeros(np.asarray(gains["channel"]).shape, dtype=bool)
+    selected = {int(chan) for chan in channels or []}
+    if selected:
+        mask = np.isin(np.asarray(gains["channel"], dtype=int), sorted(selected))
+    return mask
+
+
+def flag_count_text(flag: np.ndarray) -> str:
+    return f"{int(np.count_nonzero(flag))}/{int(flag.size)}"
+
+
+def format_selection(values: Optional[Sequence[int]]) -> str:
+    if not values:
+        return "none"
+    return ",".join(str(int(value)) for value in values)
+
+
+def write_flag_file(
+    path: Path,
+    gains: Dict[str, Any],
+    version: int,
+    source: str,
+    flag: np.ndarray,
+    intents: List[str],
+    args: argparse.Namespace,
+    previous_header: Optional[Dict[str, Any]] = None,
+) -> None:
+    header = dict(gains.get("header", {}))
+    flag_header = {
+        "format": "GDP_FLAG_FLG",
+        "format_version": "0.2",
+        "created_utc": datetime.now(timezone.utc).isoformat(),
+        "flag_version": int(version),
+        "source": str(source),
+        "source_format": header.get("format"),
+        "input_table": header.get("input_table"),
+        "mode": header.get("mode"),
+        "bchan": header.get("bchan"),
+        "echan": header.get("echan"),
+        "flag_chans": header.get("flag_chans"),
+        "flag-intent": intents,
+        "previous_flag_version": None if previous_header is None else previous_header.get("flag_version"),
+        "new_flags_only": bool(args.new_flags),
+        "fmode": args.fmode,
+        "manual_antennas": format_selection(args.manual_antennas),
+        "manual_channels": format_selection(args.manual_channels),
+        "axes": {"flag": ["sample"]},
+        "columns": ["scan", "antenna", "stokes", "channel", "row", "time", "flag"],
+    }
+    payload = {
+        "header_json": json.dumps(json_safe(flag_header), indent=2, sort_keys=True),
+        "scan": np.asarray(gains["scan"], dtype=int),
+        "antenna": np.asarray(gains["antenna"], dtype=int),
+        "stokes": np.asarray(gains["stokes"], dtype=int),
+        "channel": np.asarray(gains["channel"], dtype=int),
+        "row": np.asarray(gains["row"], dtype=int),
+        "time": np.asarray(gains["time"], dtype=float),
+        "flag": np.asarray(flag, dtype=bool),
+    }
+    write_npz_exact_suffix(path, payload)
+
+
+class TaskLogger:
+    def __init__(self, path: Path):
+        self.path = path
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+
+    def write(self, message: str) -> None:
+        line = f"{datetime.now().isoformat(timespec='seconds')} {message}"
+        print(line)
+        with self.path.open("a", encoding="utf-8") as f:
+            f.write(line + "\n")
+
+    def start(self, name: str) -> float:
+        self.write(f"START {name}")
+        return time.perf_counter()
+
+    def done(self, name: str, start: float) -> None:
+        self.write(f"DONE  {name} elapsed_sec={time.perf_counter() - start:.3f}")
+
+
+def default_log_path(input_table: Path) -> Path:
+    logs_dir = GSTATS.config_path("logs_dir") or (project_root() / "rundir" / "logs")
+    return logs_dir / f"{input_table.name.rstrip('/')}_gdp-flag_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+
+
+def logged_error(logger: TaskLogger, message: str) -> None:
+    logger.write(message)
+    raise SystemExit(1)
+
+
+def resolve_previous_flags(
+    gains_out: Path,
+    use_flags: Optional[str],
+    logger: TaskLogger,
+) -> Tuple[Optional[np.ndarray], Optional[Dict[str, Any]], Optional[Path], Optional[int]]:
+    if use_flags is None:
+        return None, None, None, None
+    requested = parse_flag_version(use_flags, "--use-flags")
+    if requested is None:
+        versions = flag_file_versions(gains_out)
+        if not versions:
+            logged_error(logger, f"ERROR: no flag versions found for {gains_out}.")
+        version, path = versions[-1]
+    else:
+        version = requested
+        path = flag_file_for_npz(gains_out, version)
+        if not path.exists():
+            logged_error(logger, f"ERROR: requested flag version V{version} does not exist: {path}")
+    return None, {"flag_version": version, "path": str(path)}, path, version
+
+
+def default_previous_flag_path(gains_out: Path) -> Tuple[Optional[int], Optional[Path]]:
+    versions = flag_file_versions(gains_out)
+    return versions[-1] if versions else (None, None)
+
+
+def selected_flag_version(gains_out: Path, requested: Optional[str]) -> int:
+    parsed = parse_flag_version(requested, "--out-fver")
+    return parsed if parsed is not None else GSTATS.next_flag_version(gains_out)
+
+
+def remove_flag_version(gains_out: Path, requested: Optional[str], logger: TaskLogger) -> None:
+    target = parse_flag_version(requested, "remove-version")
+    if target is None:
+        versions = flag_file_versions(gains_out)
+        if not versions:
+            logged_error(logger, f"ERROR: no flag versions found for {gains_out}.")
+        target, path = versions[-1]
+    else:
+        path = flag_file_for_npz(gains_out, target)
+        if not path.exists():
+            logged_error(logger, f"ERROR: requested flag version V{target} does not exist: {path}")
+    path.unlink()
+    logger.write(f"Removed flag file V{target}: {path}")
+
+
+def non_casa_batches(scans: Optional[List[int]], combine_scans: bool) -> List[Tuple[Optional[List[int]], str]]:
+    if combine_scans:
+        return [(scans, "allscans" if scans is None else "scan" + "-".join(str(s) for s in scans))]
+    if scans is None:
+        raise SystemExit("--fmode remove-version requires --scan unless --combine-scans is used.")
+    return [([int(scan)], f"scan{int(scan)}") for scan in scans]
+
+
+def run_batch(
+    args: argparse.Namespace,
+    input_table: Path,
+    mode: str,
+    scans: Optional[List[int]],
+    selected_antennas: Optional[List[int]],
+    scan_label: str,
+    logger: TaskLogger,
+) -> None:
+    logger.write(f"gdp-flag batch={scan_label}")
+    gains_out = build_gains_output(input_table, scan_label, mode, args)
+    t0 = logger.start(f"read-gains {scan_label}")
+    gains = GSTATS.compute_gains(input_table, mode, scans, selected_antennas, None, False, args.bchan, args.echan, None, None)
+    if args.write_gains_npz or not gains_out.exists():
+        GSTATS.write_npz(gains_out, gains)
+        logger.write(f"Wrote gains NPZ for flag dimensions: {gains_out}")
+    else:
+        logger.write(f"Using gains NPZ naming base: {gains_out}")
+    logger.done(f"read-gains {scan_label}", t0)
+
+    fmode = args.fmode_resolved
+    if fmode in PLACEHOLDER_FMODES:
+        logger.write(f"fmode {args.fmode} is a placeholder; no threshold flagging algorithm has been implemented yet.")
+
+    table_flags = np.asarray(gains.get("table_flagged", gains.get("flagged")), dtype=bool)
+    new_flags = np.zeros(table_flags.shape, dtype=bool)
+    intents: List[str] = []
+
+    if fmode == "casa":
+        new_flags |= table_flags
+        intents.append("CASA FLAGS")
+    elif fmode == "man_antenna":
+        new_flags |= manual_antenna_mask(gains, args.manual_antennas)
+        intents.append(f"MANUAL ANTENNA FLAGS: {format_selection(args.manual_antennas)}")
+    elif fmode == "man_chann":
+        new_flags |= manual_channel_mask(gains, args.manual_channels)
+        intents.append(f"MANUAL CHANNEL FLAGS: {format_selection(args.manual_channels)}")
+
+    previous_flags = None
+    previous_header = None
+    previous_path = None
+    previous_version = None
+    previous_ref = None
+    if args.new_flags:
+        logger.write("--new-flags set; previous flag versions will not be carried forward.")
+    elif args.use_flags is None:
+        previous_version, previous_path = default_previous_flag_path(gains_out)
+        if previous_path is None:
+            logger.write("No previous flag version found; writing only the new flags.")
+        else:
+            previous_ref = {"flag_version": previous_version, "path": str(previous_path)}
+    else:
+        _, previous_ref, previous_path, previous_version = resolve_previous_flags(gains_out, args.use_flags, logger)
+    if previous_path is not None:
+        previous_flags, previous_header = load_flag_file(previous_path, gains)
+        previous_header = previous_header or previous_ref
+        logger.write(f"Loaded previous flag file V{previous_version}: {previous_path} flags={flag_count_text(previous_flags)}")
+
+    if previous_flags is not None and not args.new_flags:
+        out_flags = previous_flags | new_flags
+        intents.insert(0, f"PREVIOUS GDP FLAGS: V{previous_header.get('flag_version')}")
+    else:
+        out_flags = new_flags
+
+    out_version = selected_flag_version(gains_out, args.out_fver)
+    flag_out = flag_file_for_npz(gains_out, out_version)
+    t1 = logger.start(f"write-flags {scan_label}")
+    write_flag_file(flag_out, gains, out_version, str(gains_out), out_flags, intents or ["NO NEW FLAGS"], args, previous_header)
+    logger.write(f"Wrote flag file V{out_version}: {flag_out} flags={flag_count_text(out_flags)}")
+    logger.done(f"write-flags {scan_label}", t1)
+
+
+def run_remove_batch(
+    args: argparse.Namespace,
+    input_table: Path,
+    mode: str,
+    scans: Optional[List[int]],
+    scan_label: str,
+    logger: TaskLogger,
+) -> None:
+    logger.write(f"gdp-flag remove-version batch={scan_label}")
+    gains_out = build_gains_output(input_table, scan_label, mode, args)
+    target = args.remove_version
+    t0 = logger.start(f"remove-version {scan_label}")
+    remove_flag_version(gains_out, target, logger)
+    logger.done(f"remove-version {scan_label}", t0)
+
+
+def parse_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser(description="Create GDP .flg sidecar files from CASA flags or manual flag intents.")
+    p.add_argument("--input-table", dest="input_table_opt", default=None, help="Input CASA gain/bandpass table path.")
+    p.add_argument("--gain-table", default=None, help="Input gain table. Defaults to saved gdp-setup gain_table in gain mode.")
+    p.add_argument("--bandpass-table", default=None, help="Input bandpass table. Defaults to saved gdp-setup bandpass_table in bandpass mode.")
+    p.add_argument("--setup-file", default=None, help="Setup JSON file to use. Relative names are resolved under the active runtime directory.")
+    p.add_argument("--mode", choices=["auto", "gain", "bandpass"], default="auto", help="Flagging mode. Default: auto.")
+    p.add_argument("--scan", default=None, help="Comma-separated scans to process. Default: all scans.")
+    p.add_argument("--combine-scans", "--combine", action="store_true", help="Combine selected scans into one allscans-style flag product.")
+    p.add_argument("--antennas", "--antenna", nargs="+", default=None, help="Antenna selection used to define the flag product dimensions.")
+    p.add_argument("--bchan", type=int, default=None, help="Start channel, inclusive. Bandpass mode only.")
+    p.add_argument("--echan", type=int, default=None, help="End channel, exclusive. Bandpass mode only.")
+    p.add_argument("--use-flags", nargs="?", const="highest", default=None, metavar="VERSION", help="Carry an existing GDP .flg version into the output. Omit VERSION to use the highest available version. By default, gdp-flag carries the highest previous version when one exists.")
+    p.add_argument("--new-flags", action="store_true", help="Write only the new fmode flags; do not carry previous GDP flag versions.")
+    p.add_argument("--out-fver", dest="out_fver", default=None, help="Output flag version. Default: next version beside the matching gains NPZ.")
+    p.add_argument("--fmode", default="casa-flags", help="Flag mode: casa-flags, man-antenna, man-chann, remove-version, all-thrsld, ante-thrsld, ks-thrsld, auto-ante, auto-chan.")
+    p.add_argument("--man-antenna", "--man-antennas", nargs="+", dest="man_antenna", default=None, help="Manual antenna list/range for --fmode man-antenna.")
+    p.add_argument("--man-chann", "--man-chan", "--man-channel", nargs="+", dest="man_chann", default=None, help="Manual channel list/range for --fmode man-chann.")
+    p.add_argument("--output-gains-npz", default=None, help="Matching gains NPZ path used as the flag filename base.")
+    p.add_argument("--write-gains-npz", action="store_true", help="Rewrite the matching gains NPZ even if it already exists.")
+    p.add_argument("fmode_values", nargs="*", help=argparse.SUPPRESS)
+    return p.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+    activate_config(args.setup_file)
+    args.fmode_resolved = parse_fmode(args.fmode)
+    mode = infer_mode(args)
+    if args.fmode_resolved == "man_chann" and mode != "bandpass":
+        raise SystemExit("ERROR: --fmode man-chann works only with --mode bandpass.")
+    explicit_input = args.input_table_opt
+    mode_input = args.bandpass_table if mode == "bandpass" else args.gain_table
+    input_table = resolve_input(explicit_input or mode_input, mode)
+    if not input_table.exists():
+        raise FileNotFoundError(f"Input table not found: {input_table}")
+    scans = parse_scan_list(args.scan)
+    if args.fmode_resolved != "remove_version":
+        GSTATS.validate_requested_scans(input_table, mode, scans)
+    selected_antennas = parse_int_selection(args.antennas, "--antennas")
+    args.manual_antennas = parse_int_selection(args.man_antenna or args.fmode_values if args.fmode_resolved == "man_antenna" else args.man_antenna, "--man-antenna")
+    args.manual_channels = parse_int_selection(args.man_chann or args.fmode_values if args.fmode_resolved == "man_chann" else args.man_chann, "--man-chann")
+    args.remove_version = str(args.fmode_values[0]) if args.fmode_resolved == "remove_version" and args.fmode_values else None
+    if mode == "gain" and (args.bchan is not None or args.echan is not None):
+        raise SystemExit("Channel options --bchan/--echan are valid only in bandpass mode.")
+    if args.fmode_resolved == "man_antenna" and not args.manual_antennas:
+        raise SystemExit("--fmode man-antenna requires --man-antenna or trailing antenna values.")
+    if args.fmode_resolved == "man_chann" and not args.manual_channels:
+        raise SystemExit("--fmode man-chann requires --man-chann or trailing channel values.")
+    logger = TaskLogger(default_log_path(input_table))
+    logger.write(f"gdp-flag input={input_table} mode={mode} fmode={args.fmode}")
+    batches = non_casa_batches(scans, args.combine_scans) if args.fmode_resolved == "remove_version" else GSTATS.scan_batches(input_table, scans, args.combine_scans)
+    if len(batches) > 1 and (args.output_gains_npz or args.out_fver):
+        raise SystemExit("Explicit --output-gains-npz or --out-fver cannot be used when writing multiple per-scan flag products.")
+    for batch_scans, batch_label in batches:
+        if args.fmode_resolved == "remove_version":
+            run_remove_batch(args, input_table, mode, batch_scans, batch_label, logger)
+        else:
+            run_batch(args, input_table, mode, batch_scans, selected_antennas, batch_label, logger)
+    logger.write(f"Log file: {logger.path}")
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except RuntimeError as exc:
+        if "casatools.table" in str(exc):
+            raise SystemExit(str(exc)) from exc
+        raise

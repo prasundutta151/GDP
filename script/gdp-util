@@ -372,7 +372,6 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
         description="Read useful metadata from CASA gain, bandpass, or MeasurementSet tables."
     )
-    p.add_argument("input_table", nargs="?", default=None, help="Input CASA table/MS path.")
     p.add_argument("--input-table", dest="input_table_opt", default=None, help="Input CASA table/MS path.")
     p.add_argument(
         "--gain-table",
@@ -439,7 +438,7 @@ def main() -> None:
         results["config"] = load_config()
 
     if args.header or args.date or args.channel_width:
-        table = resolve_input(args.input_table_opt or args.input_table, args.gain_table, args.bandpass_table)
+        table = resolve_input(args.input_table_opt, args.gain_table, args.bandpass_table)
         if not table.exists():
             raise FileNotFoundError(f"Input table not found: {table}")
         if args.header:
