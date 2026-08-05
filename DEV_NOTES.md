@@ -1967,3 +1967,25 @@ Changes Made
 - Removed the previous `2 * radius` range rule.
 - Kept outside counts defined relative to each panel's red ellipse.
 - Updated the `gdp-plot` documentation.
+
+## 2026-08-05 13:50:00 IST
+
+Prompt / Request
+- Allow the `reim` density colorbars to start at 1 count as the minimum.
+
+Changes Made
+- Changed the `gdp-plot -pmode reim` log-count colorbar helper so the default
+  first count level is 1 instead of 5.
+- Updated the `gdp-plot` documentation and sample-plot description to match
+  the new count scale.
+
+## 2026-08-05 13:55:00 IST
+
+Prompt / Request
+- Do not keep fractional values in the `reim` density colorbar levels.
+
+Changes Made
+- Rounded the `gdp-plot -pmode reim` log-spaced count colorbar levels to whole
+  counts and removed fractional tick labels.
+- Kept the minimum count label at 1.
+- Updated the HTML documentation sample text to describe whole-count labels.

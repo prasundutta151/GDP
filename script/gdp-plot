@@ -865,7 +865,7 @@ def add_gaussian_one_point_ellipse(ax: Any, ellipse_spec: Optional[Tuple[float, 
     )
 
 
-def log_count_levels(max_count: float, nlevels: int = 7, start: float = 5.0) -> np.ndarray:
+def log_count_levels(max_count: float, nlevels: int = 7, start: float = 1.0) -> np.ndarray:
     if not np.isfinite(max_count) or max_count <= 0:
         max_count = start
     high = max(start * 10.0, float(max_count))
@@ -876,13 +876,13 @@ def log_count_levels(max_count: float, nlevels: int = 7, start: float = 5.0) -> 
         if mantissa <= nice:
             high = nice * scale
             break
-    return np.geomspace(start, high, nlevels)
+    levels = np.rint(np.geomspace(start, high, nlevels)).astype(float)
+    levels = np.maximum(levels, start)
+    return np.unique(levels)
 
 
 def count_tick_label(value: float) -> str:
-    if value >= 10.0:
-        return f"{int(round(value))}"
-    return f"{value:.1f}".rstrip("0").rstrip(".")
+    return f"{int(round(value))}"
 
 
 def points_outside_ellipse(
