@@ -1989,3 +1989,33 @@ Changes Made
   counts and removed fractional tick labels.
 - Kept the minimum count label at 1.
 - Updated the HTML documentation sample text to describe whole-count labels.
+
+## 2026-08-05 14:00:00 IST
+
+Prompt / Request
+- Update all sample plots.
+
+Changes Made
+- Regenerated the documentation sample plot set with the current `gdp-plot`
+  implementation and existing GDP NPZ products.
+- Used scan 4 for gains-based samples because the available scan 2 gains NPZ
+  only contains antenna 0, while scan 4 contains the full antenna set.
+- Replaced the old `sample-*` image links in the HTML documentation with the
+  current default `gdp-plot-*` output names.
+- Removed obsolete stale sample PNGs from `doc/sample_plots`.
+
+## 2026-08-05 14:25:00 IST
+
+Prompt / Request
+- For sample plots, use gain scan 17 with antennas 0 through 29 and bandpass
+  scan 18.
+
+Changes Made
+- Regenerated the gain sample plot set from scan 17 using antennas 0-29.
+- Created missing gain scan-17 KS and self-correlation NPZ products with a
+  CASA-enabled Python environment before plotting those samples.
+- Regenerated the bandpass sample plot set from scan 18 using channels
+  800-2999 and antennas 0-29.
+- Updated the repeated HTML sample tables to include gain scan-17 and bandpass
+  scan-18 rows, with antenna 0 linked as the representative per-antenna sample.
+- Removed leftover scan-2 and scan-4 sample PNGs from `doc/sample_plots`.

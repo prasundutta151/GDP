@@ -109,21 +109,21 @@ script/gdp-plot --mode gain -pmode all
 Plot a selected NPZ directly:
 
 ```bash
-script/gdp-plot --mode gain -pmode colormap --npz-path /path/to/gdp-gains-gain-scan2.npz
+script/gdp-plot --mode gain --scan 17 -pmode colormap --npz-path /path/to/gdp-gains-gain-scan17.npz
 ```
 
 Plot pooled Real-1 versus Imag diagnostics for selected antennas:
 
 ```bash
-script/gdp-plot --mode gain -pmode reim --antenna 2,3
-script/gdp-plot --mode bandpass -pmode reim --antenna 2,3 --bchan 0 --echan 128
+script/gdp-plot --mode gain --scan 17 -pmode reim --antenna "[0,29]"
+script/gdp-plot --mode bandpass --scan 18 --bchan 800 --echan 3000 -pmode reim --antenna "[0,29]"
 ```
 
 Plot selected antennas as AntStat-style gain-time plots with Stokes side by side:
 
 ```bash
-script/gdp-plot --mode gain -pmode antenna 0,1,2
-script/gdp-plot --mode bandpass -pmode antenna 0,1,2 --bchan 0 --echan 128
+script/gdp-plot --mode gain --scan 17 -pmode antenna --antenna "[0,29]"
+script/gdp-plot --mode bandpass --scan 18 --bchan 800 --echan 3000 -pmode antenna --antenna "[0,29]"
 ```
 
 Read table date and channel-width metadata as JSON:
