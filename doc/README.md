@@ -89,8 +89,8 @@ Compute GDP statistics:
 ```bash
 script/gdp-stats --smode stats,ks
 script/gdp-stats --smode all
-script/gdp-stats --mode gain --smode gain-colormap --range 20
-script/gdp-stats --mode bandpass --smode gain-colormap -pchans "[16,64]" --range 20
+script/gdp-stats --mode gain --smode colormap --range 20
+script/gdp-stats --mode bandpass --smode colormap -pchans "[16,64]" --range 20
 script/gdp-stats --antennas [0,9] --smode stats
 script/gdp-stats --antennas 1 2 3 4 13 --smode stats
 script/gdp-stats --smode stats --csv
@@ -99,16 +99,23 @@ script/gdp-stats --smode stats --csv
 Plot AntStat-style gain histograms from the gains NPZ product:
 
 ```bash
-script/gdp-plot --mode gain -pmode gain-hist
+script/gdp-plot --mode gain -pmode hist
 script/gdp-plot --mode gain -pmode all
 ```
 
-`-pmode all` runs only `gain-colormap`, `gain-hist`, `stats`, and `ks`.
+`-pmode all` runs only `colormap`, `hist`, `stats`, and `ks`.
 
 Plot a selected NPZ directly:
 
 ```bash
-script/gdp-plot --mode gain -pmode gain-colormap --npz-path /path/to/gdp-gains-gain-scan2.npz
+script/gdp-plot --mode gain -pmode colormap --npz-path /path/to/gdp-gains-gain-scan2.npz
+```
+
+Plot pooled Real-1 versus Imag diagnostics for selected antennas:
+
+```bash
+script/gdp-plot --mode gain -pmode reim --antenna 2,3
+script/gdp-plot --mode bandpass -pmode reim --antenna 2,3 --bchan 0 --echan 128
 ```
 
 Plot selected antennas as AntStat-style gain-time plots with Stokes side by side:

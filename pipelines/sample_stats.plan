@@ -20,7 +20,7 @@ intent: gdp-stats
   #name: gain statistics with csv
   mode: gain
   combine-scans: false
-  smode: gain-colormap
+  smode: colormap
   scan: 2
 #  output-npz: ${stats_npz}
 #  csv: true

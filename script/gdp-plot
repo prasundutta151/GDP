@@ -18,6 +18,7 @@ try:
     import matplotlib
 
     matplotlib.use("Agg")
+    from matplotlib.patches import Ellipse
     import matplotlib.pyplot as plt
 except Exception as exc:
     raise RuntimeError("gdp-plot requires matplotlib. See REQUIREMENTS.md.") from exc
@@ -29,6 +30,7 @@ DEFAULT_PLOT_DPI = 320
 PRODUCTS = {
     "gain_colormap": ("gains", "gains_npz_dir", "gains"),
     "gain_hist": ("gains", "gains_npz_dir", "gains"),
+    "reim": ("gains", "gains_npz_dir", "gains"),
     "antenna": ("gains", "gains_npz_dir", "gains"),
     "stats": ("gains", "gains_npz_dir", "gains"),
     "ks": ("ks", "ks_npz_dir", "ks"),
@@ -37,13 +39,20 @@ PRODUCTS = {
     "cross_corr_colormap": ("cross_corr", "cross_corr_npz_dir", "cross-corr"),
 }
 ALL_PMODE_TASKS = ["gain_colormap", "gain_hist", "stats", "ks"]
+PLOT_TASK_NAMES = {
+    "gain_colormap": "colormap",
+    "gain_hist": "hist",
+}
 
 PMODE_ALIASES = {
     "all": "all",
+    "colormap": "gain_colormap",
     "gain-colormap": "gain_colormap",
     "gain_colormap": "gain_colormap",
+    "hist": "gain_hist",
     "gain-hist": "gain_hist",
     "gain_hist": "gain_hist",
+    "reim": "reim",
     "antenna": "antenna",
     "stats": "stats",
     "ks": "ks",
@@ -170,7 +179,7 @@ def parse_pmode(text: Optional[str]) -> List[str]:
         if not key:
             continue
         if key not in PMODE_ALIASES:
-            valid = ", ".join(sorted(k for k in PMODE_ALIASES if "-" in k or k in {"antenna", "stats", "ks"}))
+            valid = ", ".join(sorted(k for k in PMODE_ALIASES if "-" in k or k in {"all", "colormap", "hist", "reim", "antenna", "stats", "ks"}))
             raise ValueError(f"Unknown pmode '{key}'. Valid modes: {valid}")
         task = PMODE_ALIASES[key]
         if task == "all":
@@ -278,7 +287,8 @@ def default_plot_dir(fmt: str) -> Path:
 
 
 def output_path(plot_dir: Path, task: str, mode: str, scan_label: str, fmt: str) -> Path:
-    return plot_dir / f"gdp-plot-{task.replace('_', '-')}-{mode}-{scan_label}.{fmt}"
+    task_name = PLOT_TASK_NAMES.get(task, task.replace("_", "-"))
+    return plot_dir / f"gdp-plot-{task_name}-{mode}-{scan_label}.{fmt}"
 
 
 def stats_output_path(plot_dir: Path, mode: str, scan_label: str, fmt: str, adjust_mean: bool) -> Path:
@@ -300,6 +310,7 @@ def ensure_npz(product: str, mode: str, args: argparse.Namespace, scans: Optiona
     smode = {
         "gain_colormap": "gains",
         "gain_hist": "gains",
+        "reim": "gains",
         "antenna": "gains",
         "stats": "gains",
         "ks": "ks",
@@ -310,6 +321,7 @@ def ensure_npz(product: str, mode: str, args: argparse.Namespace, scans: Optiona
     output_flag = {
         "gain_colormap": "--output-gains-npz",
         "gain_hist": "--output-gains-npz",
+        "reim": "--output-gains-npz",
         "antenna": "--output-gains-npz",
         "stats": "--output-gains-npz",
         "ks": "--output-ks-npz",
@@ -376,6 +388,7 @@ def ensure_npzs(product: str, mode: str, args: argparse.Namespace, scans: Option
     smode = {
         "gain_colormap": "gains",
         "gain_hist": "gains",
+        "reim": "gains",
         "antenna": "gains",
         "stats": "gains",
         "ks": "ks",
@@ -767,6 +780,246 @@ def sample_stats_text(values: np.ndarray) -> str:
     else:
         kurt = float(np.mean(((vals - mean) / std) ** 4) - 3.0)
     return f"mean={mean:.1f} std={std:.1f} skew={skew:.1f} kurt={kurt:.1f}"
+
+
+def axis_limit_pair(real: np.ndarray, imag: np.ndarray) -> Tuple[float, float, float, float]:
+    real = np.asarray(real, dtype=float)
+    imag = np.asarray(imag, dtype=float)
+    finite_real = real[np.isfinite(real)]
+    finite_imag = imag[np.isfinite(imag)]
+    if finite_real.size:
+        xmin, xmax = float(np.nanmin(finite_real)), float(np.nanmax(finite_real))
+    else:
+        xmin, xmax = -1.0, 1.0
+    if finite_imag.size:
+        ymin, ymax = float(np.nanmin(finite_imag)), float(np.nanmax(finite_imag))
+    else:
+        ymin, ymax = -1.0, 1.0
+    if xmin == xmax:
+        xmin, xmax = xmin - 1.0, xmax + 1.0
+    if ymin == ymax:
+        ymin, ymax = ymin - 1.0, ymax + 1.0
+    xpad = 0.06 * (xmax - xmin)
+    ypad = 0.06 * (ymax - ymin)
+    return xmin - xpad, xmax + xpad, ymin - ypad, ymax + ypad
+
+
+def gaussian_one_point_ellipse(real: np.ndarray, imag: np.ndarray) -> Optional[Tuple[float, float, float, float]]:
+    npoint = int(np.count_nonzero(np.isfinite(real) & np.isfinite(imag)))
+    if npoint < 2:
+        return None
+    xmean = float(np.nanmean(real))
+    ymean = float(np.nanmean(imag))
+    xstd = float(np.nanstd(real))
+    ystd = float(np.nanstd(imag))
+    if not all(np.isfinite(v) for v in (xmean, ymean, xstd, ystd)) or xstd <= 0.0 or ystd <= 0.0:
+        return None
+    radius = math.sqrt(2.0 * math.log(float(npoint)))
+    return xmean, ymean, 2.0 * radius * xstd, 2.0 * radius * ystd
+
+
+def add_gaussian_one_point_ellipse(ax: Any, ellipse_spec: Optional[Tuple[float, float, float, float]]) -> None:
+    if ellipse_spec is None:
+        return
+    xmean, ymean, width, height = ellipse_spec
+    ax.add_patch(
+        Ellipse(
+            (xmean, ymean),
+            width=width,
+            height=height,
+            angle=0.0,
+            fill=False,
+            edgecolor="red",
+            linestyle="--",
+            linewidth=2.0,
+        )
+    )
+
+
+def axis_limit_pair_with_ellipse(
+    real: np.ndarray,
+    imag: np.ndarray,
+    ellipse_spec: Optional[Tuple[float, float, float, float]],
+) -> Tuple[float, float, float, float]:
+    xmin, xmax, ymin, ymax = axis_limit_pair(real, imag)
+    if ellipse_spec is None:
+        return xmin, xmax, ymin, ymax
+    xmean, ymean, width, height = ellipse_spec
+    xmin = min(xmin, xmean - 0.5 * width)
+    xmax = max(xmax, xmean + 0.5 * width)
+    ymin = min(ymin, ymean - 0.5 * height)
+    ymax = max(ymax, ymean + 0.5 * height)
+    xpad = 0.03 * (xmax - xmin) if xmax > xmin else 1.0
+    ypad = 0.03 * (ymax - ymin) if ymax > ymin else 1.0
+    return xmin - xpad, xmax + xpad, ymin - ypad, ymax + ypad
+
+
+def log_count_levels(max_count: float, nlevels: int = 7, start: float = 5.0) -> np.ndarray:
+    if not np.isfinite(max_count) or max_count <= 0:
+        max_count = start
+    high = max(start * 10.0, float(max_count))
+    exponent = math.floor(math.log10(high))
+    scale = 10.0 ** exponent
+    mantissa = high / scale
+    for nice in (1.0, 2.0, 5.0, 10.0):
+        if mantissa <= nice:
+            high = nice * scale
+            break
+    return np.geomspace(start, high, nlevels)
+
+
+def count_tick_label(value: float) -> str:
+    if value >= 10.0:
+        return f"{int(round(value))}"
+    return f"{value:.1f}".rstrip("0").rstrip(".")
+
+
+def antenna_selection_tag(antennas: Optional[List[int]], selected: np.ndarray) -> str:
+    if antennas is None:
+        return "allants"
+    return "ants" + "_".join(str(int(ant)) for ant in selected)
+
+
+def antenna_selection_title(antennas: Optional[List[int]], selected: np.ndarray) -> str:
+    if antennas is None:
+        return f"all antennas ({len(selected)})"
+    return ",".join(str(int(ant)) for ant in selected)
+
+
+def plot_reim_products(
+    npz_path: Path,
+    out_base: Path,
+    antennas: Optional[List[int]],
+    mode: str,
+    pchans: Optional[Tuple[int, int]] = None,
+) -> List[Path]:
+    z = load_npz(npz_path)
+    required = {"scan", "antenna", "stokes", "channel", "real", "imag"}
+    missing = required - set(z)
+    if missing:
+        raise ValueError(f"{npz_path} missing arrays: {sorted(missing)}")
+
+    available_antennas = np.unique(z["antenna"]).astype(int)
+    ant_all = filter_antennas(available_antennas, antennas)
+    stokes_all = np.unique(z["stokes"]).astype(int)
+    if ant_all.size == 0:
+        print("SKIP reim plots: none of the requested antennas are present in the gains NPZ.")
+        return []
+    if antennas is not None:
+        missing_ants = [int(ant) for ant in antennas if int(ant) not in set(int(a) for a in ant_all)]
+        for ant in missing_ants:
+            print(f"SKIP reim antenna {ant}: antenna is not present in the gains NPZ.")
+    if stokes_all.size == 0:
+        print("SKIP reim plots: no Stokes values are present in the gains NPZ.")
+        return []
+
+    header = gain_product_header(z)
+    table_name = Path(str(header.get("input_table", "gain table"))).name or "gain table"
+    scans = np.unique(z["scan"].astype(int))
+    scan_label = str(int(scans[0])) if scans.size == 1 else "allscans"
+    ant_arr = z["antenna"].astype(int)
+    stokes_arr = z["stokes"].astype(int)
+    chan_arr = z["channel"].astype(int)
+    real_arr = z["real"].astype(float)
+    imag_arr = z["imag"].astype(float)
+    flagged_arr = z["flagged"].astype(bool) if "flagged" in z else np.zeros(real_arr.shape, dtype=bool)
+    pchan_mask = plot_channel_mask(chan_arr, pchans, str(npz_path))
+
+    panels: List[Tuple[int, np.ndarray, np.ndarray]] = []
+    for stokes in stokes_all:
+        selector = np.isin(ant_arr, ant_all) & (stokes_arr == int(stokes)) & pchan_mask & ~flagged_arr
+        real_vals = (real_arr[selector] - 1.0) * 100.0
+        imag_vals = imag_arr[selector] * 100.0
+        finite = np.isfinite(real_vals) & np.isfinite(imag_vals)
+        panels.append((int(stokes), real_vals[finite], imag_vals[finite]))
+
+    if not any(real_vals.size for _, real_vals, _ in panels):
+        print("SKIP reim plot: selected antennas/stokes have no finite unflagged real/imag pairs.")
+        return []
+
+    out_base.parent.mkdir(parents=True, exist_ok=True)
+    ncols = len(panels)
+    fig_width = max(7.2, 3.6 * ncols)
+    fig, axes = plt.subplots(2, ncols, figsize=(fig_width, fig_width * 3.0 / 4.0), squeeze=False)
+    for ci, (stokes, real_vals, imag_vals) in enumerate(panels):
+        ax_scatter = axes[0, ci]
+        ax_density = axes[1, ci]
+        if real_vals.size == 0:
+            title = f"Stokes {stokes}\nRe-1: mean=nan std=nan skew=nan kurt=nan\nIm: mean=nan std=nan skew=nan kurt=nan"
+            ax_scatter.set_title(title, fontsize=7)
+            ax_scatter.text(0.5, 0.5, "No finite data", ha="center", va="center", transform=ax_scatter.transAxes, fontsize=8)
+            ax_density.text(0.5, 0.5, "No finite data", ha="center", va="center", transform=ax_density.transAxes, fontsize=8)
+        else:
+            xmean = float(np.nanmean(real_vals))
+            ymean = float(np.nanmean(imag_vals))
+            ellipse_spec = gaussian_one_point_ellipse(real_vals, imag_vals)
+            xmin, xmax, ymin, ymax = axis_limit_pair_with_ellipse(real_vals, imag_vals, ellipse_spec)
+            title = (
+                f"Stokes {stokes}\n"
+                f"Re-1: {sample_stats_text(real_vals)}\n"
+                f"Im: {sample_stats_text(imag_vals)}"
+            )
+
+            ax = ax_scatter
+            ax.scatter(real_vals, imag_vals, s=8, alpha=0.55, color="tab:blue", edgecolors="none")
+            ax.axvline(xmean, color="black", linestyle="--", linewidth=1.2)
+            ax.axhline(ymean, color="black", linestyle="--", linewidth=1.2)
+            add_gaussian_one_point_ellipse(ax, ellipse_spec)
+            ax.set_xlim(xmin, xmax)
+            ax.set_ylim(ymin, ymax)
+            ax.set_title(title, fontsize=7)
+            ax.grid(True, linestyle=":", linewidth=0.6, alpha=0.55)
+
+            ax = ax_density
+            bins = 48
+            counts, xedges, yedges = np.histogram2d(real_vals, imag_vals, bins=bins, range=[[xmin, xmax], [ymin, ymax]])
+            density = counts.T
+            count_ticks = log_count_levels(float(np.nanmax(density)) if density.size else 0.0)
+            log_vmin = float(np.log10(count_ticks[0]))
+            log_vmax = float(np.log10(count_ticks[-1]))
+            log_density = np.full_like(density, np.nan, dtype=float)
+            positive_mask = density > 0
+            log_density[positive_mask] = np.log10(density[positive_mask])
+            masked = np.ma.array(log_density, mask=~np.isfinite(log_density))
+            im = ax.pcolormesh(xedges, yedges, masked, cmap="viridis", shading="auto", vmin=log_vmin, vmax=log_vmax)
+            positive = log_density[np.isfinite(log_density)]
+            if positive.size and np.nanmax(positive) > np.nanmin(positive):
+                levels = np.log10(count_ticks[(count_ticks > 1.0) & (count_ticks <= float(np.nanmax(density)))])
+                if levels.size < 2:
+                    levels = np.linspace(float(np.nanmin(positive)), float(np.nanmax(positive)), 5)[1:]
+                xcenters = 0.5 * (xedges[:-1] + xedges[1:])
+                ycenters = 0.5 * (yedges[:-1] + yedges[1:])
+                ax.contour(xcenters, ycenters, log_density, levels=levels, colors="white", linewidths=0.7, alpha=0.85)
+            ax.axvline(xmean, color="black", linestyle="--", linewidth=1.2)
+            ax.axhline(ymean, color="black", linestyle="--", linewidth=1.2)
+            add_gaussian_one_point_ellipse(ax, ellipse_spec)
+            ax.set_xlim(xmin, xmax)
+            ax.set_ylim(ymin, ymax)
+            ax.grid(False)
+            cbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.025)
+            cbar.ax.tick_params(labelsize=6)
+            cbar.set_ticks(np.log10(count_ticks))
+            cbar.set_ticklabels([count_tick_label(level) for level in count_ticks])
+            cbar.set_label("Points", fontsize=7)
+
+        if ci == 0:
+            axes[0, ci].set_ylabel("Imag [%]")
+            axes[1, ci].set_ylabel("Imag [%]")
+        else:
+            axes[0, ci].tick_params(axis="y", left=False, labelleft=False)
+            axes[1, ci].tick_params(axis="y", left=False, labelleft=False)
+        axes[1, ci].set_xlabel("Real-1 [%]")
+        axes[0, ci].tick_params(axis="both", labelsize=7)
+        axes[1, ci].tick_params(axis="both", labelsize=7)
+
+    ant_title = antenna_selection_title(antennas, ant_all)
+    fig.suptitle(f"Gain Table: {table_name} | Antennas: {ant_title} | Scan: {scan_label}{pchan_title_text(pchans)}", fontsize=10, y=0.965)
+    fig.tight_layout(rect=(0, 0.015, 1, 0.985), h_pad=0.55, w_pad=0.65)
+    out = derived_output_path(out_base, antenna_selection_tag(antennas, ant_all))
+    fig.savefig(out, dpi=DEFAULT_PLOT_DPI)
+    plt.close(fig)
+    print(f"Wrote plot: {out}")
+    return [out]
 
 
 def plot_gain_histogram(
@@ -1751,10 +2004,11 @@ def parse_args() -> argparse.Namespace:
         "--pmode",
         default=None,
         help=(
-            "Plot mode(s), comma or space separated: all, gain-colormap, "
-            "gain-hist, antenna, stats, ks, self-corr-colormap, "
+            "Plot mode(s), comma or space separated: all, colormap, hist, "
+            "reim, antenna, stats, ks, self-corr-colormap, "
             "self-corr-antenna, cross-corr-colormap. all expands to "
-            "gain-colormap, gain-hist, stats, and ks."
+            "colormap, hist, stats, and ks. Legacy names gain-colormap and "
+            "gain-hist are accepted as aliases."
         ),
     )
     p.add_argument("--input-table", default=None, help="Input CASA table passed to gdp-stats when products are missing.")
@@ -1768,7 +2022,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--bchan", type=int, default=None, help="Bandpass start channel passed to gdp-stats when needed.")
     p.add_argument("--echan", type=int, default=None, help="Bandpass end channel passed to gdp-stats when needed.")
     p.add_argument("-pchans", "--pchans", nargs="+", default=None, help="Plot channel window as '[start,end)'. Limits gains-based plots and subplot statistics without changing NPZ product discovery.")
-    p.add_argument("--range", dest="plot_range", type=float, default=None, help="Colormap saturation half-range in percent for gain or bandpass -pmode gain-colormap. The value is rounded up to a multiple of 5 for colorbar labels.")
+    p.add_argument("--range", dest="plot_range", type=float, default=None, help="Colormap saturation half-range in percent for gain or bandpass -pmode colormap. The value is rounded up to a multiple of 5 for colorbar labels.")
     p.add_argument("--flag-chans", nargs="+", default=None, help="Pass-through to gdp-stats: original data-channel window covered by a shorter FLAG channel axis, as '[start,end)'.")
     p.add_argument("--gain-colormap", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--gain-hist", action="store_true", help=argparse.SUPPRESS)
@@ -1813,13 +2067,15 @@ def main() -> None:
                 continue
             for label, npz in products:
                 t0 = time.perf_counter()
-                plot_label = label_with_plot_channels(label, pchans if task in {"gain_colormap", "gain_hist", "antenna", "stats"} else None)
+                plot_label = label_with_plot_channels(label, pchans if task in {"gain_colormap", "gain_hist", "reim", "antenna", "stats"} else None)
                 out = stats_output_path(plot_dir, mode, plot_label, args.format, args.adjust_mean) if task == "stats" else output_path(plot_dir, task, mode, plot_label, args.format)
                 print(f"START plot {task} mode={mode} scan={label}")
                 if task == "gain_colormap":
                     plot_gain_colormap(npz, out, ants, mode, pchans, args.plot_range)
                 elif task == "gain_hist":
                     plot_gain_histogram(npz, out, ants, mode, args.hist_bins, hist_range, pchans)
+                elif task == "reim":
+                    plot_reim_products(npz, out, ants, mode, pchans)
                 elif task == "antenna":
                     plot_single_antenna_gain_products(npz, out, ants, mode, pchans)
                 elif task == "stats":

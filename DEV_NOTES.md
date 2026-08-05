@@ -1734,3 +1734,134 @@ Changes Made
 - Kept antenna, self-correlation, and cross-correlation plot modes out of the
   `all` expansion.
 - Updated README and `gdp-plot` documentation.
+
+## 2026-08-05 11:02:09 IST
+
+Prompt / Request
+- Add `reim` as a `gdp-plot -pmode` option.
+- Rename public plot/stat mode names from `gain-colormap` to `colormap` and
+  from `gain-hist` to `hist` for both `gdp-plot` and `gdp-stats`.
+
+Changes Made
+- Added `gdp-plot -pmode reim`, backed by the gains NPZ product.
+- `reim` writes one plot per selected antenna. Columns are Stokes values; the
+  top row plots individual Real-1 versus Imag points, and the bottom row shows
+  2D density as both colormap and contour.
+- Added dashed vertical and horizontal reference lines at the Real-1 and Imag
+  mean values.
+- Added Real-1 and Imag mean/std/skew/kurtosis summaries to the Stokes titles
+  with one decimal place.
+- Added public `-pmode colormap` and `-pmode hist` names, while keeping legacy
+  `gain-colormap` and `gain-hist` aliases.
+- Added public `--smode colormap` and `--output-colormap` names, while keeping
+  legacy `gain-colormap` and `--output-gain-colormap` aliases.
+- Changed new default plot filenames to use `gdp-plot-colormap-...` and
+  `gdp-plot-hist-...`.
+- Updated sample plan, README, HTML documentation, and added a representative
+  `reim` sample plot under `doc/sample_plots`.
+
+## 2026-08-05 11:28:12 IST
+
+Prompt / Request
+- Change `gdp-plot -pmode reim` so selected antenna data are plotted together
+  in one pooled Real-1 versus Imag product, instead of one plot per antenna.
+
+Changes Made
+- Updated `reim` plotting to combine all finite unflagged samples from all
+  selected antennas for each Stokes panel.
+- If no antenna selection is supplied, `reim` now pools all antennas available
+  in the gains NPZ.
+- The pooled output filename now appends `-allants` or `-ants<list>` to make
+  the antenna selection explicit.
+- Updated the HTML/Markdown documentation and refreshed the representative
+  `reim` sample plot.
+
+## 2026-08-05 11:42:03 IST
+
+Prompt / Request
+- Make the `reim` density/histogram panels use log counts while keeping the
+  axes as Real-1 and Imag.
+
+Changes Made
+- Updated the bottom-row `gdp-plot -pmode reim` panels to display
+  `log10(counts)` for the 2D histogram density image.
+- Changed the contour levels in those panels to use the same log-count scale.
+- Kept the horizontal axis as Real-1 percent and the vertical axis as Imag
+  percent.
+- Updated documentation wording and refreshed the representative sample plot.
+
+## 2026-08-05 11:53:41 IST
+
+Prompt / Request
+- Add a red dashed ellipse to all four `reim` panels showing the Gaussian
+  mean/std limit where only one point is expected outside for the plotted
+  sample size.
+
+Changes Made
+- Added a linewidth-2 dashed red ellipse to each scatter and log-count density
+  panel in `gdp-plot -pmode reim`.
+- The ellipse is centered on the pooled Real-1 and Imag means, with semi-axes
+  `sqrt(2 ln N)` times the corresponding standard deviations. This is the
+  2D Gaussian radius where the expected number of exterior points is one for
+  the plotted sample count `N`.
+- Expanded plot limits when needed so the ellipse remains visible.
+- Updated documentation wording and refreshed the representative sample plot.
+
+## 2026-08-05 12:06:18 IST
+
+Prompt / Request
+- Make the `reim` density colorbar show point counts in factor-of-two steps,
+  with seven values and count labels in multiples of 50.
+
+Changes Made
+- Added a seven-level factor-of-two count scale for `gdp-plot -pmode reim`
+  density colorbars.
+- The density image remains log10-scaled internally, but colorbar ticks are
+  labeled as point counts such as `50`, `100`, `200`, and `400`.
+- The displayed log-color range is expanded to the selected seven count levels
+  so the colorbar consistently shows the full tick sequence.
+- Updated documentation wording and refreshed the representative sample plot.
+
+## 2026-08-05 12:14:36 IST
+
+Prompt / Request
+- Increase the dynamic range of the `reim` density colormap.
+
+Changes Made
+- Temporarily widened the `gdp-plot -pmode reim` density color scale to improve
+  sparse-bin contrast. This was later revised so the color scale starts at the
+  lowest displayed colorbar count (5).
+- Kept the seven visible colorbar labels clean while testing the wider density
+  display range.
+
+## 2026-08-05 12:26:44 IST
+
+Prompt / Request
+- For `reim`, start the color scale at the lowest colorbar label (5 counts), and use seven log-spaced count labels starting at 5.
+- Increase the vertical size of the individual subplots while keeping the full
+  figure aspect ratio at 4:3, so the whitespace below the main title is
+  reduced.
+
+Changes Made
+- Replaced the factor-of-two `reim` count colorbar labels with seven evenly
+  spaced labels, all multiples of 50.
+- The colorbar range now starts at the first displayed count label and extends
+  to an adjusted upper label that covers the maximum density-bin count.
+- Tightened the `reim` figure layout under the main title and slightly reduced
+  the per-column width so the 4:3 figure gives more vertical room to the
+  individual subplots.
+
+## 2026-08-05 12:34:58 IST
+
+Prompt / Request
+- Revise the `reim` density colorbar to start at 5 counts and use seven levels
+  evenly spaced in log scale.
+
+Changes Made
+- Replaced the linear count colorbar helper with a log-spaced count helper for
+  `gdp-plot -pmode reim`.
+- The density colorbar now starts at 5 counts and uses seven geometrically
+  spaced count labels up to a rounded upper count that covers the maximum
+  density-bin count.
+- Updated documentation wording to remove the older multiples-of-50
+  description.

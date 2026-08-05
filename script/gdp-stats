@@ -25,6 +25,7 @@ CORR_COMPONENTS = ("real", "imag")
 SMODE_ALL_TASKS = ["gains", "gain_colormap", "stats", "ks", "self_corr"]
 SMODE_ALIASES = {
     "gains": "gains",
+    "colormap": "gain_colormap",
     "gain-colormap": "gain_colormap",
     "gain_colormap": "gain_colormap",
     "stats": "stats",
@@ -188,7 +189,7 @@ def parse_smode(text: Optional[str]) -> List[str]:
         if not key:
             continue
         if key not in SMODE_ALIASES:
-            valid = ", ".join(["gains", "gain-colormap", "stats", "ks", "self-corr", "all", "cross-corr"])
+            valid = ", ".join(["gains", "colormap", "stats", "ks", "self-corr", "all", "cross-corr"])
             raise SystemExit(f"Unknown smode '{key}'. Valid modes: {valid}")
         task = SMODE_ALIASES[key]
         if task == "all":
@@ -1212,7 +1213,7 @@ def plot_gain_colormap(
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
     except Exception as exc:
-        raise RuntimeError("gdp-stats --smode gain-colormap requires matplotlib. See REQUIREMENTS.md.") from exc
+        raise RuntimeError("gdp-stats --smode colormap requires matplotlib. See REQUIREMENTS.md.") from exc
 
     required = {"scan", "antenna", "stokes", "channel", "real", "imag"}
     missing = required - set(gains)
@@ -1500,16 +1501,17 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--antenna-flag", nargs="+", default=None, help="Antenna list or inclusive range to force-flag. These antennas remain in outputs but all their samples are treated as flagged/non-finite.")
     p.add_argument("--bchan", type=int, default=None, help="Start channel, inclusive.")
     p.add_argument("--echan", type=int, default=None, help="End channel, exclusive.")
-    p.add_argument("-pchans", "--pchans", nargs="+", default=None, help="Plot channel window as '[start,end)' for --smode gain-colormap. Limits displayed channels and subplot-title statistics without changing NPZ products.")
-    p.add_argument("--range", dest="plot_range", type=float, default=None, help="Colormap saturation half-range in percent for gain or bandpass --smode gain-colormap. The value is rounded up to a multiple of 5 for colorbar labels.")
+    p.add_argument("-pchans", "--pchans", nargs="+", default=None, help="Plot channel window as '[start,end)' for --smode colormap. Limits displayed channels and subplot-title statistics without changing NPZ products.")
+    p.add_argument("--range", dest="plot_range", type=float, default=None, help="Colormap saturation half-range in percent for gain or bandpass --smode colormap. The value is rounded up to a multiple of 5 for colorbar labels.")
     p.add_argument("--flag-chans", nargs="+", default=None, help="Original data-channel window covered by a shorter FLAG channel axis, as '[start,end)'. Channels outside this window are treated as flagged.")
     p.add_argument("--use-flags", action="store_true", help="Apply the CASA FLAG mask. Default: false. If requested and the table has no FLAG column, GDP stops with a warning.")
     p.add_argument(
         "--smode",
         default=None,
         help=(
-            "Stats mode(s), comma or space separated: gains, gain-colormap, "
-            "stats, ks, self-corr, all, cross-corr. cross-corr is currently a placeholder."
+            "Stats mode(s), comma or space separated: gains, colormap, stats, "
+            "ks, self-corr, all, cross-corr. Legacy name gain-colormap is "
+            "accepted as an alias. cross-corr is currently a placeholder."
         ),
     )
     p.add_argument("--output-npz", default=None, help="Stats NPZ path.")
@@ -1518,8 +1520,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--output-self-corr-npz", default=None, help="Self-correlation NPZ path.")
     p.add_argument("--output-cross-corr-npz", default=None, help="Cross-correlation NPZ path.")
     p.add_argument("--output-cross-corr-csv", default=None, help="Reserved for future cross-correlation CSV output.")
-    p.add_argument("--output-gain-colormap", default=None, help="Gain colormap plot path. Default: configured plots/<format> runtime directory.")
-    p.add_argument("--plot-format", choices=["png", "pdf", "eps"], default="png", help="Plot format for --gain-colormap. Default: png.")
+    p.add_argument("--output-colormap", "--output-gain-colormap", dest="output_gain_colormap", default=None, help="Colormap plot path. Default: configured plots/<format> runtime directory.")
+    p.add_argument("--plot-format", choices=["png", "pdf", "eps"], default="png", help="Plot format for --smode colormap. Default: png.")
     p.add_argument("--corr-threshold", type=float, default=0.7, help="S2 threshold for correlation-time extraction.")
     p.add_argument("--corr-nbin", type=int, default=32, help="Structure-function lag bin count.")
     p.add_argument("--corr-bintype", choices=["log", "lin"], default="log", help="Structure-function lag binning.")
@@ -1604,7 +1606,7 @@ def run_batch(
         logger.write(f"Wrote gains NPZ: {out}")
         if args.gain_colormap:
             plot_label = label_with_plot_channels(output_label, args.pchans)
-            plot_out = Path(args.output_gain_colormap).expanduser().resolve() if args.output_gain_colormap else build_default_plot(plot_label, mode, "gain-colormap", args.plot_format)
+            plot_out = Path(args.output_gain_colormap).expanduser().resolve() if args.output_gain_colormap else build_default_plot(plot_label, mode, "colormap", args.plot_format)
             plot_gain_colormap(plot_out, gains, mode, antennas, args.pchans, args.plot_range)
             logger.write(f"Wrote gain colormap plot: {plot_out}")
         logger.done(f"gains {scan_label}", t0)

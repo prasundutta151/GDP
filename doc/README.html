@@ -65,19 +65,19 @@ script/gdp-util /path/to/table.g --header  [inspect table metadata]
 script/gdp-util --gain-table --header  [inspect the saved gain table]
 script/gdp-util --bandpass-table --header  [inspect the saved bandpass table]
 script/gdp-stats --smode stats,ks  [compute stats and KS products from the saved input]
-script/gdp-stats --smode all  [run gains, gain-colormap, stats, KS, and self-corr]
+script/gdp-stats --smode all  [run gains, colormap, stats, KS, and self-corr]
 script/gdp-stats --antennas [0,9] --smode stats  [compute stats for antennas 0 through 9]
 script/gdp-stats --antennas 2,3,4,31 --smode stats  [compute stats for explicit antenna IDs]
 script/gdp-stats --smode stats --csv  [compute stats and optional CSV from the saved input]
 script/gdp-stats --smode stats --combine-scans  [write one combined allscans stats product]
-script/gdp-stats --mode gain --smode gain-colormap --range 20  [create gains NPZ and Real-1/Imag colormap plots with fixed percent saturation]
-script/gdp-plot --mode gain -pmode gain-colormap --npz-path /path/to/gdp-gains-gain-scan2.npz  [plot directly from a selected NPZ file]
-script/gdp-plot --mode bandpass -pmode gain-colormap --bchan 0 --echan 128 -pchans "[16,64]" --range 20  [plot a channel window from a wider bandpass gains NPZ with fixed percent saturation]
+script/gdp-stats --mode gain --smode colormap --range 20  [create gains NPZ and Real-1/Imag colormap plots with fixed percent saturation]
+script/gdp-plot --mode gain -pmode colormap --npz-path /path/to/gdp-gains-gain-scan2.npz  [plot directly from a selected NPZ file]
+script/gdp-plot --mode bandpass -pmode colormap --bchan 0 --echan 128 -pchans "[16,64]" --range 20  [plot a channel window from a wider bandpass gains NPZ with fixed percent saturation]
 script/gdp-stats --mode bandpass --smode stats --use-flags --flag-chans "[0,3000]"  [use a shorter FLAG channel axis and flag channels outside that coverage]
-script/gdp-plot --mode gain -pmode gain-hist  [plot AntStat-style gain histograms from gains NPZ]
+script/gdp-plot --mode gain -pmode hist  [plot AntStat-style gain histograms from gains NPZ]
 script/gdp-plot --mode gain -pmode antenna 0,1,2  [plot selected antennas with Stokes side by side]
 script/gdp-plot --mode gain -pmode stats  [plot stats from the gains NPZ, creating the gains NPZ first if needed]
-script/gdp-plot --mode gain -pmode all  [plot gain-colormap, gain-hist, stats, and KS only]
+script/gdp-plot --mode gain -pmode all  [plot colormap, hist, stats, and KS only]
 script/gdp-plan-run pipelines/sample_stats.plan --dry-run  [preview a pipeline plan without running it]</code></pre>
     </section>
 
@@ -91,9 +91,10 @@ script/gdp-plan-run pipelines/sample_stats.plan --dry-run  [preview a pipeline p
       <h2 id="sample-plots">Sample Plots</h2>
       <table>
         <tr><th>Plot Type</th><th>Sample</th><th>Command</th><th>Description</th></tr>
-        <tr><td>Gain colormap</td><td><a href="sample_plots/sample-gain-colormap-gain-scan2.png">sample-gain-colormap-gain-scan2.png</a></td><td><code>script/gdp-plot --mode gain --scan 2 -pmode gain-colormap</code></td><td>Real-1 and Imag gain percent colormaps by antenna and elapsed time; bandpass colormaps use whole-MHz nu labels and bottom-up channel-number axes.</td></tr>
-        <tr><td>Gain histogram</td><td><a href="sample_plots/sample-gain-hist-gain-scan2.png">sample-gain-hist-gain-scan2.png</a></td><td><code>script/gdp-plot --mode gain --scan 2 -pmode gain-hist</code></td><td>AntStat-style per-antenna gain distribution panels with summary statistics.</td></tr>
+        <tr><td>Gain colormap</td><td><a href="sample_plots/sample-gain-colormap-gain-scan2.png">sample-gain-colormap-gain-scan2.png</a></td><td><code>script/gdp-plot --mode gain --scan 2 -pmode colormap</code></td><td>Real-1 and Imag gain percent colormaps by antenna and elapsed time; bandpass colormaps use whole-MHz nu labels and bottom-up channel-number axes.</td></tr>
+        <tr><td>Gain histogram</td><td><a href="sample_plots/sample-gain-hist-gain-scan2.png">sample-gain-hist-gain-scan2.png</a></td><td><code>script/gdp-plot --mode gain --scan 2 -pmode hist</code></td><td>AntStat-style per-antenna gain distribution panels with summary statistics.</td></tr>
         <tr><td>Antenna time series</td><td><a href="sample_plots/sample-antenna-gain-scan2-ant2.png">sample-antenna-gain-scan2-ant2.png</a></td><td><code>script/gdp-plot --mode gain --scan 2 -pmode antenna 2</code></td><td>Single-antenna Real-1 and Imag gain traces with Stokes shown side by side.</td></tr>
+        <tr><td>Real-Imag plane</td><td><a href="sample_plots/sample-reim-gain-scan2-ants2_3.png">sample-reim-gain-scan2-ants2_3.png</a></td><td><code>script/gdp-plot --mode gain --scan 2 -pmode reim --antenna 2,3</code></td><td>Real-1 versus Imag scatter panels with log10-count density contours with log-spaced point-count colorbar labels starting at 5, mean reference lines, and red Gaussian one-point-limit ellipses after pooling selected antennas.</td></tr>
         <tr><td>Statistics grid</td><td><a href="sample_plots/sample-stats-gain-scan2.png">sample-stats-gain-scan2.png</a></td><td><code>script/gdp-plot --mode gain --scan 2 -pmode stats</code></td><td>Per-antenna mean, standard deviation, skewness, and kurtosis grid.</td></tr>
         <tr><td>KS grid</td><td><a href="sample_plots/sample-ks-gain-scan2.png">sample-ks-gain-scan2.png</a></td><td><code>script/gdp-plot --mode gain --scan 2 -pmode ks</code></td><td>Per-antenna fitted-normal KS D-statistic plot.</td></tr>
         <tr><td>Self-corr colormap</td><td><a href="sample_plots/sample-self-corr-colormap-gain-scan2.png">sample-self-corr-colormap-gain-scan2.png</a></td><td><code>script/gdp-plot --mode gain --scan 2 -pmode self-corr-colormap</code></td><td>Structure-function colormap with antenna on x-axis and lag on y-axis.</td></tr>
