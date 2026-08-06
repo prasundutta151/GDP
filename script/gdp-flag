@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import time
 from datetime import datetime, timezone
 from importlib.machinery import SourceFileLoader
@@ -22,12 +23,19 @@ FMODE_ALIASES = {
     "man-antenna": "man_antenna",
     "man_antenna": "man_antenna",
     "man-ant": "man_antenna",
-    "man-chann": "man_chann",
-    "man-chan": "man_chann",
-    "man-channel": "man_chann",
-    "man_chann": "man_chann",
-    "all-thrsld": "all_thrsld",
-    "all-threshold": "all_thrsld",
+    "man-chan": "man_chan",
+    "man-chann": "man_chan",
+    "man-channel": "man_chan",
+    "man_chan": "man_chan",
+    "all-std-thrsld": "all_std_thrsld",
+    "all-std-threshold": "all_std_thrsld",
+    "all_std_thrsld": "all_std_thrsld",
+    "ante-std-thrsld": "ante_std_thrsld",
+    "ante-std-threshold": "ante_std_thrsld",
+    "ante_std_thrsld": "ante_std_thrsld",
+    "ante-mean-thrsld": "ante_mean_thrsld",
+    "ante-mean-threshold": "ante_mean_thrsld",
+    "ante_mean_thrsld": "ante_mean_thrsld",
     "ante-thrsld": "ante_thrsld",
     "ante-threshold": "ante_thrsld",
     "ks-thrsld": "ks_thrsld",
@@ -40,8 +48,14 @@ FMODE_ALIASES = {
     "remove_version": "remove_version",
     "remove-ver": "remove_version",
     "rm-version": "remove_version",
+    "summary": "summary",
+    "summary-version": "summary",
+    "summary_version": "summary",
+    "show": "summary",
+    "show-version": "summary",
+    "show_version": "summary",
 }
-PLACEHOLDER_FMODES = {"all_thrsld", "ante_thrsld", "ks_thrsld", "auto_ante", "auto_chan"}
+PLACEHOLDER_FMODES = {"auto_ante", "auto_chan"}
 
 
 def project_root() -> Path:
@@ -93,11 +107,58 @@ def parse_flag_version(value: Optional[str], option_name: str = "--out-fver") ->
     if value is None or str(value).strip().lower() == "highest":
         return None
     text = str(value).strip()
-    if text.lower().startswith("v"):
+    lower = text.lower()
+    if lower.startswith("fv"):
+        text = text[2:]
+    elif lower.startswith("v"):
         text = text[1:]
     if not text.isdigit() or int(text) < 1:
         raise SystemExit(f"{option_name} must be a positive integer version number.")
     return int(text)
+
+
+def normalize_version_token(text: str, option_name: str) -> int:
+    value = str(text).strip()
+    lower = value.lower()
+    if lower.startswith("fv"):
+        value = value[2:]
+    elif lower.startswith("v"):
+        value = value[1:]
+    if not value.isdigit() or int(value) < 1:
+        raise SystemExit(
+            f"{option_name} must be a positive integer version number, "
+            "a closed range like [1-3], or an open range like [1:]."
+        )
+    return int(value)
+
+
+def parse_remove_version_request(value: Optional[str]) -> Optional[Tuple[str, Any]]:
+    if value is None or str(value).strip() == "":
+        return None
+    text = str(value).strip()
+    bracketed = (
+        (text.startswith("[") and text.endswith("]"))
+        or (text.startswith("(") and text.endswith(")"))
+    )
+    if bracketed:
+        inner = text[1:-1].strip()
+        if ":" in inner:
+            start_text, end_text = inner.split(":", 1)
+            start_text = start_text.strip()
+            end_text = end_text.strip()
+            if not start_text or end_text:
+                raise SystemExit(
+                    "remove-version open ranges must be written like [1:] or (1:)."
+                )
+            return ("open", normalize_version_token(start_text, "remove-version"))
+        if "-" in inner:
+            start_text, end_text = inner.split("-", 1)
+            start = normalize_version_token(start_text.strip(), "remove-version")
+            end = normalize_version_token(end_text.strip(), "remove-version")
+            if end < start:
+                raise SystemExit("remove-version closed ranges must satisfy end >= start.")
+            return ("closed", (start, end))
+    return ("single", parse_flag_version(text, "remove-version"))
 
 
 def parse_fmode(text: Optional[str]) -> str:
@@ -107,13 +168,16 @@ def parse_fmode(text: Optional[str]) -> str:
             [
                 "casa-flags",
                 "man-antenna",
-                "man-chann",
-                "all-thrsld",
+                "man-chan",
+                "all-std-thrsld",
+                "ante-std-thrsld",
+                "ante-mean-thrsld",
                 "ante-thrsld",
                 "ks-thrsld",
                 "auto-ante",
                 "auto-chan",
                 "remove-version",
+                "summary",
             ]
         )
         raise SystemExit(f"Unknown fmode '{key}'. Valid modes: {valid}")
@@ -128,6 +192,114 @@ def normalize_list_text(text: object) -> str:
 
 def parse_int_selection(text: object, option_name: str) -> Optional[List[int]]:
     return GSTATS.parse_antenna_list(text, option_name)
+
+
+def split_manual_tokens(text: object) -> List[str]:
+    value = normalize_list_text(text).strip()
+    tokens: List[str] = []
+    current: List[str] = []
+    depth = 0
+    for char in value:
+        if char in "([":
+            depth += 1
+            current.append(char)
+        elif char in ")]":
+            depth = max(0, depth - 1)
+            current.append(char)
+        elif depth == 0 and char in {",", " ", "\t", "\n"}:
+            token = "".join(current).strip()
+            if token:
+                tokens.append(token)
+            current = []
+        else:
+            current.append(char)
+    token = "".join(current).strip()
+    if token:
+        tokens.append(token)
+    return tokens
+
+
+def split_top_level_colon(token: str, option_name: str) -> Tuple[str, Optional[str]]:
+    depth = 0
+    for idx, char in enumerate(token):
+        if char in "([":
+            depth += 1
+        elif char in ")]":
+            depth = max(0, depth - 1)
+        elif char == ":" and depth == 0:
+            left = token[:idx].strip()
+            right = token[idx + 1 :].strip()
+            if not left or not right:
+                raise SystemExit(f"{option_name} stokes form must be TARGET:STOKES, for example {option_name} 1:0")
+            return left, right
+    return token.strip(), None
+
+
+def parse_manual_int_values(text: str, option_name: str) -> List[int]:
+    value = text.strip()
+    square_group = value.startswith("[") and value.endswith("]")
+    if (value.startswith("(") and value.endswith(")")) or square_group:
+        value = value[1:-1].strip()
+    if not value:
+        raise SystemExit(f"{option_name} contains an empty selection.")
+    if square_group and "," in value and "-" not in value:
+        parts = [item.strip() for item in value.split(",") if item.strip()]
+        if len(parts) == 2:
+            start, end = int(parts[0]), int(parts[1])
+            step = 1 if end >= start else -1
+            return list(range(start, end + step, step))
+    values: List[int] = []
+    for part in [item.strip() for item in value.split(",") if item.strip()]:
+        if "-" in part and not part.startswith("-"):
+            ends = [item.strip() for item in part.split("-", 1) if item.strip()]
+            if len(ends) != 2:
+                raise SystemExit(f"{option_name} range form must be two numbers, for example {option_name} [1-4]:0")
+            start, end = int(ends[0]), int(ends[1])
+            step = 1 if end >= start else -1
+            values.extend(range(start, end + step, step))
+        else:
+            values.append(int(part))
+    return sorted(set(values))
+
+
+def parse_manual_selection(text: object, option_name: str) -> Optional[List[Tuple[List[int], Optional[List[int]]]]]:
+    if text is None or normalize_list_text(text).strip() == "":
+        return None
+    selections: List[Tuple[List[int], Optional[List[int]]]] = []
+    for token in split_manual_tokens(text):
+        target_text, stokes_text = split_top_level_colon(token, option_name)
+        targets = parse_manual_int_values(target_text, option_name)
+        stokes = parse_manual_int_values(stokes_text, f"{option_name} stokes") if stokes_text is not None else None
+        selections.append((targets, stokes))
+    return selections
+
+
+def parse_positive_float(value: Optional[str], option_name: str, default: float = 1.0) -> float:
+    if value is None or str(value).strip() == "":
+        return float(default)
+    try:
+        parsed = float(str(value).strip())
+    except ValueError as exc:
+        raise SystemExit(f"{option_name} must be a positive numeric value.") from exc
+    if not np.isfinite(parsed) or parsed <= 0.0:
+        raise SystemExit(f"{option_name} must be a positive numeric value.")
+    return parsed
+
+
+def parse_percent_value(value: Optional[str], option_name: str, default: float = 70.0) -> float:
+    if value is None or str(value).strip() == "":
+        return float(default)
+    try:
+        parsed = float(str(value).strip())
+    except ValueError as exc:
+        raise SystemExit(f"{option_name} must be a numeric percentage from 0 to 100.") from exc
+    if not np.isfinite(parsed) or parsed < 0.0 or parsed > 100.0:
+        raise SystemExit(f"{option_name} must be a numeric percentage from 0 to 100.")
+    return parsed
+
+
+def parse_threshold_factor(value: Optional[str], option_name: str, default: float = 1.0) -> float:
+    return parse_positive_float(value, option_name, default)
 
 
 def parse_scan_list(text: Optional[str]) -> Optional[List[int]]:
@@ -150,9 +322,9 @@ def infer_mode(args: argparse.Namespace) -> str:
     mode = args.mode
     if mode != "auto":
         return mode
-    if getattr(args, "fmode_resolved", None) == "man_chann":
+    if getattr(args, "fmode_resolved", None) == "man_chan":
         return "bandpass"
-    if args.bandpass_table or args.bchan is not None or args.echan is not None or args.man_chann:
+    if args.bandpass_table or args.bchan is not None or args.echan is not None or args.man_chan:
         return "bandpass"
     return "gain"
 
@@ -186,30 +358,455 @@ def load_flag_file(flag_path: Path, gains: Dict[str, Any]) -> Tuple[np.ndarray, 
     return flags, header
 
 
-def manual_antenna_mask(gains: Dict[str, Any], antennas: Optional[Sequence[int]]) -> np.ndarray:
+def stokes_selection_mask(gains: Dict[str, Any], stokes: Optional[Sequence[int]]) -> np.ndarray:
+    if stokes is None:
+        return np.ones(np.asarray(gains["stokes"]).shape, dtype=bool)
+    return np.isin(np.asarray(gains["stokes"], dtype=int), sorted({int(pol) for pol in stokes}))
+
+
+def manual_antenna_mask(gains: Dict[str, Any], selections: Optional[Sequence[Tuple[Sequence[int], Optional[Sequence[int]]]]]) -> np.ndarray:
     mask = np.zeros(np.asarray(gains["antenna"]).shape, dtype=bool)
-    selected = {int(ant) for ant in antennas or []}
-    if selected:
-        mask = np.isin(np.asarray(gains["antenna"], dtype=int), sorted(selected))
+    antenna_values = np.asarray(gains["antenna"], dtype=int)
+    for antennas, stokes in selections or []:
+        selected = {int(ant) for ant in antennas or []}
+        if selected:
+            mask |= np.isin(antenna_values, sorted(selected)) & stokes_selection_mask(gains, stokes)
     return mask
 
 
-def manual_channel_mask(gains: Dict[str, Any], channels: Optional[Sequence[int]]) -> np.ndarray:
+def manual_channel_mask(gains: Dict[str, Any], selections: Optional[Sequence[Tuple[Sequence[int], Optional[Sequence[int]]]]]) -> np.ndarray:
     mask = np.zeros(np.asarray(gains["channel"]).shape, dtype=bool)
-    selected = {int(chan) for chan in channels or []}
-    if selected:
-        mask = np.isin(np.asarray(gains["channel"], dtype=int), sorted(selected))
+    channel_values = np.asarray(gains["channel"], dtype=int)
+    for channels, stokes in selections or []:
+        selected = {int(chan) for chan in channels or []}
+        if selected:
+            mask |= np.isin(channel_values, sorted(selected)) & stokes_selection_mask(gains, stokes)
     return mask
+
+
+def std_threshold_mask(
+    gains: Dict[str, Any],
+    alpha: float,
+    exclude_flags: Optional[np.ndarray],
+    logger: TaskLogger,
+    *,
+    per_antenna: bool,
+    fmode_label: str,
+) -> Tuple[np.ndarray, List[str]]:
+    real_values = (np.asarray(gains["real"], dtype=float) - 1.0) * 100.0
+    imag_values = np.asarray(gains["imag"], dtype=float) * 100.0
+    stokes_values = np.asarray(gains["stokes"], dtype=int)
+    antenna_values = np.asarray(gains["antenna"], dtype=int)
+    exclude = np.asarray(exclude_flags, dtype=bool) if exclude_flags is not None else np.zeros(real_values.shape, dtype=bool)
+    mask = np.zeros(real_values.shape, dtype=bool)
+    intent_parts: List[str] = [f"alpha={alpha:g}"]
+
+    groups: List[Tuple[Optional[int], int]] = []
+    if per_antenna:
+        for antenna in sorted(int(ant) for ant in np.unique(antenna_values)):
+            for stokes in sorted(int(pol) for pol in np.unique(stokes_values[antenna_values == antenna])):
+                groups.append((antenna, stokes))
+    else:
+        groups = [(None, int(pol)) for pol in sorted(int(pol) for pol in np.unique(stokes_values))]
+
+    for antenna, stokes in groups:
+        group_selector = stokes_values == stokes
+        group_text = f"stokes={stokes}"
+        intent_group = f"stokes {stokes}"
+        if antenna is not None:
+            group_selector &= antenna_values == antenna
+            group_text = f"antenna={antenna} stokes={stokes}"
+            intent_group = f"antenna {antenna} stokes {stokes}"
+        base = group_selector & ~exclude
+        finite = base & np.isfinite(real_values) & np.isfinite(imag_values)
+        npoint = int(np.count_nonzero(finite))
+        if npoint < 2:
+            logger.write(f"{fmode_label} {group_text}: skipped; finite_unflagged_samples={npoint}")
+            intent_parts.append(f"{intent_group}: skipped n={npoint}")
+            continue
+        x = real_values[finite]
+        y = imag_values[finite]
+        xstd = float(np.nanstd(x))
+        ystd = float(np.nanstd(y))
+        if not all(np.isfinite(v) for v in (xstd, ystd)) or xstd <= 0.0 or ystd <= 0.0:
+            logger.write(
+                f"{fmode_label} {group_text}: skipped; invalid mean/std "
+                f"real_std={xstd:.6g} imag_std={ystd:.6g}"
+            )
+            intent_parts.append(f"{intent_group}: skipped invalid mean/std n={npoint}")
+            continue
+        radius = math.sqrt(2.0 * math.log(float(npoint)))
+        threshold = alpha * radius
+        distance = np.full(real_values.shape, np.nan, dtype=float)
+        distance[finite] = np.sqrt((real_values[finite] / xstd) ** 2 + (imag_values[finite] / ystd) ** 2)
+        stokes_new = finite & (distance > threshold)
+        mask |= stokes_new
+        new_count = int(np.count_nonzero(stokes_new))
+        pct = 100.0 * new_count / npoint if npoint else 0.0
+        logger.write(
+            f"{fmode_label} "
+            f"{group_text} alpha={alpha:g} n={npoint} "
+            f"real_std={xstd:.3f}% "
+            f"imag_std={ystd:.3f}% "
+            f"R={radius:.3f} threshold={threshold:.3f} "
+            f"new_flags={new_count}/{npoint} ({pct:.2f}%)"
+        )
+        intent_parts.append(
+            f"{intent_group}: n={npoint} std_real={xstd:.6g}% "
+            f"std_imag={ystd:.6g}% R={radius:.6g} "
+            f"alpha={alpha:g} new_flags={new_count}"
+        )
+
+    total = int(np.count_nonzero(~exclude & np.isfinite(real_values) & np.isfinite(imag_values)))
+    total_new = int(np.count_nonzero(mask))
+    pct_total = 100.0 * total_new / total if total else 0.0
+    logger.write(f"{fmode_label} total_new_flags={total_new}/{total} ({pct_total:.2f}%)")
+    return mask, intent_parts
+
+
+def antenna_mean_threshold_mask(
+    gains: Dict[str, Any],
+    alpha: float,
+    exclude_flags: Optional[np.ndarray],
+    logger: TaskLogger,
+) -> Tuple[np.ndarray, List[str]]:
+    real_values = (np.asarray(gains["real"], dtype=float) - 1.0) * 100.0
+    imag_values = np.asarray(gains["imag"], dtype=float) * 100.0
+    stokes_values = np.asarray(gains["stokes"], dtype=int)
+    antenna_values = np.asarray(gains["antenna"], dtype=int)
+    exclude = np.asarray(exclude_flags, dtype=bool) if exclude_flags is not None else np.zeros(real_values.shape, dtype=bool)
+    mask = np.zeros(real_values.shape, dtype=bool)
+    intent_parts: List[str] = [f"threshold={alpha:g}", "cutoff=threshold_times_global_std_modulus", "center=origin"]
+
+    for stokes in sorted(int(pol) for pol in np.unique(stokes_values)):
+        stokes_selector = (stokes_values == stokes) & ~exclude & np.isfinite(real_values) & np.isfinite(imag_values)
+        stokes_n = int(np.count_nonzero(stokes_selector))
+        if stokes_n < 2:
+            logger.write(f"ante-mean-thrsld stokes={stokes}: skipped; finite_unflagged_samples={stokes_n}")
+            intent_parts.append(f"stokes {stokes}: skipped finite_unflagged_samples={stokes_n}")
+            continue
+        stokes_real_std = float(np.nanstd(real_values[stokes_selector]))
+        stokes_imag_std = float(np.nanstd(imag_values[stokes_selector]))
+        if not all(np.isfinite(v) for v in (stokes_real_std, stokes_imag_std)) or stokes_real_std <= 0.0 or stokes_imag_std <= 0.0:
+            logger.write(
+                f"ante-mean-thrsld stokes={stokes}: skipped; invalid global std "
+                f"std_real={stokes_real_std:.6g} std_imag={stokes_imag_std:.6g}"
+            )
+            intent_parts.append(f"stokes {stokes}: skipped invalid global std")
+            continue
+        cutoff = alpha * math.sqrt(stokes_real_std ** 2 + stokes_imag_std ** 2)
+        antenna_stats: List[Tuple[int, int, float, float, float, float]] = []
+        for antenna in sorted(int(ant) for ant in np.unique(antenna_values[stokes_values == stokes])):
+            group_selector = (stokes_values == stokes) & (antenna_values == antenna)
+            finite = group_selector & ~exclude & np.isfinite(real_values) & np.isfinite(imag_values)
+            npoint = int(np.count_nonzero(finite))
+            if npoint < 2:
+                logger.write(f"ante-mean-thrsld antenna={antenna} stokes={stokes}: skipped; finite_unflagged_samples={npoint}")
+                continue
+            x = real_values[finite]
+            y = imag_values[finite]
+            mean_real = float(np.nanmean(x))
+            mean_imag = float(np.nanmean(y))
+            std_real = float(np.nanstd(x))
+            std_imag = float(np.nanstd(y))
+            if not all(np.isfinite(v) for v in (mean_real, mean_imag, std_real, std_imag)) or std_real <= 0.0 or std_imag <= 0.0:
+                logger.write(
+                    f"ante-mean-thrsld antenna={antenna} stokes={stokes}: skipped; invalid mean/std "
+                    f"mean_real={mean_real:.6g} mean_imag={mean_imag:.6g} "
+                    f"std_real={std_real:.6g} std_imag={std_imag:.6g}"
+                )
+                continue
+            antenna_stats.append((antenna, npoint, mean_real, mean_imag, std_real, std_imag))
+
+        nant = len(antenna_stats)
+        if nant < 2:
+            logger.write(f"ante-mean-thrsld stokes={stokes}: skipped; valid_antennas={nant}")
+            intent_parts.append(f"stokes {stokes}: skipped valid_antennas={nant}")
+            continue
+
+        for antenna, npoint, mean_real, mean_imag, std_real, std_imag in antenna_stats:
+            mean_modulus = math.sqrt(mean_real ** 2 + mean_imag ** 2)
+            promote = bool(np.isfinite(mean_modulus) and mean_modulus > cutoff)
+            if promote:
+                mask |= (stokes_values == stokes) & (antenna_values == antenna)
+            logger.write(
+                "ante-mean-thrsld "
+                f"antenna={antenna} stokes={stokes} threshold={alpha:g} "
+                f"valid_antennas={nant} n={npoint} stokes_n={stokes_n} "
+                f"global_std_real={stokes_real_std:.3f}% global_std_imag={stokes_imag_std:.3f}% "
+                f"mean_real={mean_real:.3f}% mean_imag={mean_imag:.3f}% "
+                f"mean_modulus={mean_modulus:.3f}% cutoff={cutoff:.3f}% "
+                f"promote={'yes' if promote else 'no'}"
+            )
+            intent_parts.append(
+                f"stokes {stokes} antenna {antenna}: valid_antennas={nant} n={npoint} stokes_n={stokes_n} "
+                f"global_std_real={stokes_real_std:.6g}% global_std_imag={stokes_imag_std:.6g}% "
+                f"mean_real={mean_real:.6g}% mean_imag={mean_imag:.6g}% "
+                f"mean_modulus={mean_modulus:.6g}% cutoff={cutoff:.6g}% "
+                f"threshold={alpha:g} "
+                f"promote={'yes' if promote else 'no'}"
+            )
+
+    total = int(np.count_nonzero(~exclude & np.isfinite(real_values) & np.isfinite(imag_values)))
+    total_new = int(np.count_nonzero(mask))
+    pct_total = 100.0 * total_new / total if total else 0.0
+    promoted = sorted({int(ant) for ant in antenna_values[mask]}) if np.any(mask) else []
+    logger.write(
+        f"ante-mean-thrsld promoted_antennas={format_int_values(promoted) if promoted else 'none'} "
+        f"new_flags={total_new}/{total} ({pct_total:.2f}%)"
+    )
+    return mask, intent_parts
+
+
+def antenna_flag_fraction_threshold_mask(
+    gains: Dict[str, Any],
+    source_flags: np.ndarray,
+    percent: float,
+    logger: TaskLogger,
+) -> Tuple[np.ndarray, List[str]]:
+    antenna_values = np.asarray(gains["antenna"], dtype=int)
+    stokes_values = np.asarray(gains["stokes"], dtype=int)
+    mode = str(gains.get("header", {}).get("mode") or "").strip().lower()
+    if mode == "bandpass":
+        axis_values = np.asarray(gains["channel"], dtype=int)
+        axis_label = "channel"
+    else:
+        axis_values = np.asarray(gains["time"], dtype=float)
+        axis_label = "time"
+    source = np.asarray(source_flags, dtype=bool)
+    mask = np.zeros(source.shape, dtype=bool)
+    intent_parts: List[str] = [f"percent={percent:g}", f"availability_axis={axis_label}_by_stokes"]
+
+    available_counts: Dict[int, int] = {}
+    for antenna in sorted(int(ant) for ant in np.unique(antenna_values)):
+        ant_mask = antenna_values == antenna
+        available = {
+            (int(pol), axis)
+            for pol, axis, flagged in zip(stokes_values[ant_mask], axis_values[ant_mask], source[ant_mask])
+            if not flagged
+        }
+        available_counts[antenna] = len(available)
+    max_available = max(available_counts.values(), default=0)
+    logger.write(
+        f"ante-thrsld availability_axis={axis_label}_by_stokes "
+        f"max_unflagged_units={max_available}"
+    )
+
+    for antenna in sorted(int(ant) for ant in np.unique(antenna_values)):
+        ant_mask = antenna_values == antenna
+        available = int(available_counts.get(antenna, 0))
+        flagged = max(0, max_available - available)
+        flagged_percent = 100.0 * flagged / max_available if max_available else 0.0
+        promote = max_available > 0 and flagged_percent >= percent
+        if promote:
+            mask |= ant_mask
+        logger.write(
+            "ante-thrsld "
+            f"antenna={antenna} percent_threshold={percent:g} "
+            f"unflagged_{axis_label}_stokes={available}/{max_available} "
+            f"flagged_fraction={flagged}/{max_available} ({flagged_percent:.2f}%) "
+            f"promote={'yes' if promote else 'no'}"
+        )
+        intent_parts.append(
+            f"antenna {antenna}: unflagged_{axis_label}_stokes={available}/{max_available} "
+            f"flagged_fraction={flagged}/{max_available} "
+            f"({flagged_percent:.6g}%) threshold={percent:g} "
+            f"promote={'yes' if promote else 'no'}"
+        )
+
+    total_new = int(np.count_nonzero(mask))
+    total_samples = int(mask.size)
+    pct_total = 100.0 * total_new / total_samples if total_samples else 0.0
+    promoted_antennas = sorted(int(ant) for ant in np.unique(antenna_values[mask])) if np.any(mask) else []
+    logger.write(
+        f"ante-thrsld promoted_antennas={format_int_values(promoted_antennas) if promoted_antennas else 'none'} "
+        f"new_flags={total_new}/{total_samples} ({pct_total:.2f}%)"
+    )
+    return mask, intent_parts
+
+
+def normal_ks_d(values: np.ndarray) -> float:
+    x = np.sort(np.asarray(values, dtype=float)[np.isfinite(values)])
+    if x.size < 2:
+        return np.nan
+    mean = float(np.mean(x))
+    std = float(np.std(x, ddof=1))
+    if not np.isfinite(std) or std <= 0.0:
+        return np.nan
+    cdf = 0.5 * (1.0 + np.vectorize(math.erf)((x - mean) / (std * math.sqrt(2.0))))
+    empirical_hi = np.arange(1, x.size + 1, dtype=float) / x.size
+    empirical_lo = np.arange(0, x.size, dtype=float) / x.size
+    return float(max(np.max(np.abs(empirical_hi - cdf)), np.max(np.abs(cdf - empirical_lo))))
+
+
+def two_sample_ks_d(x: np.ndarray, y: np.ndarray) -> float:
+    x = np.sort(np.asarray(x, dtype=float)[np.isfinite(x)])
+    y = np.sort(np.asarray(y, dtype=float)[np.isfinite(y)])
+    if x.size < 2 or y.size < 2:
+        return np.nan
+    pooled = np.concatenate([x, y])
+    cdf_x = np.searchsorted(x, pooled, side="right") / float(x.size)
+    cdf_y = np.searchsorted(y, pooled, side="right") / float(y.size)
+    return float(np.max(np.abs(cdf_x - cdf_y)))
+
+
+def simulated_gaussian_ks_mean(n_sample: int, seed: int, realizations: int = 128) -> float:
+    n = int(n_sample)
+    if n < 2:
+        return np.nan
+    rng = np.random.default_rng(seed)
+    values = np.asarray(
+        [two_sample_ks_d(rng.normal(size=n), rng.normal(size=n)) for _ in range(max(1, int(realizations)))],
+        dtype=float,
+    )
+    values = values[np.isfinite(values)]
+    return float(np.mean(values)) if values.size else np.nan
+
+
+def ks_threshold_mask(
+    gains: Dict[str, Any],
+    factor: float,
+    exclude_flags: Optional[np.ndarray],
+    logger: TaskLogger,
+) -> Tuple[np.ndarray, List[str]]:
+    real_values = (np.asarray(gains["real"], dtype=float) - 1.0) * 100.0
+    imag_values = np.asarray(gains["imag"], dtype=float) * 100.0
+    antenna_values = np.asarray(gains["antenna"], dtype=int)
+    stokes_values = np.asarray(gains["stokes"], dtype=int)
+    exclude = np.asarray(exclude_flags, dtype=bool) if exclude_flags is not None else np.zeros(real_values.shape, dtype=bool)
+    mask = np.zeros(real_values.shape, dtype=bool)
+    intent_parts: List[str] = [f"factor={factor:g}", "real=Real-1 percent", "imag=Imag percent", "gaussian_realizations=128"]
+
+    for antenna in sorted(int(ant) for ant in np.unique(antenna_values)):
+        antenna_selector = antenna_values == antenna
+        for stokes in sorted(int(pol) for pol in np.unique(stokes_values[antenna_selector])):
+            group_selector = antenna_selector & (stokes_values == stokes)
+            component_results: List[str] = []
+            promote = False
+            for comp_index, (comp_name, values) in enumerate((("real", real_values), ("imag", imag_values))):
+                finite = group_selector & ~exclude & np.isfinite(values)
+                samples = values[finite]
+                npoint = int(samples.size)
+                observed = normal_ks_d(samples)
+                sim_mean = simulated_gaussian_ks_mean(
+                    npoint,
+                    seed=20260806 + 1000003 * int(antenna) + 1009 * int(stokes) + 37 * comp_index,
+                )
+                threshold = factor * sim_mean if np.isfinite(sim_mean) else np.nan
+                fail = bool(np.isfinite(observed) and np.isfinite(threshold) and observed > threshold)
+                promote = promote or fail
+                obs_pct = observed * 100.0 if np.isfinite(observed) else np.nan
+                sim_pct = sim_mean * 100.0 if np.isfinite(sim_mean) else np.nan
+                thresh_pct = threshold * 100.0 if np.isfinite(threshold) else np.nan
+                logger.write(
+                    "ks-thrsld "
+                    f"antenna={antenna} stokes={stokes} component={comp_name} "
+                    f"factor={factor:g} n={npoint} ks={obs_pct:.3f}% "
+                    f"gaussian_mean_ks={sim_pct:.3f}% threshold={thresh_pct:.3f}% "
+                    f"flag={'yes' if fail else 'no'}"
+                )
+                component_results.append(
+                    f"{comp_name}: n={npoint} ks={obs_pct:.6g}% "
+                    f"gaussian_mean_ks={sim_pct:.6g}% threshold={thresh_pct:.6g}% "
+                    f"flag={'yes' if fail else 'no'}"
+                )
+            if promote:
+                mask |= group_selector
+            logger.write(
+                f"ks-thrsld antenna={antenna} stokes={stokes} "
+                f"promote={'yes' if promote else 'no'}"
+            )
+            intent_parts.append(
+                f"antenna {antenna} stokes {stokes}: "
+                + "; ".join(component_results)
+                + f"; promote={'yes' if promote else 'no'}"
+            )
+
+    total_new = int(np.count_nonzero(mask))
+    total_samples = int(mask.size)
+    pct_total = 100.0 * total_new / total_samples if total_samples else 0.0
+    promoted = sorted(
+        {(int(ant), int(pol)) for ant, pol in zip(antenna_values[mask], stokes_values[mask])}
+    )
+    promoted_text = ",".join(f"{ant}:{pol}" for ant, pol in promoted) if promoted else "none"
+    logger.write(f"ks-thrsld promoted_antenna_stokes={promoted_text} new_flags={total_new}/{total_samples} ({pct_total:.2f}%)")
+    return mask, intent_parts
 
 
 def flag_count_text(flag: np.ndarray) -> str:
     return f"{int(np.count_nonzero(flag))}/{int(flag.size)}"
 
 
+def log_per_antenna_flag_summary(gains: Dict[str, Any], flags: np.ndarray, logger: TaskLogger) -> None:
+    antenna_values = np.asarray(gains["antenna"], dtype=int)
+    flag_values = np.asarray(flags, dtype=bool)
+    logger.write("Per-antenna final flag summary:")
+    logger.write("antenna  flagged_points  total_points  flagged_percent")
+    for antenna in sorted(int(ant) for ant in np.unique(antenna_values)):
+        ant_mask = antenna_values == antenna
+        total = int(np.count_nonzero(ant_mask))
+        flagged = int(np.count_nonzero(flag_values & ant_mask))
+        percent = 100.0 * flagged / total if total else 0.0
+        logger.write(f"{antenna:7d}  {flagged:14d}  {total:12d}  {percent:15.2f}")
+
+
 def format_selection(values: Optional[Sequence[int]]) -> str:
     if not values:
         return "none"
     return ",".join(str(int(value)) for value in values)
+
+
+def format_int_values(values: Sequence[int]) -> str:
+    unique = sorted({int(value) for value in values})
+    if not unique:
+        return "none"
+    ranges: List[str] = []
+    start = prev = unique[0]
+    for value in unique[1:]:
+        if value == prev + 1:
+            prev = value
+            continue
+        ranges.append(str(start) if start == prev else f"{start}-{prev}")
+        start = prev = value
+    ranges.append(str(start) if start == prev else f"{start}-{prev}")
+    return ",".join(ranges)
+
+
+def format_manual_selection(selections: Optional[Sequence[Tuple[Sequence[int], Optional[Sequence[int]]]]]) -> str:
+    if not selections:
+        return "none"
+    parts: List[str] = []
+    for targets, stokes in selections:
+        target_text = format_int_values(targets)
+        if stokes is None:
+            parts.append(target_text)
+        else:
+            stokes_text = format_int_values(stokes)
+            parts.append(f"{target_text}:{stokes_text}")
+    return ";".join(parts)
+
+
+def normalize_flag_intents(value: Any) -> List[str]:
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple)):
+        return [str(item) for item in value if str(item).strip()]
+    text = str(value).strip()
+    return [text] if text else []
+
+
+def merged_flag_intents(previous_header: Optional[Dict[str, Any]], new_intents: Sequence[str], new_flags_only: bool) -> List[str]:
+    merged: List[str] = []
+    if not new_flags_only and previous_header is not None:
+        merged.extend(normalize_flag_intents(previous_header.get("flag-intent")))
+    merged.extend(str(item) for item in new_intents if str(item).strip())
+    return merged or ["NO NEW FLAGS"]
+
+
+def log_flag_intents(logger: TaskLogger, intents: Sequence[str]) -> None:
+    logger.write("Flag intent:")
+    for intent in intents:
+        logger.write(f"  - {intent}")
 
 
 def write_flag_file(
@@ -235,12 +832,15 @@ def write_flag_file(
         "bchan": header.get("bchan"),
         "echan": header.get("echan"),
         "flag_chans": header.get("flag_chans"),
-        "flag-intent": intents,
+        "flag-intent": list(intents),
         "previous_flag_version": None if previous_header is None else previous_header.get("flag_version"),
         "new_flags_only": bool(args.new_flags),
         "fmode": args.fmode,
-        "manual_antennas": format_selection(args.manual_antennas),
-        "manual_channels": format_selection(args.manual_channels),
+        "threshold_alpha": getattr(args, "threshold_alpha", None),
+        "threshold_percent": getattr(args, "threshold_percent", None),
+        "threshold_factor": getattr(args, "threshold_factor", None),
+        "manual_antennas": format_manual_selection(args.manual_antennas),
+        "manual_channels": format_manual_selection(args.manual_channels),
         "axes": {"flag": ["sample"]},
         "columns": ["scan", "antenna", "stokes", "channel", "row", "time", "flag"],
     }
@@ -303,7 +903,7 @@ def resolve_previous_flags(
         version = requested
         path = flag_file_for_npz(gains_out, version)
         if not path.exists():
-            logged_error(logger, f"ERROR: requested flag version V{version} does not exist: {path}")
+            logged_error(logger, f"ERROR: requested flag version fV{version} does not exist: {path}")
     return None, {"flag_version": version, "path": str(path)}, path, version
 
 
@@ -318,18 +918,60 @@ def selected_flag_version(gains_out: Path, requested: Optional[str]) -> int:
 
 
 def remove_flag_version(gains_out: Path, requested: Optional[str], logger: TaskLogger) -> None:
-    target = parse_flag_version(requested, "remove-version")
-    if target is None:
+    request = parse_remove_version_request(requested)
+    if request is None:
         versions = flag_file_versions(gains_out)
         if not versions:
             logged_error(logger, f"ERROR: no flag versions found for {gains_out}.")
         target, path = versions[-1]
-    else:
+        path.unlink()
+        logger.write(f"Removed flag file fV{target}: {path}")
+        return
+
+    kind, payload = request
+    if kind == "single":
+        target = int(payload)
         path = flag_file_for_npz(gains_out, target)
         if not path.exists():
-            logged_error(logger, f"ERROR: requested flag version V{target} does not exist: {path}")
-    path.unlink()
-    logger.write(f"Removed flag file V{target}: {path}")
+            logged_error(logger, f"ERROR: requested flag version fV{target} does not exist: {path}")
+        path.unlink()
+        logger.write(f"Removed flag file fV{target}: {path}")
+        return
+
+    versions = flag_file_versions(gains_out)
+    if not versions:
+        logged_error(logger, f"ERROR: no flag versions found for {gains_out}.")
+    version_map = {int(version): path for version, path in versions}
+
+    if kind == "closed":
+        start, end = payload
+        targets = list(range(int(start), int(end) + 1))
+        missing = [version for version in targets if version not in version_map]
+        if missing:
+            missing_text = ", ".join(f"fV{version}" for version in missing)
+            logged_error(logger, f"ERROR: requested flag versions do not exist: {missing_text}")
+    else:
+        start = int(payload)
+        targets = [version for version in sorted(version_map) if version >= start]
+        if not targets:
+            logged_error(logger, f"ERROR: no flag versions found at or above fV{start} for {gains_out}.")
+
+    for target in targets:
+        version_map[target].unlink()
+        logger.write(f"Removed flag file fV{target}: {version_map[target]}")
+
+
+def resolve_summary_flag_version(gains_out: Path, requested: Optional[str], logger: TaskLogger) -> Tuple[int, Path]:
+    requested_version = parse_flag_version(requested, "summary")
+    if requested_version is None:
+        versions = flag_file_versions(gains_out)
+        if not versions:
+            logged_error(logger, f"ERROR: no flag versions found for {gains_out}.")
+        return int(versions[-1][0]), versions[-1][1]
+    path = flag_file_for_npz(gains_out, requested_version)
+    if not path.exists():
+        logged_error(logger, f"ERROR: requested flag version fV{requested_version} does not exist: {path}")
+    return int(requested_version), path
 
 
 def non_casa_batches(scans: Optional[List[int]], combine_scans: bool) -> List[Tuple[Optional[List[int]], str]]:
@@ -360,23 +1002,9 @@ def run_batch(
         logger.write(f"Using gains NPZ naming base: {gains_out}")
     logger.done(f"read-gains {scan_label}", t0)
 
-    fmode = args.fmode_resolved
-    if fmode in PLACEHOLDER_FMODES:
-        logger.write(f"fmode {args.fmode} is a placeholder; no threshold flagging algorithm has been implemented yet.")
-
     table_flags = np.asarray(gains.get("table_flagged", gains.get("flagged")), dtype=bool)
     new_flags = np.zeros(table_flags.shape, dtype=bool)
     intents: List[str] = []
-
-    if fmode == "casa":
-        new_flags |= table_flags
-        intents.append("CASA FLAGS")
-    elif fmode == "man_antenna":
-        new_flags |= manual_antenna_mask(gains, args.manual_antennas)
-        intents.append(f"MANUAL ANTENNA FLAGS: {format_selection(args.manual_antennas)}")
-    elif fmode == "man_chann":
-        new_flags |= manual_channel_mask(gains, args.manual_channels)
-        intents.append(f"MANUAL CHANNEL FLAGS: {format_selection(args.manual_channels)}")
 
     previous_flags = None
     previous_header = None
@@ -396,19 +1024,83 @@ def run_batch(
     if previous_path is not None:
         previous_flags, previous_header = load_flag_file(previous_path, gains)
         previous_header = previous_header or previous_ref
-        logger.write(f"Loaded previous flag file V{previous_version}: {previous_path} flags={flag_count_text(previous_flags)}")
+        logger.write(f"Loaded previous flag file fV{previous_version}: {previous_path} flags={flag_count_text(previous_flags)}")
+
+    fmode = args.fmode_resolved
+    if fmode in PLACEHOLDER_FMODES:
+        logger.write(f"fmode {args.fmode} is a placeholder; no threshold flagging algorithm has been implemented yet.")
+
+    if fmode == "casa":
+        new_flags |= table_flags
+        intents.append("CASA FLAGS")
+    elif fmode == "man_antenna":
+        new_flags |= manual_antenna_mask(gains, args.manual_antennas)
+        intents.append(f"MANUAL ANTENNA FLAGS: {format_manual_selection(args.manual_antennas)}")
+    elif fmode == "man_chan":
+        new_flags |= manual_channel_mask(gains, args.manual_channels)
+        intents.append(f"MANUAL CHANNEL FLAGS: {format_manual_selection(args.manual_channels)}")
+    elif fmode in {"all_std_thrsld", "ante_std_thrsld"}:
+        exclude_flags = table_flags.copy()
+        if previous_flags is not None and not args.new_flags:
+            exclude_flags |= previous_flags
+        fmode_label = "ante-std-thrsld" if fmode == "ante_std_thrsld" else "all-std-thrsld"
+        threshold_flags, threshold_intent = std_threshold_mask(
+            gains,
+            args.threshold_alpha,
+            exclude_flags,
+            logger,
+            per_antenna=fmode == "ante_std_thrsld",
+            fmode_label=fmode_label,
+        )
+        new_flags |= threshold_flags
+        intent_name = "ANTENNA STD THRESHOLD FLAGS" if fmode == "ante_std_thrsld" else "ALL STD THRESHOLD FLAGS"
+        intents.append(f"{intent_name}: " + "; ".join(threshold_intent))
+    elif fmode == "ante_mean_thrsld":
+        exclude_flags = table_flags.copy()
+        if previous_flags is not None and not args.new_flags:
+            exclude_flags |= previous_flags
+        threshold_flags, threshold_intent = antenna_mean_threshold_mask(
+            gains,
+            args.threshold_alpha,
+            exclude_flags,
+            logger,
+        )
+        new_flags |= threshold_flags
+        intents.append("ANTENNA MEAN THRESHOLD FLAGS: " + "; ".join(threshold_intent))
+    elif fmode == "ante_thrsld":
+        source_flags = table_flags.copy()
+        if previous_flags is not None and not args.new_flags:
+            source_flags = previous_flags
+        threshold_flags, threshold_intent = antenna_flag_fraction_threshold_mask(gains, source_flags, args.threshold_percent, logger)
+        new_flags |= threshold_flags
+        intents.append("ANTENNA FLAG FRACTION THRESHOLD FLAGS: " + "; ".join(threshold_intent))
+    elif fmode == "ks_thrsld":
+        exclude_flags = table_flags.copy()
+        if previous_flags is not None and not args.new_flags:
+            exclude_flags |= previous_flags
+        threshold_flags, threshold_intent = ks_threshold_mask(gains, args.threshold_factor, exclude_flags, logger)
+        new_flags |= threshold_flags
+        intents.append("KS THRESHOLD FLAGS: " + "; ".join(threshold_intent))
 
     if previous_flags is not None and not args.new_flags:
         out_flags = previous_flags | new_flags
-        intents.insert(0, f"PREVIOUS GDP FLAGS: V{previous_header.get('flag_version')}")
     else:
         out_flags = new_flags
 
+    stored_intents = merged_flag_intents(previous_header, intents, bool(args.new_flags))
     out_version = selected_flag_version(gains_out, args.out_fver)
     flag_out = flag_file_for_npz(gains_out, out_version)
     t1 = logger.start(f"write-flags {scan_label}")
-    write_flag_file(flag_out, gains, out_version, str(gains_out), out_flags, intents or ["NO NEW FLAGS"], args, previous_header)
-    logger.write(f"Wrote flag file V{out_version}: {flag_out} flags={flag_count_text(out_flags)}")
+    write_flag_file(flag_out, gains, out_version, str(gains_out), out_flags, stored_intents, args, previous_header)
+    new_pct = 100.0 * int(np.count_nonzero(new_flags)) / int(new_flags.size) if new_flags.size else 0.0
+    out_pct = 100.0 * int(np.count_nonzero(out_flags)) / int(out_flags.size) if out_flags.size else 0.0
+    logger.write(
+        f"Wrote flag file fV{out_version}: {flag_out} "
+        f"new_flags={flag_count_text(new_flags)} ({new_pct:.2f}%) "
+        f"total_flags={flag_count_text(out_flags)} ({out_pct:.2f}%)"
+    )
+    log_flag_intents(logger, stored_intents)
+    log_per_antenna_flag_summary(gains, out_flags, logger)
     logger.done(f"write-flags {scan_label}", t1)
 
 
@@ -428,6 +1120,27 @@ def run_remove_batch(
     logger.done(f"remove-version {scan_label}", t0)
 
 
+def run_summary_batch(
+    args: argparse.Namespace,
+    input_table: Path,
+    mode: str,
+    scans: Optional[List[int]],
+    selected_antennas: Optional[List[int]],
+    scan_label: str,
+    logger: TaskLogger,
+) -> None:
+    logger.write(f"gdp-flag summary batch={scan_label}")
+    gains_out = build_gains_output(input_table, scan_label, mode, args)
+    version, path = resolve_summary_flag_version(gains_out, args.summary_version, logger)
+    t0 = logger.start(f"summary {scan_label}")
+    gains = GSTATS.compute_gains(input_table, mode, scans, selected_antennas, None, False, args.bchan, args.echan, None, None)
+    flags, header = load_flag_file(path, gains)
+    logger.write(f"Loaded flag file fV{version}: {path} flags={flag_count_text(flags)}")
+    log_flag_intents(logger, normalize_flag_intents((header or {}).get("flag-intent")))
+    log_per_antenna_flag_summary(gains, flags, logger)
+    logger.done(f"summary {scan_label}", t0)
+
+
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Create GDP .flg sidecar files from CASA flags or manual flag intents.")
     p.add_argument("--input-table", dest="input_table_opt", default=None, help="Input CASA gain/bandpass table path.")
@@ -443,9 +1156,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--use-flags", nargs="?", const="highest", default=None, metavar="VERSION", help="Carry an existing GDP .flg version into the output. Omit VERSION to use the highest available version. By default, gdp-flag carries the highest previous version when one exists.")
     p.add_argument("--new-flags", action="store_true", help="Write only the new fmode flags; do not carry previous GDP flag versions.")
     p.add_argument("--out-fver", dest="out_fver", default=None, help="Output flag version. Default: next version beside the matching gains NPZ.")
-    p.add_argument("--fmode", default="casa-flags", help="Flag mode: casa-flags, man-antenna, man-chann, remove-version, all-thrsld, ante-thrsld, ks-thrsld, auto-ante, auto-chan.")
-    p.add_argument("--man-antenna", "--man-antennas", nargs="+", dest="man_antenna", default=None, help="Manual antenna list/range for --fmode man-antenna.")
-    p.add_argument("--man-chann", "--man-chan", "--man-channel", nargs="+", dest="man_chann", default=None, help="Manual channel list/range for --fmode man-chann.")
+    p.add_argument("--fmode", default="casa-flags", help="Flag mode: casa-flags, man-antenna, man-chan, all-std-thrsld, ante-std-thrsld, ante-mean-thrsld, remove-version, summary, ante-thrsld, ks-thrsld, auto-ante, auto-chan.")
+    p.add_argument("--alpha", dest="threshold_alpha_opt", default=None, help="Threshold value for --fmode all-std-thrsld, ante-std-thrsld, or ante-mean-thrsld. If omitted, the default is 1 for std-threshold modes and 5 for ante-mean-thrsld. A trailing value after the fmode is also accepted.")
+    p.add_argument("--percent", dest="threshold_percent_opt", default=None, help="Flagged-data percentage threshold for --fmode ante-thrsld. If omitted, percent=70. A trailing value after the fmode is also accepted.")
+    p.add_argument("--factor", dest="threshold_factor_opt", default=None, help="Multiplier for --fmode ks-thrsld. If omitted, factor=1. A trailing value after the fmode is also accepted.")
+    p.add_argument("--man-antenna", "--man-antennas", nargs="+", dest="man_antenna", default=None, help="Manual antenna list/range for --fmode man-antenna. Add :STOKES to flag selected stokes only, for example 1:0, [1-4]:1, or 23 for all stokes.")
+    p.add_argument("--man-chan", "--man-channel", nargs="+", dest="man_chan", default=None, help="Manual bandpass channel list/range for --fmode man-chan. Add :STOKES to flag selected stokes only, for example 900:0, [900-1200]:1, or 1300 for all stokes.")
     p.add_argument("--output-gains-npz", default=None, help="Matching gains NPZ path used as the flag filename base.")
     p.add_argument("--write-gains-npz", action="store_true", help="Rewrite the matching gains NPZ even if it already exists.")
     p.add_argument("fmode_values", nargs="*", help=argparse.SUPPRESS)
@@ -457,8 +1173,8 @@ def main() -> None:
     activate_config(args.setup_file)
     args.fmode_resolved = parse_fmode(args.fmode)
     mode = infer_mode(args)
-    if args.fmode_resolved == "man_chann" and mode != "bandpass":
-        raise SystemExit("ERROR: --fmode man-chann works only with --mode bandpass.")
+    if args.fmode_resolved == "man_chan" and mode != "bandpass":
+        raise SystemExit("ERROR: --fmode man-chan works only with --mode bandpass.")
     explicit_input = args.input_table_opt
     mode_input = args.bandpass_table if mode == "bandpass" else args.gain_table
     input_table = resolve_input(explicit_input or mode_input, mode)
@@ -468,15 +1184,42 @@ def main() -> None:
     if args.fmode_resolved != "remove_version":
         GSTATS.validate_requested_scans(input_table, mode, scans)
     selected_antennas = parse_int_selection(args.antennas, "--antennas")
-    args.manual_antennas = parse_int_selection(args.man_antenna or args.fmode_values if args.fmode_resolved == "man_antenna" else args.man_antenna, "--man-antenna")
-    args.manual_channels = parse_int_selection(args.man_chann or args.fmode_values if args.fmode_resolved == "man_chann" else args.man_chann, "--man-chann")
+    args.manual_antennas = parse_manual_selection(args.man_antenna or args.fmode_values if args.fmode_resolved == "man_antenna" else args.man_antenna, "--man-antenna")
+    args.manual_channels = parse_manual_selection(args.man_chan or args.fmode_values if args.fmode_resolved == "man_chan" else args.man_chan, "--man-chan")
     args.remove_version = str(args.fmode_values[0]) if args.fmode_resolved == "remove_version" and args.fmode_values else None
+    args.summary_version = str(args.fmode_values[0]) if args.fmode_resolved == "summary" and args.fmode_values else None
+    if args.fmode_resolved == "remove_version" and len(args.fmode_values) > 1:
+        raise SystemExit("--fmode remove-version accepts at most one trailing version selector.")
+    if args.fmode_resolved == "summary" and len(args.fmode_values) > 1:
+        raise SystemExit("--fmode summary accepts at most one trailing version selector.")
+    threshold_fmodes = {"all_std_thrsld", "ante_std_thrsld", "ante_mean_thrsld"}
+    percent_fmodes = {"ante_thrsld"}
+    factor_fmodes = {"ks_thrsld"}
+    if args.fmode_resolved in threshold_fmodes and len(args.fmode_values) > 1:
+        raise SystemExit(f"--fmode {args.fmode} accepts at most one trailing alpha value.")
+    if args.fmode_resolved in percent_fmodes and len(args.fmode_values) > 1:
+        raise SystemExit(f"--fmode {args.fmode} accepts at most one trailing percent value.")
+    if args.fmode_resolved in factor_fmodes and len(args.fmode_values) > 1:
+        raise SystemExit(f"--fmode {args.fmode} accepts at most one trailing multiplier value.")
+    if args.fmode_resolved not in threshold_fmodes and args.threshold_alpha_opt is not None:
+        raise SystemExit("--alpha is valid only with --fmode all-std-thrsld, ante-std-thrsld, or ante-mean-thrsld.")
+    if args.fmode_resolved not in percent_fmodes and args.threshold_percent_opt is not None:
+        raise SystemExit("--percent is valid only with --fmode ante-thrsld.")
+    if args.fmode_resolved not in factor_fmodes and args.threshold_factor_opt is not None:
+        raise SystemExit("--factor is valid only with --fmode ks-thrsld.")
+    alpha_value = args.threshold_alpha_opt or (str(args.fmode_values[0]) if args.fmode_resolved in threshold_fmodes and args.fmode_values else None)
+    alpha_default = 5.0 if args.fmode_resolved == "ante_mean_thrsld" else 1.0
+    args.threshold_alpha = parse_positive_float(alpha_value, f"{args.fmode} alpha", alpha_default)
+    percent_value = args.threshold_percent_opt or (str(args.fmode_values[0]) if args.fmode_resolved in percent_fmodes and args.fmode_values else None)
+    args.threshold_percent = parse_percent_value(percent_value, f"{args.fmode} percent", 70.0)
+    factor_value = args.threshold_factor_opt or (str(args.fmode_values[0]) if args.fmode_resolved in factor_fmodes and args.fmode_values else None)
+    args.threshold_factor = parse_threshold_factor(factor_value, f"{args.fmode} factor", 1.0)
     if mode == "gain" and (args.bchan is not None or args.echan is not None):
         raise SystemExit("Channel options --bchan/--echan are valid only in bandpass mode.")
     if args.fmode_resolved == "man_antenna" and not args.manual_antennas:
         raise SystemExit("--fmode man-antenna requires --man-antenna or trailing antenna values.")
-    if args.fmode_resolved == "man_chann" and not args.manual_channels:
-        raise SystemExit("--fmode man-chann requires --man-chann or trailing channel values.")
+    if args.fmode_resolved == "man_chan" and not args.manual_channels:
+        raise SystemExit("--fmode man-chan requires --man-chan or trailing channel values.")
     logger = TaskLogger(default_log_path(input_table))
     logger.write(f"gdp-flag input={input_table} mode={mode} fmode={args.fmode}")
     batches = non_casa_batches(scans, args.combine_scans) if args.fmode_resolved == "remove_version" else GSTATS.scan_batches(input_table, scans, args.combine_scans)
@@ -485,6 +1228,8 @@ def main() -> None:
     for batch_scans, batch_label in batches:
         if args.fmode_resolved == "remove_version":
             run_remove_batch(args, input_table, mode, batch_scans, batch_label, logger)
+        elif args.fmode_resolved == "summary":
+            run_summary_batch(args, input_table, mode, batch_scans, selected_antennas, batch_label, logger)
         else:
             run_batch(args, input_table, mode, batch_scans, selected_antennas, batch_label, logger)
     logger.write(f"Log file: {logger.path}")

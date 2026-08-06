@@ -97,12 +97,13 @@ casa --nogui --nologger --nologfile --log2term -c script/gdp-stats --smode gains
 script/gdp-stats --smode all
 script/gdp-stats --mode gain --scan 17 --smode gains
 script/gdp-plot --mode gain --scan 17 -pmode colormap --range 20
-script/gdp-plot --mode bandpass -pmode colormap -pchans "[16,64]" --range 20
+script/gdp-plot --mode bandpass -pmode colormap -pchans "[16-64]" --range 20
 script/gdp-stats --mode gain --scan 17 --smode gains --flagver 1
 script/gdp-stats --mode gain --scan 17 --smode stats,ks --use-flags --flagver 1
-script/gdp-stats --antennas [0,9] --smode stats
+script/gdp-plot --mode gain --scan 17 -pmode colormap --use-flags --flagver 1
+script/gdp-stats --antennas [0-9] --smode stats
 script/gdp-stats --antennas 1 2 3 4 13 --smode stats
-script/gdp-stats --antennas "(1,5)" 6 "(9-12)" 15 16 19 --smode stats
+script/gdp-stats --antennas "[1-5]" 6 "[9-12]" 15 16 19 --smode stats
 script/gdp-stats --smode stats --csv
 ```
 
@@ -111,17 +112,63 @@ Create GDP flag versions:
 ```bash
 script/gdp-flag --mode gain --scan 17 --fmode casa-flags
 script/gdp-flag --mode gain --scan 17 --fmode man-antenna --man-antenna 3,4 --use-flags
+script/gdp-flag --mode gain --scan 17 --fmode man-antenna --man-antenna "1:0, 3:1, [11-14]:1, 23"
 script/gdp-flag --mode gain --scan 17 --fmode man-antenna 9 --new-flags
 script/gdp-flag --mode gain --scan 17 --fmode man-antenna --man-antenna 9 --out-fver 5
-script/gdp-flag --mode bandpass --scan 18 --bchan 800 --echan 3000 --fmode man-chann --man-chann "[900,1200]" --new-flags
+script/gdp-flag --mode bandpass --scan 18 --bchan 800 --echan 3000 --fmode man-chan --man-chan "[900-1200]" --new-flags
+script/gdp-flag --mode bandpass --scan 18 --bchan 800 --echan 3000 --fmode man-chan --man-chan "[900-1200]:1, 1300:0"
+script/gdp-flag --mode gain --scan 17 --fmode all-std-thrsld
+script/gdp-flag --mode gain --scan 17 --fmode all-std-thrsld 1.5
+script/gdp-flag --mode gain --scan 17 --fmode ante-std-thrsld
+script/gdp-flag --mode gain --scan 17 --fmode ante-std-thrsld --alpha 1.5
+script/gdp-flag --mode gain --scan 17 --fmode ante-thrsld
+script/gdp-flag --mode gain --scan 17 --fmode ante-thrsld 40
+script/gdp-flag --mode gain --scan 17 --fmode ante-thrsld --percent 40
+script/gdp-flag --mode gain --scan 17 --fmode ks-thrsld
+script/gdp-flag --mode gain --scan 17 --fmode ks-thrsld 1.5
+script/gdp-flag --mode gain --scan 17 --fmode ks-thrsld --factor 1.5
+script/gdp-flag --mode bandpass --scan 18 --bchan 800 --echan 3000 --fmode all-std-thrsld --alpha 2
 script/gdp-flag --mode gain --scan 17 --fmode remove-version
 script/gdp-flag --mode gain --scan 17 --fmode remove-version 3
+script/gdp-flag --mode gain --scan 17 --fmode remove-version "[1-3]"
+script/gdp-flag --mode gain --scan 17 --fmode remove-version "[1:]"
+script/gdp-flag --mode gain --scan 17 --fmode summary
+script/gdp-flag --mode gain --scan 17 --fmode summary 3
 ```
 
 Manual flag commands carry the highest previous flag version by default. Use
-`--new-flags` to write only the newly requested flags. `man-chann` is valid only
+`--new-flags` to write only the newly requested flags. `man-chan` is valid only
 for bandpass mode; requested flag versions that do not exist are reported as
 terminal `ERROR:` messages and the command exits without a Python traceback.
+Manual antenna/channel values can include `:STOKES`, for example `1:0`,
+`[11-14]:1`, or `23` for all Stokes.
+`all-std-thrsld` computes per-Stokes Real-1 and Imag standard deviations from
+all selected antennas together, then flags points outside `alpha * R` using a
+zero-centered normalized RE/IM distance. `ante-std-thrsld` uses the same rule,
+but calculates the standard deviations and `R` separately for each antenna and
+Stokes. If alpha is omitted, it is `1`; terminal and task logs report the
+percentage of data flagged.
+`ante-mean-thrsld` works on antenna means instead of individual points: for
+each Stokes, GDP computes the global Real-1 and Imag standard deviations from
+all unflagged finite samples across all antennas, then computes the Real-1 and
+Imag mean for each antenna. The full antenna/Stokes group is flagged when the
+modulus of that antenna mean point, `sqrt(mean_real^2 + mean_imag^2)`, is
+greater than `threshold * sqrt(std_real^2 + std_imag^2)`. If the threshold is
+omitted, it is `5`.
+`ante-thrsld` promotes partially flagged antennas to fully flagged antennas:
+in bandpass mode, GDP compares each antenna's unflagged `(Stokes, channel)`
+availability against the maximum unflagged `(Stokes, channel)` count seen for
+any antenna; in gain mode it uses `(Stokes, time)` availability instead. If at
+least the requested percent of that reference availability is missing for an
+antenna, the whole antenna is flagged. The default percent threshold is `70`.
+`ks-thrsld` calculates per-antenna, per-Stokes fitted-normal KS statistics for
+Real-1 and Imag samples. For each component, GDP generates 128 Gaussian-pair
+realizations with the same sample size and flags the antenna/Stokes group if
+the measured KS is greater than `factor` times the mean Gaussian KS. The
+default factor is `1`.
+Flagged data products and plots append `_fV<version>` before the file
+extension, for example `gdp-stats-gain-scan17_fV1.npz` and
+`gdp-plot-colormap-gain-scan17_fV1.png`.
 
 Plot AntStat-style gain histograms from the gains NPZ product:
 
@@ -141,15 +188,15 @@ script/gdp-plot --mode gain --scan 17 -pmode colormap --npz-path /path/to/gdp-ga
 Plot pooled Real-1 versus Imag diagnostics for selected antennas:
 
 ```bash
-script/gdp-plot --mode gain --scan 17 -pmode reim --antenna "[0,29]"
-script/gdp-plot --mode bandpass --scan 18 --bchan 800 --echan 3000 -pmode reim --antenna "[0,29]"
+script/gdp-plot --mode gain --scan 17 -pmode reim --antenna "[0-29]"
+script/gdp-plot --mode bandpass --scan 18 --bchan 800 --echan 3000 -pmode reim --antenna "[0-29]"
 ```
 
 Plot selected antennas as AntStat-style gain-time plots with Stokes side by side:
 
 ```bash
-script/gdp-plot --mode gain --scan 17 -pmode antenna --antenna "[0,29]"
-script/gdp-plot --mode bandpass --scan 18 --bchan 800 --echan 3000 -pmode antenna --antenna "[0,29]"
+script/gdp-plot --mode gain --scan 17 -pmode antenna --antenna "[0-29]"
+script/gdp-plot --mode bandpass --scan 18 --bchan 800 --echan 3000 -pmode antenna --antenna "[0-29]"
 ```
 
 Read table date and channel-width metadata as JSON:

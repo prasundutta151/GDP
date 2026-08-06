@@ -951,7 +951,7 @@ Changes Made
 
 Prompt / Request
 - Change `gdp-stats --antennas LIST` to support two input styles: inclusive
-  range syntax like `(0,9)` or `[0,9]`, and explicit antenna IDs like
+  range syntax like `(0,9)` or `[0-9]`, and explicit antenna IDs like
   `1,2,3,4,13` or `1 2 3 4 13`.
 
 Changes Made
@@ -1455,7 +1455,7 @@ Changes Made
 ## 2026-07-31 14:46:16 IST
 
 Prompt / Request
-- Add a `-pchans "[pbchan, pechan]"` option in `gdp-stats` and `gdp-plot`.
+- Add a `-pchans "[pbchan-pechan]"` option in `gdp-stats` and `gdp-plot`.
 - When provided, plots should be limited to those channels and subplot-title
   statistics should be calculated from only those channels.
 
@@ -1481,7 +1481,7 @@ Prompt / Request
 - Stop with a clear text error if channel options are used in gain mode.
 
 Changes Made
-- Added `gdp-stats --flag-chans [START,END]` for shorter FLAG channel axes.
+- Added `gdp-stats --flag-chans [START-END]` for shorter FLAG channel axes.
   The option declares which original data channels the shorter FLAG array
   covers; all channels outside that coverage are treated as flagged.
 - Expanded FLAG normalization so stats, gains, KS, and self-correlation can
@@ -1526,7 +1526,7 @@ Prompt / Request
 
 Changes Made
 - Updated `gdp-stats` and `gdp-plot` CLI help/error text to use bracketed
-  antenna range examples such as `--antennas [0,9]` and `--antenna [0,9]`.
+  antenna range examples such as `--antennas [0-9]` and `--antenna [0-9]`.
 - Kept explicit antenna-list parsing for comma-separated and space-separated
   values, including `--antennas 2,3,4,31`.
 - Updated README, step-by-step, `gdp-stats`, and `gdp-plot` HTML examples.
@@ -1874,12 +1874,12 @@ Changes Made
 
 Prompt / Request
 - Preserve antenna range notation in `reim` output filenames. For example,
-  `--antenna "(1,4)"` should use `1-4` in the filename, while explicit antenna
+  `--antenna "[1-4]"` should use `1-4` in the filename, while explicit antenna
   lists should name only the selected antennas.
 
 Changes Made
 - Added range-form detection for `gdp-plot -pmode reim` antenna naming.
-- Range inputs such as `(1,4)` and `[1,4]` now produce pooled output suffixes
+- Range inputs such as `[1-4]` now produce pooled output suffixes
   such as `-ants1-4`.
 - Explicit selections such as `--antenna 1,2,4` continue to produce suffixes
   such as `-ants1_2_4`.
@@ -1889,12 +1889,12 @@ Changes Made
 
 Prompt / Request
 - Allow antenna selections to mix inclusive ranges and individual antenna
-  numbers, for example `"(1,5)" 6 "(9-12)" 15 16 19`.
+  numbers, for example `"[1-5]" 6 "[9-12]" 15 16 19`.
 
 Changes Made
 - Updated `gdp-plot --antenna`, `gdp-stats --antennas`, and
   `gdp-stats --antenna-flag` parsing to accept mixed range/list tokens.
-- Supported range token forms include `(1,5)`, `[1,5]`, `(9-12)`, and `9-12`.
+- Supported range token forms include `[1-5]`, `[9-12]`, and `9-12`.
 - Pooled `gdp-plot -pmode reim` filenames preserve mixed selections with
   suffixes such as `-ants1-5_6_9-12_15_16_19`.
 - Updated CLI help and documentation examples.
@@ -2029,7 +2029,7 @@ Prompt / Request
 Changes Made
 - Added `--flagver` to `gdp-stats` and `gdp-plot`.
 - `gdp-stats --smode gains` now writes a matching
-  `NAME_V<version>.flg` sidecar containing sample-level flag arrays from the
+  `NAME_fV<version>.flg` sidecar containing sample-level flag arrays from the
   CASA gain or bandpass table.
 - If no `--flagver` is supplied while writing gains, GDP writes the next flag
   version number; if `--flagver` is supplied, it writes that exact version.
@@ -2072,8 +2072,8 @@ Changes Made
   `--combine-scans`, `--antennas`, `--bchan`, `--echan`, `--use-flags
   [VERSION]`, `--new-flags`, `--out-fver`, and `--fmode`.
 - Implemented `--fmode casa-flags`, `--fmode man-antenna`, and
-  `--fmode man-chann`; kept `all-thrsld`, `ante-thrsld`, `ks-thrsld`,
-  `auto-ante`, and `auto-chan` as logged placeholders.
+  `--fmode man-chan`; kept `auto-ante` and `auto-chan` as logged
+  placeholders.
 - Removed the user-facing `gdp-stats --antenna-flag` and `--flag-chans`
   options so manual flag creation is centralized in `gdp-flag`.
 - Updated the HTML and Markdown documentation, added `doc/gdp-flag.html`, and
@@ -2122,7 +2122,7 @@ Prompt / Request
 
 Changes Made
 - Changed `gdp-flag` so, unless `--new-flags` is set, it automatically carries
-  the highest existing `NAME_V<version>.flg` file into the new output version.
+  the highest existing `NAME_fV<version>.flg` file into the new output version.
 - Kept `--use-flags VERSION` as the way to choose a specific prior flag version.
 - If no previous flag version exists, `gdp-flag` now logs that it is writing
   only the newly requested flags.
@@ -2137,7 +2137,7 @@ Prompt / Request
 Changes Made
 - Added `remove-version` aliases to `gdp-flag --fmode`.
 - `gdp-flag --fmode remove-version VERSION` removes
-  `NAME_V<VERSION>.flg` for the selected mode/scan/channel product base.
+  `NAME_fV<VERSION>.flg` for the selected mode/scan/channel product base.
 - `gdp-flag --fmode remove-version` removes the highest available matching
   version.
 - This removal mode works from product naming metadata and does not read CASA
@@ -2167,10 +2167,10 @@ Follow-up Rename
   the remove target remains `--fmode remove-version [VERSION]`.
 
 Follow-up Validation
-- Tightened `gdp-flag --fmode man-chann` so it works only in bandpass mode.
-- If `--mode gain --fmode man-chann` is requested, GDP now prints a concise
+- Tightened `gdp-flag --fmode man-chan` so it works only in bandpass mode.
+- If `--mode gain --fmode man-chan` is requested, GDP now prints a concise
   `ERROR:` terminal message and exits before reading CASA table rows.
-- In `--mode auto`, `--fmode man-chann` now infers bandpass mode.
+- In `--mode auto`, `--fmode man-chan` now infers bandpass mode.
 
 ## 2026-08-05 18:28:21 IST
 
@@ -2191,3 +2191,342 @@ Changes Made
 - Updated `doc/README.md`, `doc/README.html`, and `pipelines/sample_stats.plan`
   so quick-start and dry-run examples match the current `gdp-stats`,
   `gdp-flag`, `gdp-plot`, and `gdp-plan-run` behavior.
+
+## 2026-08-06 11:18:38 IST
+
+Prompt / Request
+- Change the flag-version naming convention to use `fV<flagversion>`.
+- When writing data products or plots with a flag version, include the same
+  `_fV<flagversion>` in the output name.
+
+Changes Made
+- Updated shared flag sidecar naming from `NAME_V<version>.flg` to
+  `NAME_fV<version>.flg`.
+- Updated `gdp-stats`, `gdp-plot`, and `gdp-flag` to parse `fV1`, `V1`, or
+  `1` as the same flag-version value.
+- Updated default flagged `gdp-stats` derived product names so stats, KS, and
+  self-correlation outputs append `_fV<version>` when `--use-flags` is active.
+- Updated default flagged `gdp-plot` output names so plots append
+  `_fV<version>` when `--use-flags` is active.
+- Updated plot discovery for flagged KS/self-correlation products so existing
+  `_fV<version>` NPZ products can be found when plotting without an explicit
+  scan list.
+- Updated command help text and HTML/Markdown documentation to describe the
+  new `fV` sidecar and output naming convention.
+
+Follow-up Plot Title
+- Removed the plot-only `PChans: ...` text from bandpass colormap plot titles.
+  The selected channel window still affects the plotted data and output
+  filename; only the redundant title text is suppressed.
+
+## 2026-08-06 11:25:58 IST
+
+Prompt / Request
+- Add manual flagging syntax so `gdp-flag --fmode man-antenna` and
+  `--fmode man-chan` can flag selected Stokes for selected antennas/channels.
+
+Changes Made
+- Added a manual-selection parser for `gdp-flag` that accepts
+  `TARGET:STOKES` entries for manual antenna and channel flags.
+- Supported examples include `1:0`, `[1-4]:1`, `(1, 3):0`, and mixed forms
+  such as `1:0, 3:1, [11-14]:1, 23`.
+- Targets without `:STOKES` continue to flag all Stokes for that antenna or
+  channel.
+- Preserved the existing square-bracket inclusive range convention, so
+  `[900-1200]` still flags channels 900 through 1200; hyphen ranges such as
+  `[900-1200]:1` are also supported.
+- Updated manual flag masks so antenna/channel selection and Stokes selection
+  are combined sample-by-sample in the written `.flg` file.
+- Updated `gdp-flag`, flag product, README, and step-by-step documentation.
+
+## 2026-08-06 11:30:08 IST
+
+Prompt / Request
+- Standardize antenna and channel range selections so bracketed hyphen ranges
+  like `[1-400]` mean antennas/channels 1 through 400 everywhere.
+
+Changes Made
+- Standardized command help and documentation examples to use `[start-end]`
+  for antenna and channel ranges.
+- Updated `gdp-plot -pchans` so `[START-END]` is inclusive at both ends.
+  Internally GDP still uses an exclusive upper bound for array masking, so
+  `[800-1200]` is stored as `(800, 1201)` and filenames keep
+  `pchan_800_1200`.
+- Verified `[1-4]` parsing for `gdp-stats --antennas`,
+  `gdp-plot --antenna`, `gdp-flag --antennas`, manual antenna flags, and
+  manual channel flags.
+
+## 2026-08-06 11:33:06 IST
+
+Prompt / Request
+- Correct the manual channel fmode spelling to `man-chan`.
+- Keep `--fmode man-antenna` working for both gain and bandpass mode, while
+  `--fmode man-chan` works only for bandpass mode.
+
+Changes Made
+- Updated the public `gdp-flag` CLI and documentation to use `--fmode
+  man-chan` and `--man-chan`.
+- Removed the misspelled `--man-chann` option from the visible command-line
+  help.
+- Kept `man-antenna` unrestricted across gain and bandpass flag products.
+- Kept `man-chan` guarded so a gain-mode request exits gracefully with
+  `ERROR: --fmode man-chan works only with --mode bandpass.`
+- Retained the old `man-chann` fmode spelling internally as a compatibility
+  alias for older plan files.
+
+## 2026-08-06 11:50:43 IST
+
+Prompt / Request
+- Implement `gdp-flag --fmode all-std-thrsld` rather than the older
+  `all-thrsld` name.
+- Allow an optional threshold value `alpha`; default alpha is `1`.
+- For each Stokes, calculate Real-1 and Imag standard deviations, derive the
+  same Gaussian one-expected-point RE/IM radius used by `gdp-plot -pmode
+  reim`, and flag samples farther than `alpha * R` without subtracting the
+  measured Real/Imag means.
+- Report the percentage of data flagged in terminal output and task logs.
+
+Changes Made
+- Added `all-std-thrsld` as an implemented `gdp-flag` mode for gain and
+  bandpass products.
+- Removed the old public `all-thrsld` spelling so the supported all-antenna
+  standard-deviation threshold mode is unambiguously `all-std-thrsld`.
+- Added alpha parsing as either a trailing fmode value, for example
+  `--fmode all-std-thrsld 1.5`, or the explicit option `--alpha 1.5`.
+- For each Stokes, GDP now computes Real-1 and Imag values in percent,
+  estimates per-Stokes standard deviations from finite unflagged samples,
+  computes `R = sqrt(2 log N)`, and flags samples whose zero-centered
+  normalized RE/IM distance is greater than `alpha * R`.
+- The threshold fit excludes CASA table flags and any carried previous GDP
+  flag version so already-known bad samples do not set the threshold.
+- Terminal output and the task log now report per-Stokes threshold statistics,
+  new flag counts, and final flag percentages.
+- The `.flg` header now records `threshold_alpha` and the full
+  `ALL STD THRESHOLD FLAGS` intent provenance.
+- Updated the flag documentation, product-format page, README, and
+  step-by-step guide with the new fmode and alpha examples.
+
+## 2026-08-06 12:03:35 IST
+
+Prompt / Request
+- Implement `gdp-flag --fmode ante-std-thrsld`, where the same RE/IM
+  threshold statistics are calculated separately for each antenna and then
+  applied only to that antenna.
+
+Changes Made
+- Added `ante-std-thrsld` as an implemented `gdp-flag` threshold mode.
+- Reused the same alpha and one-expected-point ellipse rule as
+  `all-std-thrsld`, but grouped samples by antenna and Stokes before
+  calculating the standard deviations and `R`.
+- `all-std-thrsld` remains pooled across all selected antennas for each
+  Stokes; `ante-std-thrsld` is per antenna and Stokes.
+- Per-antenna threshold runs now log lines such as
+  `ante-std-thrsld antenna=0 stokes=0 ... new_flags=... (...)`.
+- The `.flg` header records `ANTENNA STD THRESHOLD FLAGS` provenance for
+  this mode.
+- Updated README, HTML help, flag product documentation, and the step-by-step
+  guide with `ante-std-thrsld` examples.
+
+## 2026-08-06 12:47:00 IST
+
+Prompt / Request
+- Remove the subtraction of `mean_real` and `mean_imag` from the
+  `all-std-thrsld` and `ante-std-thrsld` flagging criteria.
+
+Changes Made
+- Changed the standard-deviation threshold distance in `gdp-flag` to be
+  zero-centered in the RE/IM plane.
+- `all-std-thrsld` and `ante-std-thrsld` now use
+  `sqrt((Real-1/std_real)^2 + (Imag/std_imag)^2)` rather than subtracting the
+  measured Real/Imag means first.
+- Runtime log lines and stored flag-intent text now report only
+  `real_std` and `imag_std` for these modes.
+- Updated the README, `gdp-flag` HTML help, and the step-by-step guide to
+  describe the std-only, zero-centered threshold rule.
+
+## 2026-08-06 12:13:05 IST
+
+Prompt / Request
+- Implement `gdp-flag --fmode ante-thrsld`, taking a percentage threshold
+  argument.
+- If an antenna has enough data already flagged in the flag table, promote the
+  entire antenna to flagged.
+
+Changes Made
+- Added `ante-thrsld` as an implemented antenna flag-fraction threshold mode.
+- Added percent parsing as either a trailing fmode value, for example
+  `--fmode ante-thrsld 40`, or the explicit option `--percent 40`.
+- Default threshold is `70` percent.
+- For each antenna, GDP now measures missing availability against the maximum
+  unflagged availability seen for any antenna in the selected data:
+  `(Stokes, channel)` units in bandpass mode and `(Stokes, time)` units in
+  gain mode. If no previous GDP flag file is carried, CASA table flags are
+  used as the source.
+- If the missing-availability fraction is at least the requested threshold,
+  GDP flags all selected samples for that antenna in the output flag version.
+- Terminal output and task logs report the per-antenna source flag fraction,
+  whether each antenna was promoted, the promoted antenna list, and the final
+  flag percentages.
+- The `.flg` header now records `threshold_percent` and
+  `ANTENNA FLAG FRACTION THRESHOLD FLAGS` provenance.
+- Updated README, HTML help, flag product documentation, and the step-by-step
+  guide with `ante-thrsld` examples.
+
+## 2026-08-06 13:18:00 IST
+
+Prompt / Request
+- Change `ante-thrsld` percentage calculation so it uses the maximum number of
+  unflagged channels in bandpass mode, or unflagged time stamps in gain mode,
+  seen for any antenna as the reference denominator.
+
+Changes Made
+- Updated `gdp-flag --fmode ante-thrsld` to compute per-antenna availability
+  using unique `(Stokes, channel)` units in bandpass mode and unique
+  `(Stokes, time)` units in gain mode.
+- The reference denominator is now the maximum unflagged availability seen for
+  any antenna in the selected data.
+- The per-antenna flagged percentage is now the missing fraction relative to
+  that reference denominator, rather than the raw fraction of flagged samples
+  within the antenna's own sample count.
+- Runtime logs now report the selected availability axis, the maximum
+  unflagged reference size, each antenna's unflagged availability, and the
+  derived flagged fraction used for promotion.
+- Updated the README, `gdp-flag` help page, and the step-by-step runtime
+  example to describe the new denominator rule.
+
+## 2026-08-06 13:32:00 IST
+
+Prompt / Request
+- Add `gdp-flag --fmode ante-mean-thrsld [ALPHA]`, where an antenna/Stokes
+  group is flagged from its antenna-mean location.
+
+Changes Made
+- Added `ante-mean-thrsld` as a new implemented `gdp-flag --fmode`.
+- For each Stokes, GDP now computes the global Real-1 and Imag standard
+  deviations from all unflagged finite samples across all antennas.
+- GDP then computes the Real-1 and Imag mean for each antenna/Stokes group and
+  the modulus of that antenna mean point.
+- The cutoff is now `threshold * sqrt(std_real^2 + std_imag^2)`, using the
+  global Stokes-wise point scatter rather than the earlier antenna-mean
+  ellipse construction.
+- If an antenna/Stokes mean modulus is greater than that cutoff, GDP flags the
+  full antenna/Stokes group.
+- The mode accepts trailing alpha syntax, for example
+  `--fmode ante-mean-thrsld 6`, and the explicit `--alpha VALUE` option.
+- Default threshold is now `5` for `ante-mean-thrsld`.
+- Runtime logs and stored `flag-intent` entries report the global Stokes-wise
+  std values, antenna mean, antenna-mean modulus, cutoff modulus, and
+  promotion decision for each antenna/Stokes group.
+- Updated the README, `gdp-flag` HTML help, the flag-product documentation,
+  and the step-by-step runtime example with `ante-mean-thrsld`.
+
+Follow-up Default
+- Changed the default `ante-thrsld` percentage threshold from `30` to `70`.
+
+## 2026-08-06 12:22:18 IST
+
+Prompt / Request
+- Implement `gdp-flag --fmode ks-thrsld [optional value]`.
+- For each antenna/Stokes/Real/Imag component, calculate the KS statistic.
+- For the same sample size, generate 128 Gaussian random realizations,
+  calculate the KS for each, average those simulated KS values, and flag if
+  the measured KS is greater than the optional multiplier times the simulated
+  mean.
+
+Changes Made
+- Added `ks-thrsld` as an implemented `gdp-flag` threshold mode.
+- Added multiplier parsing as either a trailing fmode value, for example
+  `--fmode ks-thrsld 1.5`, or the explicit option `--factor 1.5`.
+- Default KS threshold multiplier is `1`.
+- For each selected antenna and Stokes, GDP computes fitted-normal KS
+  statistics for Real-1 and Imag samples in percent.
+- For each component sample size, GDP runs 128 Gaussian-pair KS simulations
+  and uses their mean as the reference threshold.
+- If either Real or Imag has measured KS greater than `factor * gaussian_mean`,
+  the full antenna/Stokes group is flagged in the output flag version.
+- Existing CASA and carried GDP flags are excluded while calculating the KS
+  statistic and simulation comparison.
+- Terminal output and task logs report the measured KS, simulated mean KS,
+  threshold, per-component decision, promoted antenna/Stokes list, and final
+  flag percentages.
+- The `.flg` header now records `threshold_factor` and
+  `KS THRESHOLD FLAGS` provenance.
+- Updated README, HTML help, flag product documentation, and step-by-step
+  guide with `ks-thrsld` examples.
+
+## 2026-08-06 12:24:25 IST
+
+Prompt / Request
+- After each flagging cycle, print a table showing how many data points and
+  what percentage of each antenna's data are flagged.
+
+Changes Made
+- Added a per-antenna final flag summary to `gdp-flag` after each output
+  `.flg` file is written.
+- The table is written to both terminal output and the task log.
+- Columns are `antenna`, `flagged_points`, `total_points`, and
+  `flagged_percent`.
+- The summary uses the final output flags after all carried previous flags and
+  new flags have been combined.
+- Updated the `gdp-flag` help page and step-by-step guide to show the new
+  runtime table.
+
+## 2026-08-06 12:40:00 IST
+
+Prompt / Request
+- Extend `gdp-flag --fmode remove-version [VERSION]` so the version selector
+  can also be a closed range like `[1-3]` or an open-ended range like `[1:]`.
+
+Changes Made
+- Added range parsing for `gdp-flag --fmode remove-version`.
+- `remove-version 3` still removes only `fV3`.
+- `remove-version [1-3]` now removes every matching version from `fV1`
+  through `fV3`.
+- `remove-version [1:]` now removes every matching version at or above `fV1`.
+- Closed ranges require every requested version to exist; otherwise GDP writes
+  an `ERROR:` message and exits without deleting a partial subset.
+- Open-ended ranges remove every existing matching version from the requested
+  start upward; if none exist, GDP writes an `ERROR:` message and exits.
+- Updated `gdp-flag` HTML help, the flag-product documentation, the README
+  command examples, and the step-by-step guide with the new selector forms.
+
+## 2026-08-06 12:58:00 IST
+
+Prompt / Request
+- Add `gdp-flag --fmode summary [optional flagversion no]` to print only the
+  per-antenna flag summary from the requested version or, if omitted, from the
+  highest available matching flag version.
+
+Changes Made
+- Added `summary` as the public `gdp-flag --fmode` name for read-only flag
+  inspection, while keeping `show` as a backward-compatible internal alias.
+- `gdp-flag --fmode summary` now loads the highest matching `.flg` sidecar and
+  prints the existing per-antenna summary table without writing a new flag
+  version.
+- `gdp-flag --fmode summary VERSION` loads that specific `fV<VERSION>` file
+  and prints the same summary table.
+- Missing requested summary versions now produce a logged `ERROR:` message and
+  exit cleanly, matching the other flag-version lookup behaviors.
+- Updated the flag help page, the flag-product documentation, the README
+  examples, and the step-by-step guide with the new `summary` mode.
+
+## 2026-08-06 13:10:00 IST
+
+Prompt / Request
+- Ensure every new flag version updates the stored `flag-intent`, and make
+  `gdp-flag --fmode summary` print the `flag-intent` along with the per-antenna
+  summary.
+
+Changes Made
+- Changed `gdp-flag` so new `.flg` versions keep the previously stored
+  `flag-intent` entries when earlier GDP flags are carried, then append the
+  new flagging provenance for the current operation.
+- Removed the old synthetic `PREVIOUS GDP FLAGS: fV...` marker in favor of
+  carrying the actual prior intent history forward.
+- Added runtime logging of the stored `flag-intent` block after a new `.flg`
+  file is written.
+- Updated `gdp-flag --fmode summary` to print the stored `flag-intent` block
+  before the per-antenna flagged-point table.
+- Updated the `gdp-flag` help page, the flag-product documentation, and the
+  step-by-step guide to describe the accumulated intent history and summary
+  output.
