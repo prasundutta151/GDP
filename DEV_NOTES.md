@@ -2530,3 +2530,40 @@ Changes Made
 - Updated the `gdp-flag` help page, the flag-product documentation, and the
   step-by-step guide to describe the accumulated intent history and summary
   output.
+
+## 2026-08-06 13:32:00 IST
+
+Prompt / Request
+- Add a runtime `gaintable/` folder during setup.
+- Extend `gdp-flag` with `--apply-flag [VERSION]` so an existing GDP flag
+  version can be written back into a copied CASA gain or bandpass table.
+- Support `--output-table` for the copied CASA table path, and keep
+  `flag-intent` provenance inside the output CASA table metadata when
+  possible.
+
+Changes Made
+- Added `gaintable/` to the `gdp-setup` runtime layout and saved
+  `gaintable_dir` in the setup/config path map.
+- Extended `script/gdp-flag` with a standalone `--apply-flag [VERSION]`
+  action that:
+  copies the selected gain/bandpass table,
+  resolves the requested or highest matching `fV<version>` sidecar,
+  writes those flags into the copied CASA table `FLAG` column for the selected
+  scan/channel subset, and
+  stores applied flag provenance in CASA table keywords and README/comment
+  lines when supported by the active CASA table interface.
+- Added `--output-table` for explicit copied-table destinations and kept the
+  default destination under `rundir/gaintable/` as
+  `<original>_fV<version>.<suffix>`.
+- Updated the setup, flag, flag-product, README, and step-by-step
+  documentation with the new `gaintable` runtime convention and
+  `--apply-flag` examples.
+
+Verification
+- `python3 -m py_compile script/gdp-setup script/gdp-flag`
+
+Notes
+- The active shell here does not include `casatools`, so the CASA metadata
+  write-back path could not be live-tested in this environment; the new code
+  uses the same CASA table API family GDP already depends on and degrades
+  quietly if optional metadata methods are unavailable.

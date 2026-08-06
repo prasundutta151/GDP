@@ -44,7 +44,7 @@
 
     <section>
       <h2>Purpose</h2>
-      <p><code>gdp-flag</code> creates <code>NAME_fV&lt;version&gt;.flg</code> sidecar files beside the matching GDP gains NPZ. It can write flags from the original CASA gain/bandpass table, add manual antenna or channel flags, or create threshold flags from the Real-1 versus Imag gain plane.</p>
+      <p><code>gdp-flag</code> creates <code>NAME_fV&lt;version&gt;.flg</code> sidecar files beside the matching GDP gains NPZ. It can write flags from the original CASA gain/bandpass table, add manual antenna or channel flags, create threshold flags from the Real-1 versus Imag gain plane, and apply a chosen GDP flag version back into a copied CASA table under the runtime <code>gaintable/</code> folder.</p>
     </section>
 
     <section>
@@ -74,6 +74,8 @@ script/gdp-flag --mode gain --scan 17 --fmode remove-version "[1:]"  [remove all
 script/gdp-flag --mode gain --scan 17 --fmode remove-version  [remove the highest flag version for the matching gain product]
 script/gdp-flag --mode gain --scan 17 --fmode summary  [show the per-antenna summary for the highest matching flag version]
 script/gdp-flag --mode gain --scan 17 --fmode summary 3  [show the per-antenna summary for flag version fV3]
+script/gdp-flag --mode gain --scan 17 --apply-flag  [copy the saved gain table into rundir/gaintable and write the highest matching flag version into its CASA FLAG column]
+script/gdp-flag --mode gain --scan 17 --apply-flag 3 --output-table /path/to/output/table_fV3.g  [apply flag version fV3 into a chosen output CASA table path]
 script/gdp-flag --setup-file project-a-setup.json --mode bandpass --scan 18 --fmode casa-flags  [use a named setup file from the active runtime directory]</code></pre>
     </section>
 
@@ -94,6 +96,8 @@ script/gdp-flag --setup-file project-a-setup.json --mode bandpass --scan 18 --fm
         <tr><td><code>--use-flags [VERSION]</code></td><td>Choose an existing GDP <code>.flg</code> file to carry into the output. If the version is omitted, GDP uses the highest available version beside the matching gains NPZ. If this option is omitted entirely, GDP still carries the highest previous version when one exists.</td></tr>
         <tr><td><code>--new-flags</code></td><td>Write only the new flags from the selected <code>--fmode</code>; do not carry any previous GDP flag version.</td></tr>
         <tr><td><code>--out-fver VERSION</code></td><td>Output flag version. Default: next version beside the matching gains NPZ.</td></tr>
+        <tr><td><code>--apply-flag [VERSION]</code></td><td>Standalone action that copies the selected input CASA table and writes the requested GDP flag version into its CASA <code>FLAG</code> column. If <code>VERSION</code> is omitted, GDP uses the highest available matching version.</td></tr>
+        <tr><td><code>--output-table PATH</code></td><td>Output CASA table path used with <code>--apply-flag</code>. If omitted, GDP writes under <code>rundir/gaintable/</code> (or the configured runtime <code>gaintable_dir</code>) as <code>&lt;original&gt;_fV&lt;version&gt;</code>.</td></tr>
         <tr class="smode-option"><td><code>--fmode casa-flags</code></td><td>Write flags already present in the CASA gain or bandpass table. The <code>flag-intent</code> header records <code>CASA FLAGS</code>.</td></tr>
         <tr class="smode-option"><td><code>--fmode man-antenna</code></td><td>Flag manually selected antennas. Supply values with <code>--man-antenna LIST</code> or as trailing values after the mode. Add <code>:STOKES</code> to flag only selected Stokes; omit <code>:STOKES</code> to flag all Stokes. Examples: <code>1:0</code>, <code>[1-4]:1</code>, <code>(1, 3):0</code>, and <code>1:0, 3:1, [11-14]:1, 23</code>.</td></tr>
         <tr class="smode-option"><td><code>--fmode man-chan</code></td><td>Flag manually selected bandpass channels. Supply values with <code>--man-chan LIST</code> or as trailing values after the mode. Add <code>:STOKES</code> to flag only selected Stokes; omit <code>:STOKES</code> to flag all Stokes. Examples: <code>900:0</code>, <code>[900-1200]:1</code>, <code>(900, 1300):0</code>, and <code>[900-1200]</code> for the existing square-bracket inclusive range form. If used with <code>--mode gain</code>, GDP prints an <code>ERROR:</code> message and exits before reading table rows.</td></tr>
@@ -111,7 +115,7 @@ script/gdp-flag --setup-file project-a-setup.json --mode bandpass --scan 18 --fm
         <tr><td><code>--output-gains-npz PATH</code></td><td>Matching gains NPZ path used as the filename base for the <code>.flg</code> file.</td></tr>
         <tr><td><code>--write-gains-npz</code></td><td>Rewrite the matching gains NPZ even if it already exists.</td></tr>
       </table>
-      <p>After each completed flagging cycle, <code>gdp-flag</code> writes the accumulated <code>flag-intent</code> provenance and a per-antenna summary table to the terminal and task log with flagged points, total points, and flagged percentage in the final output flag version. If a required flag version is requested but not present, <code>gdp-flag</code> writes an <code>ERROR:</code> line to the terminal and the task log, then exits without a Python traceback.</p>
+      <p>After each completed flagging cycle, <code>gdp-flag</code> writes the accumulated <code>flag-intent</code> provenance and a per-antenna summary table to the terminal and task log with flagged points, total points, and flagged percentage in the final output flag version. With <code>--apply-flag</code>, GDP copies the CASA table first, writes the selected version into the copied table’s <code>FLAG</code> column, and stores the flag provenance in table keywords and README/comment lines when the CASA table interface supports them. If a required flag version is requested but not present, <code>gdp-flag</code> writes an <code>ERROR:</code> line to the terminal and the task log, then exits without a Python traceback.</p>
     </section>
   </main>
 </body>

@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import shutil
 import time
 from datetime import datetime, timezone
 from importlib.machinery import SourceFileLoader
@@ -336,6 +337,84 @@ def build_gains_output(input_table: Path, scan_label: str, mode: str, args: argp
     )
 
 
+def default_gaintable_dir() -> Path:
+    path = GSTATS.config_path("gaintable_dir")
+    if path is not None:
+        return Path(path)
+    return project_root() / "rundir" / "gaintable"
+
+
+def default_output_table_path(input_table: Path, version: int) -> Path:
+    out_dir = default_gaintable_dir()
+    suffix = input_table.suffix
+    stem = input_table.name[:-len(suffix)] if suffix else input_table.name
+    return out_dir / f"{stem}_fV{int(version)}{suffix}"
+
+
+def copy_table_tree(source: Path, destination: Path) -> None:
+    if source.resolve() == destination.resolve():
+        raise SystemExit("--output-table must be different from the input CASA table path.")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if destination.exists():
+        if destination.is_dir():
+            shutil.rmtree(destination)
+        else:
+            destination.unlink()
+    if source.is_dir():
+        shutil.copytree(source, destination)
+    else:
+        shutil.copy2(source, destination)
+
+
+def open_casa_table(tb: Any, path: Path, writable: bool = False) -> None:
+    if writable:
+        try:
+            tb.open(str(path), nomodify=False)
+            return
+        except TypeError:
+            pass
+    tb.open(str(path))
+
+
+def restore_flag_storage_shape(
+    full_flag: np.ndarray,
+    raw_template: np.ndarray,
+    data_shape: Sequence[int],
+    data_ch0: int = 0,
+    flag_chans: Optional[Tuple[int, int]] = None,
+) -> np.ndarray:
+    raw = np.asarray(raw_template, dtype=bool)
+    full = np.asarray(full_flag, dtype=bool)
+    if raw.shape == tuple(data_shape):
+        return full.astype(bool, copy=True)
+    if raw.ndim == 2 and len(data_shape) == 3:
+        npol, _, nrow = data_shape
+        if raw.shape == (npol, nrow):
+            return np.any(full, axis=1).astype(bool, copy=True)
+    if raw.ndim == 3 and len(data_shape) == 3:
+        npol, nchan, nrow = data_shape
+        if raw.shape[0] == npol and raw.shape[2] == nrow:
+            flag_nchan = int(raw.shape[1])
+            if flag_chans is None:
+                f0, f1 = int(data_ch0), int(data_ch0) + flag_nchan
+            else:
+                f0, f1 = int(flag_chans[0]), int(flag_chans[1])
+            out = np.ones(raw.shape, dtype=bool)
+            data_ch1 = int(data_ch0) + nchan
+            overlap0 = max(int(data_ch0), f0)
+            overlap1 = min(data_ch1, f1)
+            if overlap1 > overlap0:
+                src0 = overlap0 - int(data_ch0)
+                src1 = overlap1 - int(data_ch0)
+                dst0 = overlap0 - f0
+                dst1 = overlap1 - f0
+                out[:, dst0:dst1, :] = full[:, src0:src1, :]
+            return out
+    raise ValueError(
+        f"Cannot restore FLAG storage shape {raw.shape} from normalized shape {tuple(full.shape)}."
+    )
+
+
 def write_npz_exact_suffix(path: Path, payload: Dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("wb") as handle:
@@ -356,6 +435,41 @@ def load_flag_file(flag_path: Path, gains: Dict[str, Any]) -> Tuple[np.ndarray, 
         dtype=bool,
     )
     return flags, header
+
+
+def write_flag_intent_metadata(
+    tb: Any,
+    flag_version: int,
+    flag_path: Path,
+    header: Dict[str, Any],
+) -> None:
+    intents = normalize_flag_intents(header.get("flag-intent"))
+    if hasattr(tb, "putkeyword"):
+        for key, value in {
+            "GDP_FLAG_VERSION": int(flag_version),
+            "GDP_FLAG_FILE": str(flag_path),
+            "GDP_FLAG_INTENT": intents,
+            "GDP_FLAG_METADATA": json_safe(
+                {
+                    "flag_version": int(flag_version),
+                    "flag_file": str(flag_path),
+                    "flag_intent": intents,
+                    "flag_created_utc": header.get("created_utc"),
+                }
+            ),
+        }.items():
+            try:
+                tb.putkeyword(key, value)
+            except Exception:
+                pass
+    if hasattr(tb, "addreadmeline"):
+        try:
+            tb.addreadmeline(f"GDP flag version applied: fV{int(flag_version)}")
+            tb.addreadmeline(f"GDP flag source file: {flag_path}")
+            for intent in intents:
+                tb.addreadmeline(f"GDP flag intent: {intent}")
+        except Exception:
+            pass
 
 
 def stokes_selection_mask(gains: Dict[str, Any], stokes: Optional[Sequence[int]]) -> np.ndarray:
@@ -1141,6 +1255,90 @@ def run_summary_batch(
     logger.done(f"summary {scan_label}", t0)
 
 
+def run_apply_batch(
+    args: argparse.Namespace,
+    input_table: Path,
+    mode: str,
+    scans: Optional[List[int]],
+    selected_antennas: Optional[List[int]],
+    scan_label: str,
+    logger: TaskLogger,
+) -> None:
+    logger.write(f"gdp-flag apply batch={scan_label}")
+    gains_out = build_gains_output(input_table, scan_label, mode, args)
+    requested = parse_flag_version(args.apply_flag, "--apply-flag")
+    version, flag_path = resolve_summary_flag_version(gains_out, str(requested) if requested is not None else None, logger)
+    output_table = (
+        Path(args.output_table).expanduser().resolve()
+        if args.output_table
+        else default_output_table_path(input_table, version)
+    )
+    gains = GSTATS.compute_gains(
+        input_table,
+        mode,
+        scans,
+        selected_antennas,
+        None,
+        False,
+        args.bchan,
+        args.echan,
+        None,
+        None,
+    )
+    if gains["row"].size == 0:
+        logged_error(logger, f"ERROR: no matching rows found for {input_table} batch={scan_label}.")
+    lookup, header = GSTATS.load_flag_lookup(flag_path)
+    t0 = logger.start(f"apply-flag {scan_label}")
+    copy_table_tree(input_table, output_table)
+    casatable = GSTATS.casatable_factory()
+    tb = casatable()
+    applied_points = 0
+    try:
+        open_casa_table(tb, output_table, writable=True)
+        cols = list(tb.colnames())
+        if "FLAG" not in cols:
+            logged_error(logger, f"ERROR: output CASA table has no FLAG column: {output_table}")
+        data_col = GSTATS.choose_data_column(cols, mode)
+        flag_chans = header.get("flag_chans")
+        if isinstance(flag_chans, list) and len(flag_chans) == 2:
+            flag_chans_tuple = (int(flag_chans[0]), int(flag_chans[1]))
+        else:
+            flag_chans_tuple = None
+        row_values = np.asarray(gains["row"], dtype=int)
+        stokes_values = np.asarray(gains["stokes"], dtype=int)
+        channel_values = np.asarray(gains["channel"], dtype=int)
+        output_flags = np.asarray(
+            [
+                bool(lookup.get((int(row), int(pol), int(chan)), False))
+                for row, pol, chan in zip(row_values, stokes_values, channel_values)
+            ],
+            dtype=bool,
+        )
+        for row_id in sorted(int(row) for row in np.unique(row_values)):
+            row_mask = row_values == row_id
+            data_raw = np.asarray(tb.getcol(data_col, startrow=row_id, nrow=1))
+            if data_raw.ndim == 2:
+                data_raw = data_raw[:, None, :]
+            raw_flag = np.asarray(tb.getcol("FLAG", startrow=row_id, nrow=1))
+            full_flag = GSTATS.normalize_flag(raw_flag, data_raw.shape, 0, flag_chans_tuple)
+            for pol, chan, flag in zip(stokes_values[row_mask], channel_values[row_mask], output_flags[row_mask]):
+                full_flag[int(pol), int(chan), 0] = bool(flag)
+                applied_points += 1
+            stored_flag = restore_flag_storage_shape(full_flag, raw_flag, data_raw.shape, 0, flag_chans_tuple)
+            tb.putcol("FLAG", np.asarray(stored_flag, dtype=bool), startrow=row_id, nrow=1)
+        write_flag_intent_metadata(tb, version, flag_path, header or {})
+    finally:
+        try:
+            tb.close()
+        except Exception:
+            pass
+    logger.write(
+        f"Applied flag version fV{version}: {flag_path} -> {output_table} "
+        f"updated_points={applied_points}"
+    )
+    logger.done(f"apply-flag {scan_label}", t0)
+
+
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Create GDP .flg sidecar files from CASA flags or manual flag intents.")
     p.add_argument("--input-table", dest="input_table_opt", default=None, help="Input CASA gain/bandpass table path.")
@@ -1156,6 +1354,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--use-flags", nargs="?", const="highest", default=None, metavar="VERSION", help="Carry an existing GDP .flg version into the output. Omit VERSION to use the highest available version. By default, gdp-flag carries the highest previous version when one exists.")
     p.add_argument("--new-flags", action="store_true", help="Write only the new fmode flags; do not carry previous GDP flag versions.")
     p.add_argument("--out-fver", dest="out_fver", default=None, help="Output flag version. Default: next version beside the matching gains NPZ.")
+    p.add_argument("--apply-flag", nargs="?", const="highest", default=None, metavar="VERSION", help="Apply an existing GDP .flg version back into a copied CASA table. Omit VERSION to use the highest available matching version.")
+    p.add_argument("--output-table", default=None, help="Output CASA table path for --apply-flag. Default: rundir/gaintable/<original>_fV<VERSION>.")
     p.add_argument("--fmode", default="casa-flags", help="Flag mode: casa-flags, man-antenna, man-chan, all-std-thrsld, ante-std-thrsld, ante-mean-thrsld, remove-version, summary, ante-thrsld, ks-thrsld, auto-ante, auto-chan.")
     p.add_argument("--alpha", dest="threshold_alpha_opt", default=None, help="Threshold value for --fmode all-std-thrsld, ante-std-thrsld, or ante-mean-thrsld. If omitted, the default is 1 for std-threshold modes and 5 for ante-mean-thrsld. A trailing value after the fmode is also accepted.")
     p.add_argument("--percent", dest="threshold_percent_opt", default=None, help="Flagged-data percentage threshold for --fmode ante-thrsld. If omitted, percent=70. A trailing value after the fmode is also accepted.")
@@ -1173,6 +1373,9 @@ def main() -> None:
     activate_config(args.setup_file)
     args.fmode_resolved = parse_fmode(args.fmode)
     mode = infer_mode(args)
+    applying_flags = args.apply_flag is not None
+    if applying_flags and args.fmode != "casa-flags":
+        raise SystemExit("--apply-flag is a standalone action; do not combine it with a non-default --fmode.")
     if args.fmode_resolved == "man_chan" and mode != "bandpass":
         raise SystemExit("ERROR: --fmode man-chan works only with --mode bandpass.")
     explicit_input = args.input_table_opt
@@ -1225,8 +1428,12 @@ def main() -> None:
     batches = non_casa_batches(scans, args.combine_scans) if args.fmode_resolved == "remove_version" else GSTATS.scan_batches(input_table, scans, args.combine_scans)
     if len(batches) > 1 and (args.output_gains_npz or args.out_fver):
         raise SystemExit("Explicit --output-gains-npz or --out-fver cannot be used when writing multiple per-scan flag products.")
+    if applying_flags and len(batches) > 1 and args.output_table:
+        raise SystemExit("Explicit --output-table cannot be used when --apply-flag would write multiple per-scan tables.")
     for batch_scans, batch_label in batches:
-        if args.fmode_resolved == "remove_version":
+        if applying_flags:
+            run_apply_batch(args, input_table, mode, batch_scans, selected_antennas, batch_label, logger)
+        elif args.fmode_resolved == "remove_version":
             run_remove_batch(args, input_table, mode, batch_scans, batch_label, logger)
         elif args.fmode_resolved == "summary":
             run_summary_batch(args, input_table, mode, batch_scans, selected_antennas, batch_label, logger)

@@ -134,12 +134,17 @@ script/gdp-flag --mode gain --scan 17 --fmode remove-version "[1-3]"
 script/gdp-flag --mode gain --scan 17 --fmode remove-version "[1:]"
 script/gdp-flag --mode gain --scan 17 --fmode summary
 script/gdp-flag --mode gain --scan 17 --fmode summary 3
+script/gdp-flag --mode gain --scan 17 --apply-flag
+script/gdp-flag --mode gain --scan 17 --apply-flag 3 --output-table /path/to/output/table_fV3.g
 ```
 
 Manual flag commands carry the highest previous flag version by default. Use
 `--new-flags` to write only the newly requested flags. `man-chan` is valid only
 for bandpass mode; requested flag versions that do not exist are reported as
 terminal `ERROR:` messages and the command exits without a Python traceback.
+`--apply-flag` copies the input CASA table and writes a selected GDP flag
+version into the copied table's `FLAG` column, using `rundir/gaintable/` by
+default if `--output-table` is not supplied.
 Manual antenna/channel values can include `:STOKES`, for example `1:0`,
 `[11-14]:1`, or `23` for all Stokes.
 `all-std-thrsld` computes per-Stokes Real-1 and Imag standard deviations from

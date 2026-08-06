@@ -95,6 +95,8 @@ script/gdp-flag --mode gain --scan 17 --fmode remove-version "[1-3]"  [remove fl
 script/gdp-flag --mode gain --scan 17 --fmode remove-version "[1:]"  [remove all matching flag versions starting at fV1]
 script/gdp-flag --mode gain --scan 17 --fmode summary  [show the per-antenna summary for the highest matching flag version]
 script/gdp-flag --mode gain --scan 17 --fmode summary 3  [show the per-antenna summary for flag version fV3]
+script/gdp-flag --mode gain --scan 17 --apply-flag  [copy the saved gain table to rundir/gaintable and apply the highest matching flag version]
+script/gdp-flag --mode gain --scan 17 --apply-flag 3 --output-table /path/to/output/table_fV3.g  [apply fV3 to a chosen output CASA table path]
 script/gdp-stats --mode gain --scan 17 --smode stats,ks --use-flags --flagver 1  [compute flagged products using fV1 .flg flags; default names include _fV1]
 script/gdp-plot --mode gain --scan 17 -pmode colormap --use-flags --flagver 1  [plot using fV1 flags; default name includes _fV1]
 script/gdp-plot --mode gain --scan 17 -pmode colormap --npz-path /path/to/gdp-gains-gain-scan17.npz  [plot directly from a selected gain scan-17 NPZ file]

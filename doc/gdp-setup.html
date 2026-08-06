@@ -44,7 +44,7 @@
 
     <section>
       <h2>Purpose</h2>
-      <p><code>gdp-setup</code> creates the runtime directory structure and saves separate gain and bandpass table locations so later GDP commands can reuse the correct default for each mode. It stores a setup JSON file inside the runtime directory and updates the active GDP configuration used by the other commands.</p>
+      <p><code>gdp-setup</code> creates the runtime directory structure and saves separate gain and bandpass table locations so later GDP commands can reuse the correct default for each mode. It stores a setup JSON file inside the runtime directory, initializes a <code>gaintable/</code> folder for CASA table copies, and updates the active GDP configuration used by the other commands.</p>
     </section>
 
     <section>
@@ -69,6 +69,7 @@ script/gdp-setup --show  [print the saved GDP setup]</code></pre>
         <tr><td><code>--dry-run</code></td><td>Show the directories and configuration that would be written.</td></tr>
         <tr><td><code>--allow-missing-table</code></td><td>Allow gain or bandpass table paths to be recorded before they exist.</td></tr>
       </table>
+      <p>The runtime directory includes <code>data-product/</code>, <code>logs/</code>, <code>plots/</code>, and <code>gaintable/</code>. <code>gdp-flag --apply-flag</code> writes copied CASA gain or bandpass tables under <code>gaintable/</code> unless <code>--output-table</code> is supplied.</p>
     </section>
 
     <section class="sample-plots" aria-labelledby="sample-plots">

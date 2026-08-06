@@ -131,7 +131,9 @@ script/gdp-flag --mode gain --scan 17 --fmode remove-version 3
 script/gdp-flag --mode gain --scan 17 --fmode remove-version "[1-3]"
 script/gdp-flag --mode gain --scan 17 --fmode remove-version "[1:]"
 script/gdp-flag --mode gain --scan 17 --fmode summary
-script/gdp-flag --mode gain --scan 17 --fmode summary 3</code></pre>
+script/gdp-flag --mode gain --scan 17 --fmode summary 3
+script/gdp-flag --mode gain --scan 17 --apply-flag
+script/gdp-flag --mode gain --scan 17 --apply-flag 3 --output-table /path/to/output/table_fV3.g</code></pre>
       <p>Expected runtime output pattern:</p>
       <pre><code>Loaded previous flag file fV1: .../gdp-gains-gain-scan17_fV1.flg
 all-std-thrsld stokes=0 alpha=1 n=... real_std=... imag_std=... R=... threshold=... new_flags=... (...%)
@@ -153,9 +155,10 @@ Per-antenna final flag summary:
 antenna  flagged_points  total_points  flagged_percent
       0             ...           ...             ...
 Removed flag file fV3: .../gdp-gains-gain-scan17_fV3.flg
+Applied flag version fV3: .../gdp-gains-gain-scan17_fV3.flg -> .../gaintable/gain_table_fV3.g updated_points=...
 ERROR: requested flag version fV8 does not exist: ...
 ERROR: --fmode man-chan works only with --mode bandpass.</code></pre>
-      <p>After creating flags, use <code>--use-flags</code> with <code>gdp-stats</code> or <code>gdp-plot</code>. If <code>--flagver</code> is omitted, GDP uses the highest available version and reports it in terminal output. Flagged data products and plots append <code>_fV&lt;version&gt;</code> to the output name, for example <code>gdp-stats-gain-scan17_fV2.npz</code> or <code>gdp-plot-colormap-gain-scan17_fV2.png</code>.</p>
+      <p>After creating flags, use <code>--use-flags</code> with <code>gdp-stats</code> or <code>gdp-plot</code>. If <code>--flagver</code> is omitted, GDP uses the highest available version and reports it in terminal output. Flagged data products and plots append <code>_fV&lt;version&gt;</code> to the output name, for example <code>gdp-stats-gain-scan17_fV2.npz</code> or <code>gdp-plot-colormap-gain-scan17_fV2.png</code>. Use <code>--apply-flag</code> when you want a copied CASA gain or bandpass table with that GDP flag version written into its <code>FLAG</code> column under <code>rundir/gaintable/</code>.</p>
     </section>
 
     <section>
