@@ -40,6 +40,12 @@ RUNDIR_SUBDIRS = [
     "plots/eps",
     "plots/pdf",
 ]
+CLEAN_RUNTIME_DIRS = [
+    "data-product",
+    "plots",
+    "logs",
+    "gaintable",
+]
 
 
 def project_root() -> Path:
@@ -132,6 +138,57 @@ def ensure_rundir(rundir: Path, dry_run: bool = False) -> List[str]:
     return created
 
 
+def assert_inside(parent: Path, child: Path) -> None:
+    try:
+        child.resolve().relative_to(parent.resolve())
+    except ValueError as exc:
+        raise ValueError(f"Refusing to clean path outside runtime directory: {child}") from exc
+
+
+def clean_runtime_products(rundir: Path, dry_run: bool = False) -> List[str]:
+    removed: List[str] = []
+    for rel in CLEAN_RUNTIME_DIRS:
+        root = (rundir / rel).resolve()
+        assert_inside(rundir, root)
+        if not root.exists():
+            continue
+        if not root.is_dir():
+            raise NotADirectoryError(f"Runtime cleanup target is not a directory: {root}")
+        for child in sorted(root.iterdir(), key=lambda item: str(item)):
+            assert_inside(rundir, child)
+            removed.append(str(child))
+            if dry_run:
+                continue
+            if child.is_dir() and not child.is_symlink():
+                shutil.rmtree(child)
+            else:
+                child.unlink()
+    return removed
+
+
+def clean_without_prompt(clean_value: object) -> bool:
+    if clean_value in (None, False):
+        return False
+    if clean_value in (True, "prompt"):
+        return False
+    if str(clean_value).strip().lower() == "no-stop":
+        return True
+    raise SystemExit("--clean accepts only the optional value 'no-stop'.")
+
+
+def confirm_clean(rundir: Path, removed: List[str]) -> bool:
+    print(f"Clean GDP runtime outputs under: {rundir}")
+    if removed:
+        print("This will permanently remove:")
+        for item in removed:
+            print(f"  {item}")
+    else:
+        print("No GDP runtime outputs found to remove.")
+        return True
+    answer = input("Type 'yes' to continue: ").strip().lower()
+    return answer == "yes"
+
+
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
         description=(
@@ -183,6 +240,18 @@ def parse_args() -> argparse.Namespace:
         help="Show the current saved configuration and exit.",
     )
     p.add_argument(
+        "--clean",
+        nargs="?",
+        const="prompt",
+        default=None,
+        metavar="no-stop",
+        help=(
+            "Delete GDP-generated runtime outputs under data-product/, plots/, "
+            "logs/, and gaintable/, then recreate the standard runtime folders. "
+            "Prompts before deletion unless used as '--clean no-stop'."
+        ),
+    )
+    p.add_argument(
         "--dry-run",
         action="store_true",
         help="Print what would be created/written without changing files.",
@@ -229,6 +298,41 @@ def main() -> None:
         or (project_root() / "rundir")
     ).expanduser().resolve()
     setup_file = resolve_setup_file(rundir, args.setup_file)
+
+    if args.clean is not None:
+        no_stop = clean_without_prompt(args.clean)
+        removed = clean_runtime_products(rundir, dry_run=True)
+        if args.dry_run:
+            created = ensure_rundir(rundir, dry_run=True)
+            print(f"Would clean GDP runtime outputs under: {rundir}")
+            if removed:
+                print("Would remove:")
+                for item in removed:
+                    print(f"  {item}")
+            else:
+                print("No GDP runtime outputs found to remove.")
+            if created:
+                print("Would recreate directories:")
+                for item in created:
+                    print(f"  {item}")
+            return
+        if not no_stop and not confirm_clean(rundir, removed):
+            print("Clean cancelled.")
+            return
+        removed = clean_runtime_products(rundir, dry_run=False)
+        created = ensure_rundir(rundir, dry_run=args.dry_run)
+        print(f"Cleaned GDP runtime outputs under: {rundir}")
+        if removed:
+            print("Removed:")
+            for item in removed:
+                print(f"  {item}")
+        else:
+            print("No GDP runtime outputs found to remove.")
+        if created:
+            print("Recreated directories:")
+            for item in created:
+                print(f"  {item}")
+        return
 
     allow_missing = args.allow_missing_table or args.allow_missing_source
     gain_table = resolve_optional_path(args.gain_table or args.gain_dir or old.get("gain_table"))

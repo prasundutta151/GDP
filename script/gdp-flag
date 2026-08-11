@@ -331,9 +331,8 @@ def infer_mode(args: argparse.Namespace) -> str:
 
 
 def build_gains_output(input_table: Path, scan_label: str, mode: str, args: argparse.Namespace) -> Path:
-    label = GSTATS.label_with_channel(scan_label, mode, args.bchan, args.echan)
     return Path(args.output_gains_npz).expanduser().resolve() if args.output_gains_npz else GSTATS.build_default_output(
-        input_table, label, mode, "gains", "npz"
+        input_table, scan_label, mode, "gains", "npz"
     )
 
 
@@ -976,9 +975,16 @@ class TaskLogger:
         self.path = path
         self.path.parent.mkdir(parents=True, exist_ok=True)
 
+    def terminal_line(self, line: str) -> str:
+        marker = " FLAGS:"
+        idx = line.find(marker)
+        if "  - " in line and idx >= 0:
+            return line[: idx + len(marker)]
+        return line
+
     def write(self, message: str) -> None:
         line = f"{datetime.now().isoformat(timespec='seconds')} {message}"
-        print(line)
+        print(self.terminal_line(line))
         with self.path.open("a", encoding="utf-8") as f:
             f.write(line + "\n")
 

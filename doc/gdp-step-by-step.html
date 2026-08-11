@@ -93,7 +93,7 @@ antennas: [...]</code></pre>
       <h2>3. Generate Gains, Stats, And KS Products</h2>
       <p>Run these in a CASA-enabled shell because table reading uses <code>casatools</code>. The gains NPZ is the common source product used by the plotter, and the matching flag sidecar stores the CASA table flag state.</p>
       <pre><code>casa --nogui --nologger --nologfile --log2term -c script/gdp-stats --mode gain --scan 17 --antennas "[0-29]" --smode gains,stats,ks</code></pre>
-      <pre><code>casa --nogui --nologger --nologfile --log2term -c script/gdp-stats --mode bandpass --scan 18 --bchan 800 --echan 3000 --antennas "[0-29]" --smode gains,stats,ks</code></pre>
+      <pre><code>casa --nogui --nologger --nologfile --log2term -c script/gdp-stats --mode bandpass --scan 18 --antennas "[0-29]" --smode gains,stats,ks</code></pre>
       <pre><code>casa --nogui --nologger --nologfile --log2term -c script/gdp-stats --mode gain --scan 17 --antennas [0-9] --smode stats,ks
 casa --nogui --nologger --nologfile --log2term -c script/gdp-stats --mode gain --scan 17 --antennas 2,3,4,31 --smode stats
 casa --nogui --nologger --nologfile --log2term -c script/gdp-stats --mode gain --scan 17 --antennas "[1-5]" 6 "[9-12]" 15 16 19 --smode stats</code></pre>
@@ -119,8 +119,8 @@ casa --nogui --nologger --nologfile --log2term -c script/gdp-flag --mode gain --
 casa --nogui --nologger --nologfile --log2term -c script/gdp-flag --mode gain --scan 17 --fmode man-antenna --man-antenna "1:0, 3:1, [11-14]:1, 23"
 casa --nogui --nologger --nologfile --log2term -c script/gdp-flag --mode gain --scan 17 --fmode man-antenna --man-antenna 9 --out-fver 5
 casa --nogui --nologger --nologfile --log2term -c script/gdp-flag --mode gain --scan 17 --fmode man-antenna 9 --new-flags
-casa --nogui --nologger --nologfile --log2term -c script/gdp-flag --mode bandpass --scan 18 --bchan 800 --echan 3000 --fmode man-chan --man-chan "[900-1200]"
-casa --nogui --nologger --nologfile --log2term -c script/gdp-flag --mode bandpass --scan 18 --bchan 800 --echan 3000 --fmode man-chan --man-chan "[900-1200]:1, 1300:0"
+casa --nogui --nologger --nologfile --log2term -c script/gdp-flag --mode bandpass --scan 18 --fmode man-chan --man-chan "[900-1200]"
+casa --nogui --nologger --nologfile --log2term -c script/gdp-flag --mode bandpass --scan 18 --fmode man-chan --man-chan "[900-1200]:1, 1300:0"
 casa --nogui --nologger --nologfile --log2term -c script/gdp-flag --mode gain --scan 17 --fmode all-std-thrsld
 casa --nogui --nologger --nologfile --log2term -c script/gdp-flag --mode gain --scan 17 --fmode all-std-thrsld 1.5
 casa --nogui --nologger --nologfile --log2term -c script/gdp-flag --mode gain --scan 17 --fmode ante-std-thrsld
@@ -180,10 +180,10 @@ DONE  self-corr scan17 elapsed_sec=...</code></pre>
 script/gdp-plot --mode gain --scan 17 -pmode self-corr-colormap --antenna "[0-29]"
 script/gdp-plot --mode gain --scan 17 -pmode colormap,hist --antenna "[0-29]" --range 20
 script/gdp-plot --mode gain --scan 17 -pmode antenna --antenna "[0-29]"
-script/gdp-plot --mode bandpass --scan 18 --bchan 800 --echan 3000 -pmode colormap -pchans "[800-1200]" --antenna "[0-29]" --range 20
+script/gdp-plot --mode bandpass --scan 18 -pmode colormap -pchans "[800-1200]" --antenna "[0-29]" --range 20
 script/gdp-plot --mode gain --scan 17 -pmode reim --antenna "[0-29]"
-casa --nogui --nologger --nologfile --log2term -c script/gdp-stats --mode bandpass --scan 18 --bchan 800 --echan 3000 --antennas "[0-29]" --smode stats --use-flags
-script/gdp-plot --mode bandpass --scan 18 --bchan 800 --echan 3000 -pmode stats --use-flags</code></pre>
+casa --nogui --nologger --nologfile --log2term -c script/gdp-stats --mode bandpass --scan 18 --antennas "[0-29]" --smode stats --use-flags
+script/gdp-plot --mode bandpass --scan 18 -pmode stats --use-flags</code></pre>
       <p>Expected runtime output pattern:</p>
       <pre><code>Using existing gains NPZ for stats: .../gdp-gains-gain-scan17.npz
 Using flag file fV2: .../gdp-gains-gain-scan17_fV2.flg
@@ -195,7 +195,7 @@ DONE  plot stats elapsed_sec=...</code></pre>
         <tr><td>Stats</td><td><a href="sample_plots/gdp-plot-stats-gain-scan17.png">gdp-plot-stats-gain-scan17.png</a></td><td>All selected antennas appear on the x-axis.</td></tr>
         <tr><td>KS</td><td><a href="sample_plots/gdp-plot-ks-gain-scan17.png">gdp-plot-ks-gain-scan17.png</a></td><td>D-statistic trends are shown per antenna and Stokes/component.</td></tr>
         <tr><td>Self-corr colormap</td><td><a href="sample_plots/gdp-plot-self-corr-colormap-gain-scan17.png">gdp-plot-self-corr-colormap-gain-scan17.png</a></td><td>White columns or cells correspond to NaN/insufficient samples.</td></tr>
-        <tr><td>Bandpass colormap</td><td><a href="sample_plots/gdp-plot-colormap-bandpass-scan18-chan_800_3000.png">gdp-plot-colormap-bandpass-scan18-chan_800_3000.png</a></td><td>Bandpass versions use whole-MHz nu labels and bottom-up channel indices.</td></tr>
+        <tr><td>Bandpass colormap</td><td><a href="sample_plots/gdp-plot-colormap-bandpass-scan18-pchan_800_3000.png">gdp-plot-colormap-bandpass-scan18-pchan_800_3000.png</a></td><td>Bandpass versions use whole-MHz nu labels and bottom-up channel indices.</td></tr>
       </table>
     </section>
 
@@ -244,14 +244,14 @@ Version archive: .../gdp-...tgz</code></pre>
         <tr><td>Gain KS grid</td><td><a href="sample_plots/gdp-plot-ks-gain-scan17.png">gdp-plot-ks-gain-scan17.png</a></td><td><code>script/gdp-plot --mode gain --scan 17 -pmode ks --antenna "[0-29]"</code></td><td>Per-antenna fitted-normal KS D-statistic plot for gain scan 17.</td></tr>
         <tr><td>Gain self-corr colormap</td><td><a href="sample_plots/gdp-plot-self-corr-colormap-gain-scan17.png">gdp-plot-self-corr-colormap-gain-scan17.png</a></td><td><code>script/gdp-plot --mode gain --scan 17 -pmode self-corr-colormap --antenna "[0-29]"</code></td><td>Gain structure-function colormap with antenna on x-axis and lag on y-axis.</td></tr>
         <tr><td>Gain self-corr antenna</td><td><a href="sample_plots/gdp-plot-self-corr-antenna-gain-scan17-ant0.png">gdp-plot-self-corr-antenna-gain-scan17-ant0.png</a></td><td><code>script/gdp-plot --mode gain --scan 17 -pmode self-corr-antenna --antenna "[0-29]"</code></td><td>One gain structure-function curve plot is written per selected antenna; antenna 0 is linked as the representative sample.</td></tr>
-        <tr><td>Bandpass colormap</td><td><a href="sample_plots/gdp-plot-colormap-bandpass-scan18-chan_800_3000.png">gdp-plot-colormap-bandpass-scan18-chan_800_3000.png</a></td><td><code>script/gdp-plot --mode bandpass --scan 18 --bchan 800 --echan 3000 -pmode colormap --antenna "[0-29]"</code></td><td>Bandpass Real-1 and Imag percent colormaps for scan 18, channels 800 through 2999, antennas 0 through 29.</td></tr>
-        <tr><td>Bandpass histogram</td><td><a href="sample_plots/gdp-plot-hist-bandpass-scan18-chan_800_3000.png">gdp-plot-hist-bandpass-scan18-chan_800_3000.png</a></td><td><code>script/gdp-plot --mode bandpass --scan 18 --bchan 800 --echan 3000 -pmode hist --antenna "[0-29]"</code></td><td>Bandpass distribution panels for scan 18, channels 800 through 2999.</td></tr>
-        <tr><td>Bandpass antenna</td><td><a href="sample_plots/gdp-plot-antenna-bandpass-scan18-chan_800_3000-ant0.png">gdp-plot-antenna-bandpass-scan18-chan_800_3000-ant0.png</a></td><td><code>script/gdp-plot --mode bandpass --scan 18 --bchan 800 --echan 3000 -pmode antenna --antenna "[0-29]"</code></td><td>One bandpass antenna plot is written per selected antenna with finite data; antenna 0 is linked as the representative sample.</td></tr>
-        <tr><td>Bandpass Real-Imag plane</td><td><a href="sample_plots/gdp-plot-reim-bandpass-scan18-chan_800_3000-ants0-29.png">gdp-plot-reim-bandpass-scan18-chan_800_3000-ants0-29.png</a></td><td><code>script/gdp-plot --mode bandpass --scan 18 --bchan 800 --echan 3000 -pmode reim --antenna "[0-29]"</code></td><td>Pooled Real-1 versus Imag scatter and log-count density panels for bandpass scan 18.</td></tr>
-        <tr><td>Bandpass statistics grid</td><td><a href="sample_plots/gdp-plot-stats-bandpass-scan18-chan_800_3000.png">gdp-plot-stats-bandpass-scan18-chan_800_3000.png</a></td><td><code>script/gdp-plot --mode bandpass --scan 18 --bchan 800 --echan 3000 -pmode stats --antenna "[0-29]"</code></td><td>Per-antenna bandpass statistics for scan 18, channels 800 through 2999.</td></tr>
-        <tr><td>Bandpass KS grid</td><td><a href="sample_plots/gdp-plot-ks-bandpass-scan18-chan_800_3000.png">gdp-plot-ks-bandpass-scan18-chan_800_3000.png</a></td><td><code>script/gdp-plot --mode bandpass --scan 18 --bchan 800 --echan 3000 -pmode ks --antenna "[0-29]"</code></td><td>Per-antenna fitted-normal KS D-statistic plot for bandpass scan 18.</td></tr>
-        <tr><td>Bandpass self-corr colormap</td><td><a href="sample_plots/gdp-plot-self-corr-colormap-bandpass-scan18-chan_800_3000.png">gdp-plot-self-corr-colormap-bandpass-scan18-chan_800_3000.png</a></td><td><code>script/gdp-plot --mode bandpass --scan 18 --bchan 800 --echan 3000 -pmode self-corr-colormap --antenna "[0-29]"</code></td><td>Bandpass structure-function colormap for scan 18.</td></tr>
-        <tr><td>Bandpass self-corr antenna</td><td><a href="sample_plots/gdp-plot-self-corr-antenna-bandpass-scan18-chan_800_3000-ant0.png">gdp-plot-self-corr-antenna-bandpass-scan18-chan_800_3000-ant0.png</a></td><td><code>script/gdp-plot --mode bandpass --scan 18 --bchan 800 --echan 3000 -pmode self-corr-antenna --antenna "[0-29]"</code></td><td>One bandpass structure-function curve plot is written per selected antenna; antenna 0 is linked as the representative sample.</td></tr>
+        <tr><td>Bandpass colormap</td><td><a href="sample_plots/gdp-plot-colormap-bandpass-scan18-pchan_800_3000.png">gdp-plot-colormap-bandpass-scan18-pchan_800_3000.png</a></td><td><code>script/gdp-plot --mode bandpass --scan 18 -pmode colormap -pchans "[800-3000]" --antenna "[0-29]"</code></td><td>Bandpass Real-1 and Imag percent colormaps for scan 18, channels 800 through 3000, antennas 0 through 29.</td></tr>
+        <tr><td>Bandpass histogram</td><td><a href="sample_plots/gdp-plot-hist-bandpass-scan18-pchan_800_3000.png">gdp-plot-hist-bandpass-scan18-pchan_800_3000.png</a></td><td><code>script/gdp-plot --mode bandpass --scan 18 -pmode hist -pchans "[800-3000]" --antenna "[0-29]"</code></td><td>Bandpass distribution panels for scan 18, channels 800 through 3000.</td></tr>
+        <tr><td>Bandpass antenna</td><td><a href="sample_plots/gdp-plot-antenna-bandpass-scan18-pchan_800_3000-ant0.png">gdp-plot-antenna-bandpass-scan18-pchan_800_3000-ant0.png</a></td><td><code>script/gdp-plot --mode bandpass --scan 18 -pmode antenna -pchans "[800-3000]" --antenna "[0-29]"</code></td><td>One bandpass antenna plot is written per selected antenna with finite data; antenna 0 is linked as the representative sample.</td></tr>
+        <tr><td>Bandpass Real-Imag plane</td><td><a href="sample_plots/gdp-plot-reim-bandpass-scan18-pchan_800_3000-ants0-29.png">gdp-plot-reim-bandpass-scan18-pchan_800_3000-ants0-29.png</a></td><td><code>script/gdp-plot --mode bandpass --scan 18 -pmode reim -pchans "[800-3000]" --antenna "[0-29]"</code></td><td>Pooled Real-1 versus Imag scatter and log-count density panels for bandpass scan 18.</td></tr>
+        <tr><td>Bandpass statistics grid</td><td><a href="sample_plots/gdp-plot-stats-bandpass-scan18-pchan_800_3000.png">gdp-plot-stats-bandpass-scan18-pchan_800_3000.png</a></td><td><code>script/gdp-plot --mode bandpass --scan 18 -pmode stats -pchans "[800-3000]" --antenna "[0-29]"</code></td><td>Per-antenna bandpass statistics for scan 18, channels 800 through 3000.</td></tr>
+        <tr><td>Bandpass KS grid</td><td><a href="sample_plots/gdp-plot-ks-bandpass-scan18.png">gdp-plot-ks-bandpass-scan18.png</a></td><td><code>script/gdp-plot --mode bandpass --scan 18 -pmode ks --antenna "[0-29]"</code></td><td>Per-antenna fitted-normal KS D-statistic plot for bandpass scan 18.</td></tr>
+        <tr><td>Bandpass self-corr colormap</td><td><a href="sample_plots/gdp-plot-self-corr-colormap-bandpass-scan18.png">gdp-plot-self-corr-colormap-bandpass-scan18.png</a></td><td><code>script/gdp-plot --mode bandpass --scan 18 -pmode self-corr-colormap --antenna "[0-29]"</code></td><td>Bandpass structure-function colormap for scan 18.</td></tr>
+        <tr><td>Bandpass self-corr antenna</td><td><a href="sample_plots/gdp-plot-self-corr-antenna-bandpass-scan18-ant0.png">gdp-plot-self-corr-antenna-bandpass-scan18-ant0.png</a></td><td><code>script/gdp-plot --mode bandpass --scan 18 -pmode self-corr-antenna --antenna "[0-29]"</code></td><td>One bandpass structure-function curve plot is written per selected antenna; antenna 0 is linked as the representative sample.</td></tr>
       </table>
     </section>
   </main>

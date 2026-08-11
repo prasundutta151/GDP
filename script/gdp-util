@@ -298,39 +298,119 @@ def open_table_for_spw(path: Path) -> Path:
     return spw if spw.is_dir() else path
 
 
-def channel_width(path: Path) -> Dict[str, Any]:
+def positive_finite(values: np.ndarray) -> np.ndarray:
+    arr = np.asarray(values, dtype=float).ravel()
+    return arr[np.isfinite(arr) & (arr > 0)]
+
+
+def value_stats(values: np.ndarray, prefix: str, unit: str, scale: float = 1.0) -> Dict[str, Any]:
+    valid = positive_finite(values) / scale
+    if valid.size == 0:
+        raise RuntimeError(f"No valid positive {prefix.replace('_', ' ')} values found.")
+    return {
+        f"n_{prefix}": int(valid.size),
+        f"{prefix}_{unit}_mean": float(np.mean(valid)),
+        f"{prefix}_{unit}_min": float(np.min(valid)),
+        f"{prefix}_{unit}_max": float(np.max(valid)),
+    }
+
+
+def mean_positive_finite(values: np.ndarray, scale: float = 1.0) -> float:
+    valid = positive_finite(values) / scale
+    if valid.size == 0:
+        raise RuntimeError("No valid positive values found.")
+    return float(np.mean(valid))
+
+
+def scaled_frequency_value(prefix: str, value_hz: float) -> Dict[str, float]:
+    abs_value = abs(float(value_hz))
+    if abs_value >= 1e6:
+        return {f"{prefix}_MHz": float(value_hz) / 1e6}
+    return {f"{prefix}_kHz": float(value_hz) / 1e3}
+
+
+def channel_width_values_hz(table_path: Path) -> np.ndarray:
     casatable = casatable_factory()
-    table_path = open_table_for_spw(path)
     tb = casatable()
     tb.open(str(table_path))
     try:
         cols = tb.colnames()
         if "CHANNEL_WIDTH" in cols:
-            widths = np.asarray(tb.getcol("CHANNEL_WIDTH"), dtype=float)
-        elif "CHAN_WIDTH" in cols:
-            widths = np.asarray(tb.getcol("CHAN_WIDTH"), dtype=float)
-        elif "CHAN_FREQ" in cols:
+            return np.abs(np.asarray(tb.getcol("CHANNEL_WIDTH"), dtype=float))
+        if "CHAN_WIDTH" in cols:
+            return np.abs(np.asarray(tb.getcol("CHAN_WIDTH"), dtype=float))
+        if "CHAN_FREQ" in cols:
             freq = np.asarray(tb.getcol("CHAN_FREQ"), dtype=float)
-            freq = freq.reshape((-1, freq.shape[-1])) if freq.ndim > 1 else freq.reshape((-1, 1))
-            widths = np.diff(freq, axis=0)
-        else:
-            raise RuntimeError(f"No CHANNEL_WIDTH/CHAN_WIDTH/CHAN_FREQ column in {table_path}")
+            if freq.ndim == 1:
+                return np.abs(np.diff(freq))
+            return np.abs(np.diff(freq, axis=0))
+        raise RuntimeError(f"No CHANNEL_WIDTH/CHAN_WIDTH/CHAN_FREQ column in {table_path}")
     finally:
         tb.close()
 
-    widths_hz = np.abs(widths).ravel()
-    widths_hz = widths_hz[np.isfinite(widths_hz) & (widths_hz > 0)]
-    if widths_hz.size == 0:
-        raise RuntimeError(f"No valid positive channel widths found in {table_path}")
-    widths_mhz = widths_hz / 1e6
-    return {
-        "path": str(path),
-        "table_used": str(table_path),
-        "n_width": int(widths_mhz.size),
-        "channel_width_mhz_mean": float(np.mean(widths_mhz)),
-        "channel_width_mhz_min": float(np.min(widths_mhz)),
-        "channel_width_mhz_max": float(np.max(widths_mhz)),
-    }
+
+def channel_width(path: Path) -> Dict[str, Any]:
+    table_path = open_table_for_spw(path)
+    return scaled_frequency_value("chan-width", mean_positive_finite(channel_width_values_hz(table_path)))
+
+
+def band_width(path: Path) -> Dict[str, Any]:
+    table_path = open_table_for_spw(path)
+    casatable = casatable_factory()
+    tb = casatable()
+    tb.open(str(table_path))
+    try:
+        cols = tb.colnames()
+        if "TOTAL_BANDWIDTH" in cols:
+            widths = np.asarray(tb.getcol("TOTAL_BANDWIDTH"), dtype=float)
+        elif "BANDWIDTH" in cols:
+            widths = np.asarray(tb.getcol("BANDWIDTH"), dtype=float)
+        elif "CHANNEL_WIDTH" in cols:
+            chan_widths = np.abs(np.asarray(tb.getcol("CHANNEL_WIDTH"), dtype=float))
+            widths = np.sum(chan_widths, axis=0) if chan_widths.ndim > 1 else np.asarray([np.sum(chan_widths)])
+        elif "CHAN_WIDTH" in cols:
+            chan_widths = np.abs(np.asarray(tb.getcol("CHAN_WIDTH"), dtype=float))
+            widths = np.sum(chan_widths, axis=0) if chan_widths.ndim > 1 else np.asarray([np.sum(chan_widths)])
+        elif "CHAN_FREQ" in cols:
+            freq = np.asarray(tb.getcol("CHAN_FREQ"), dtype=float)
+            if freq.ndim == 1:
+                widths = np.asarray([np.nanmax(freq) - np.nanmin(freq)])
+            else:
+                widths = np.nanmax(freq, axis=0) - np.nanmin(freq, axis=0)
+        else:
+            raise RuntimeError(f"No TOTAL_BANDWIDTH/BANDWIDTH/CHANNEL_WIDTH/CHAN_WIDTH/CHAN_FREQ column in {table_path}")
+    finally:
+        tb.close()
+
+    return scaled_frequency_value("band-width", mean_positive_finite(np.abs(widths)))
+
+
+def integration_time(path: Path) -> Dict[str, Any]:
+    casatable = casatable_factory()
+    tb = casatable()
+    tb.open(str(path))
+    try:
+        cols = list(tb.colnames())
+        if "TIME" not in cols:
+            raise RuntimeError(f"No TIME column in {path}")
+        times = np.asarray(tb.getcol("TIME"), dtype=float).ravel()
+        if "SCAN_NUMBER" in cols:
+            scans = np.asarray(tb.getcol("SCAN_NUMBER"), dtype=int).ravel()
+            valid_scan = scans[np.isfinite(times)]
+            if valid_scan.size:
+                scan = int(np.min(valid_scan))
+                times = times[scans == scan]
+    finally:
+        tb.close()
+
+    unique_times = np.unique(times[np.isfinite(times)])
+    if unique_times.size < 2:
+        raise RuntimeError(f"Need at least two unique TIME values to calculate integration time in {path}")
+    dt = np.diff(np.sort(unique_times))
+    valid_dt = positive_finite(dt)
+    if valid_dt.size == 0:
+        raise RuntimeError(f"No valid positive TIME differences found in {path}")
+    return {"integration-time_sec": float(np.median(valid_dt))}
 
 
 SAVED_TABLE = "__GDP_SAVED_TABLE__"
@@ -358,7 +438,35 @@ def resolve_input(value: Optional[str], gain_table: Optional[str], bandpass_tabl
     return Path(str(source)).expanduser().resolve()
 
 
+def resolve_bandpass_input(value: Optional[str], bandpass_table: Optional[str]) -> Path:
+    if bandpass_table:
+        return resolve_input(None, None, bandpass_table)
+    if value:
+        return Path(value).expanduser().resolve()
+    cfg = load_config()
+    source = cfg.get("bandpass_table")
+    if not source:
+        raise SystemExit("No saved bandpass_table is available. Run gdp-setup first or pass --bandpass-table PATH.")
+    return Path(str(source)).expanduser().resolve()
+
+
+def resolve_gain_input(value: Optional[str], gain_table: Optional[str]) -> Path:
+    if gain_table:
+        return resolve_input(None, gain_table, None)
+    if value:
+        return Path(value).expanduser().resolve()
+    cfg = load_config()
+    source = cfg.get("gain_table")
+    if not source:
+        raise SystemExit("No saved gain_table is available. Run gdp-setup first or pass --gain-table PATH.")
+    return Path(str(source)).expanduser().resolve()
+
+
 def print_human(title: str, data: Dict[str, Any]) -> None:
+    if all(str(key).startswith(("chan-width_", "band-width_", "integration-time_sec")) for key in data):
+        for key, value in data.items():
+            print(f"{key}: {value}")
+        return
     print(title)
     print("=" * len(title))
     for key, value in data.items():
@@ -400,7 +508,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--header", action="store_true", help="Print table header, columns, row count, and common IDs.")
     p.add_argument("--keywords", action="store_true", help="Include table keywords in --header output.")
     p.add_argument("--date", action="store_true", help="Print IST observing date/time span from TIME column.")
-    p.add_argument("--channel-width", action="store_true", help="Print channel-width statistics in MHz.")
+    p.add_argument("--channel-width", "--channelwidth", dest="channel_width", action="store_true", help="Print mean bandpass-table channel width in kHz or MHz.")
+    p.add_argument("--band-width", "--bandwidth", dest="band_width", action="store_true", help="Print mean bandpass-table total bandwidth in kHz or MHz.")
+    p.add_argument("--integration-time", action="store_true", help="Print median gain-table integration time from TIME differences in one scan.")
     p.add_argument("--config", action="store_true", help="Print saved GDP setup configuration.")
     p.add_argument(
         "--git-push",
@@ -429,7 +539,7 @@ def main() -> None:
         git_push_release(message=message, no_push=args.no_push)
         return
 
-    actions = [args.header, args.date, args.channel_width, args.config]
+    actions = [args.header, args.date, args.channel_width, args.band_width, args.integration_time, args.config]
     if not any(actions):
         args.header = True
 
@@ -437,7 +547,7 @@ def main() -> None:
     if args.config:
         results["config"] = load_config()
 
-    if args.header or args.date or args.channel_width:
+    if args.header or args.date:
         table = resolve_input(args.input_table_opt, args.gain_table, args.bandpass_table)
         if not table.exists():
             raise FileNotFoundError(f"Input table not found: {table}")
@@ -445,8 +555,21 @@ def main() -> None:
             results["header"] = table_header(table, include_keywords=args.keywords)
         if args.date:
             results["date"] = table_dates(table)
+
+    if args.integration_time:
+        table = resolve_gain_input(args.input_table_opt, args.gain_table)
+        if not table.exists():
+            raise FileNotFoundError(f"Gain table not found: {table}")
+        results["integration_time"] = integration_time(table)
+
+    if args.channel_width or args.band_width:
+        table = resolve_bandpass_input(args.input_table_opt, args.bandpass_table)
+        if not table.exists():
+            raise FileNotFoundError(f"Bandpass table not found: {table}")
         if args.channel_width:
             results["channel_width"] = channel_width(table)
+        if args.band_width:
+            results["band_width"] = band_width(table)
 
     if args.json:
         print(json.dumps(results, indent=2, sort_keys=True))

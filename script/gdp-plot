@@ -237,17 +237,6 @@ def scan_text(scans: Optional[List[int]]) -> str:
     return "allscans" if scans is None else "scan" + "-".join(str(s) for s in scans)
 
 
-def channel_tag(mode: str, bchan: Optional[int], echan: Optional[int]) -> str:
-    if mode == "bandpass" and bchan is not None and echan is not None:
-        return f"chan_{int(bchan)}_{int(echan)}"
-    return ""
-
-
-def label_with_channel(scan_label: str, mode: str, bchan: Optional[int], echan: Optional[int]) -> str:
-    tag = channel_tag(mode, bchan, echan)
-    return f"{scan_label}-{tag}" if tag else scan_label
-
-
 def plot_channel_tag(pchans: Optional[Tuple[int, int]]) -> str:
     if pchans is None:
         return ""
@@ -263,10 +252,6 @@ def validate_channel_options_for_mode(mode: str, args: argparse.Namespace, pchan
     if mode != "gain":
         return
     used = []
-    if args.bchan is not None:
-        used.append("--bchan")
-    if args.echan is not None:
-        used.append("--echan")
     if pchans is not None:
         used.append("-pchans/--pchans")
     if used:
@@ -296,28 +281,21 @@ def default_product_path(
     product: str,
     mode: str,
     scan_label: str,
-    bchan: Optional[int] = None,
-    echan: Optional[int] = None,
     flagver: Optional[int] = None,
 ) -> Path:
     product_name, _, _ = PRODUCTS[product]
-    output_label = label_with_channel(scan_label, mode, bchan, echan)
-    path = default_product_dir(product) / f"gdp-{product_name.replace('_', '-')}-{mode}-{output_label}.npz"
+    path = default_product_dir(product) / f"gdp-{product_name.replace('_', '-')}-{mode}-{scan_label}.npz"
     return path_with_flag_version(path, flagver)
 
 
 def discover_scan_products(
     product: str,
     mode: str,
-    bchan: Optional[int] = None,
-    echan: Optional[int] = None,
     flagver: Optional[int] = None,
 ) -> List[Tuple[str, Path]]:
     product_name, _, _ = PRODUCTS[product]
-    tag = channel_tag(mode, bchan, echan)
-    suffix = f"-{tag}" if tag else ""
     flag_suffix = flag_version_suffix(flagver) if flagver is not None else ""
-    pattern = f"gdp-{product_name.replace('_', '-')}-{mode}-scan*{suffix}{flag_suffix}.npz"
+    pattern = f"gdp-{product_name.replace('_', '-')}-{mode}-scan*{flag_suffix}.npz"
     found = []
     for path in sorted(default_product_dir(product).glob(pattern)):
         label = path.stem.split(f"gdp-{product_name.replace('_', '-')}-{mode}-", 1)[-1]
@@ -327,16 +305,14 @@ def discover_scan_products(
     return found
 
 
-def discover_flagged_scan_products(product: str, mode: str, bchan: Optional[int] = None, echan: Optional[int] = None) -> List[Tuple[str, Path]]:
+def discover_flagged_scan_products(product: str, mode: str) -> List[Tuple[str, Path]]:
     product_name, _, _ = PRODUCTS[product]
-    tag = channel_tag(mode, bchan, echan)
-    suffix = f"-{tag}" if tag else ""
     prefix = f"gdp-{product_name.replace('_', '-')}-{mode}-"
-    pattern = f"{prefix}scan*{suffix}_fV*.npz"
+    pattern = f"{prefix}scan*_fV*.npz"
     latest: Dict[str, Tuple[int, Path]] = {}
     for path in sorted(default_product_dir(product).glob(pattern)):
         label = path.stem.split(prefix, 1)[-1]
-        match = re.fullmatch(rf"(.+{re.escape(suffix)})_fV(\d+)", label)
+        match = re.fullmatch(r"(.+)_fV(\d+)", label)
         if not match:
             continue
         base_label, version_text = match.groups()
@@ -378,7 +354,7 @@ def product_message_name(product: str) -> str:
 
 
 def gains_product_path_for_label(mode: str, scan_label: str, args: argparse.Namespace) -> Path:
-    return default_product_path("gain_colormap", mode, scan_label, args.bchan, args.echan)
+    return default_product_path("gain_colormap", mode, scan_label)
 
 
 def product_file_flag_version(product: str, mode: str, scan_label: str, args: argparse.Namespace) -> Optional[int]:
@@ -428,7 +404,7 @@ def plot_output_flag_version(npz_path: Path, args: argparse.Namespace) -> Option
 
 def ensure_npz(product: str, mode: str, args: argparse.Namespace, scans: Optional[List[int]], scan_label: str) -> Path:
     product_flagver = product_file_flag_version(product, mode, scan_label, args)
-    path = default_product_path(product, mode, scan_label, args.bchan, args.echan, product_flagver)
+    path = default_product_path(product, mode, scan_label, flagver=product_flagver)
     if path.exists() and not args.recompute and not (product_requires_flagged_file(product, args) and product_flagver is None):
         print(f"Using existing {product_message_name(product)}: {path}")
         return path
@@ -469,10 +445,6 @@ def ensure_npz(product: str, mode: str, args: argparse.Namespace, scans: Optiona
         cmd.extend(["--scan", ",".join(str(s) for s in scans)])
     if args.antenna:
         cmd.extend(["--antennas", args.antenna])
-    if args.bchan is not None:
-        cmd.extend(["--bchan", str(args.bchan)])
-    if args.echan is not None:
-        cmd.extend(["--echan", str(args.echan)])
     if args.use_flags:
         cmd.append("--use-flags")
     if args.flagver is not None:
@@ -498,7 +470,7 @@ def ensure_npzs(product: str, mode: str, args: argparse.Namespace, scans: Option
 
     if args.combine_scans:
         label = scan_text(scans)
-        return [(label_with_channel(label, mode, args.bchan, args.echan), ensure_npz(product, mode, args, scans, label))]
+        return [(label, ensure_npz(product, mode, args, scans, label))]
 
     if scans is not None:
         labels = [f"scan{int(scan)}" for scan in scans]
@@ -509,16 +481,16 @@ def ensure_npzs(product: str, mode: str, args: argparse.Namespace, scans: Option
                 continue
             existing.append(
                 (
-                    label_with_channel(label, mode, args.bchan, args.echan),
-                    default_product_path(product, mode, label, args.bchan, args.echan, product_flagver),
+                    label,
+                    default_product_path(product, mode, label, flagver=product_flagver),
                 )
             )
     else:
         discover_flagver = None if not args.use_flags or product in {"gain_colormap", "gain_hist", "reim", "antenna", "stats"} else args.flagver
         if args.use_flags and product not in {"gain_colormap", "gain_hist", "reim", "antenna", "stats"} and args.flagver is None:
-            existing = discover_flagged_scan_products(product, mode, args.bchan, args.echan)
+            existing = discover_flagged_scan_products(product, mode)
         else:
-            existing = discover_scan_products(product, mode, args.bchan, args.echan, discover_flagver)
+            existing = discover_scan_products(product, mode, flagver=discover_flagver)
         labels = [label for label, _ in existing]
     if existing and not args.recompute and all(path.exists() for _, path in existing):
         for _, path in existing:
@@ -549,10 +521,6 @@ def ensure_npzs(product: str, mode: str, args: argparse.Namespace, scans: Option
         cmd.extend(["--scan", ",".join(str(s) for s in scans)])
     if args.antenna:
         cmd.extend(["--antennas", args.antenna])
-    if args.bchan is not None:
-        cmd.extend(["--bchan", str(args.bchan)])
-    if args.echan is not None:
-        cmd.extend(["--echan", str(args.echan)])
     if args.use_flags:
         cmd.append("--use-flags")
     if args.flagver is not None:
@@ -572,16 +540,16 @@ def ensure_npzs(product: str, mode: str, args: argparse.Namespace, scans: Option
                 continue
             result.append(
                 (
-                    label_with_channel(label, mode, args.bchan, args.echan),
-                    default_product_path(product, mode, label, args.bchan, args.echan, product_flagver),
+                    label,
+                    default_product_path(product, mode, label, flagver=product_flagver),
                 )
             )
     else:
         discover_flagver = None if not args.use_flags or product in {"gain_colormap", "gain_hist", "reim", "antenna", "stats"} else args.flagver
         if args.use_flags and product not in {"gain_colormap", "gain_hist", "reim", "antenna", "stats"} and args.flagver is None:
-            result = discover_flagged_scan_products(product, mode, args.bchan, args.echan)
+            result = discover_flagged_scan_products(product, mode)
         else:
-            result = discover_scan_products(product, mode, args.bchan, args.echan, discover_flagver)
+            result = discover_scan_products(product, mode, flagver=discover_flagver)
     missing = [str(path) for _, path in result if not path.exists()]
     if missing:
         raise FileNotFoundError(f"Missing expected per-scan products: {missing}")
@@ -2350,8 +2318,6 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--scan", default=None, help="Comma-separated scans. Must match or create the corresponding GDP products.")
     p.add_argument("--combine-scans", action="store_true", help="Plot one combined allscans-style product. Default: false, make one plot per scan.")
     p.add_argument("--antenna", nargs="+", default=None, help="Antenna list, inclusive range, or mixed selection. Examples: --antenna [0-9] for antennas 0 through 9; --antenna 2,3,4,31 or --antenna 2 3 4 31 for explicit antenna IDs; --antenna \"[1-5]\" 6 \"[9-12]\" 15 16 19 for mixed ranges and single antennas. The same list is passed to gdp-stats if missing products must be created.")
-    p.add_argument("--bchan", type=int, default=None, help="Bandpass start channel passed to gdp-stats when needed.")
-    p.add_argument("--echan", type=int, default=None, help="Bandpass end channel passed to gdp-stats when needed.")
     p.add_argument("-pchans", "--pchans", nargs="+", default=None, help="Plot channel window as '[start-end]' with an inclusive end channel. Limits gains-based plots and subplot statistics without changing NPZ product discovery.")
     p.add_argument("--range", dest="plot_range", type=float, default=None, help="Colormap saturation half-range in percent for gain or bandpass -pmode colormap. The value is rounded up to a multiple of 5 for colorbar labels.")
     p.add_argument("--gain-colormap", action="store_true", help=argparse.SUPPRESS)

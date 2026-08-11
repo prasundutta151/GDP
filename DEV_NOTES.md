@@ -2567,3 +2567,161 @@ Notes
   write-back path could not be live-tested in this environment; the new code
   uses the same CASA table API family GDP already depends on and degrades
   quietly if optional metadata methods are unavailable.
+
+## 2026-08-10 17:15:00 IST
+
+Prompt / Request
+- In `gdp-util`, add options for channel width, band width, and integration
+  time, reporting the mean value when multiple values are present.
+
+Changes Made
+- Kept `--channel-width` as the per-channel width summary and added shared
+  positive finite mean/min/max statistics.
+- Added `--band-width` with `--bandwidth` as an alias for total band-width
+  summaries in MHz, preferring `TOTAL_BANDWIDTH` and falling back to summed
+  channel widths where needed.
+- Added `--integration-time` summaries in seconds, preferring `INTERVAL` and
+  falling back to `EXPOSURE`.
+- Updated `doc/gdp-util.html` and `doc/README.md` examples/options.
+
+Verification
+- `python3 -m py_compile script/gdp-util`
+- `script/gdp-util --help`
+
+## 2026-08-10 17:25:00 IST
+
+Prompt / Request
+- Remove self-correlation from `gdp-stats --smode all`; keep self-correlation
+  available only as its separate `--smode self-corr` option.
+
+Changes Made
+- Changed `SMODE_ALL_TASKS` in `script/gdp-stats` so `all` expands only to
+  `gains`, `stats`, and `ks`.
+- Updated `gdp-stats` and README documentation examples to describe
+  self-correlation as an explicit separate mode.
+
+Verification
+- `python3 -m py_compile script/gdp-stats`
+- `script/gdp-stats --help`
+- Verified `parse_smode("all")` expands to `["gains", "stats", "ks"]`.
+
+## 2026-08-10 17:35:00 IST
+
+Prompt / Request
+- In `gdp-util`, read channel width and band width from the bandpass table, and
+  read integration time from the `INTERVAL` keyword.
+
+Changes Made
+- Changed channel-width and band-width action resolution so, when no explicit
+  table is supplied, they use the saved `bandpass_table` rather than falling
+  back to the saved gain table first.
+- Changed `--integration-time` to read the table `INTERVAL` keyword instead of
+  reading the `INTERVAL` or `EXPOSURE` columns.
+- Updated CLI help and `gdp-util` documentation to describe the source of each
+  value.
+
+Verification
+- `python3 -m py_compile script/gdp-util`
+- `script/gdp-util --help`
+
+## 2026-08-10 17:45:00 IST
+
+Prompt / Request
+- Keep verbose antenna flag-fraction threshold intent messages in the
+  `gdp-flag` log, but shorten the terminal output to only
+  `ANTENNA FLAG FRACTION THRESHOLD FLAGS:`.
+- Apply the same terminal shortening to all other flag-type intent messages.
+
+Changes Made
+- Added `TaskLogger.terminal_line()` in `script/gdp-flag` to truncate only
+  terminal display for flag-intent lines containing `FLAGS:`.
+- Kept the underlying file log write unchanged, so the full per-antenna detail
+  remains in the log file and flag intent metadata.
+
+Verification
+- `python3 -m py_compile script/gdp-flag`
+- Verified the terminal formatter truncates manual, threshold, antenna
+  fraction, and KS flag-intent lines while leaving short CASA flag lines
+  unchanged.
+
+## 2026-08-11 09:40:00 IST
+
+Prompt / Request
+- For `gdp-util --integration-time`, use the gain table and print
+  `integration-time_sec`.
+- For `--bandwidth` or `--channelwidth`, terminal output should print only
+  `band-width_hz` and `chan-width_hz` respectively.
+- Revise integration time to calculate the median positive difference between
+  MJD timestamp values in one scan, and print channel/band widths in kHz or MHz
+  as appropriate.
+
+Changes Made
+- Added `--channelwidth` as an alias for `--channel-width`.
+- Changed channel-width and bandwidth summaries to return a single mean value
+  with unit-aware keys such as `chan-width_kHz` or `band-width_MHz`.
+- Changed integration-time resolution to default to the saved gain table and
+  calculate `integration-time_sec` as the median positive spacing between
+  unique `TIME` values in the first available scan.
+
+Verification
+- `python3 -m py_compile script/gdp-util`
+- `script/gdp-util --help`
+
+## 2026-08-11 10:05:00 IST
+
+Prompt / Request
+- Align the workflow so `gdp-stats` first writes gain/bandpass NPZ products,
+  then `gdp-flag` creates flag versions, then other stat modes and plotting are
+  run.
+- Correct `gdp-stats` default naming so data product filenames do not include
+  channel selections or antenna selections. Plot filenames may still include
+  specific channel or antenna selections.
+
+Changes Made
+- Changed `gdp-stats` default output labels to use only the scan label for
+  gains, stats, KS, and self-corr products.
+- Changed `gdp-flag` matching gains-product base to use the same channel-free
+  filename convention, so `.flg` sidecars remain aligned with the gains NPZ.
+- Changed `gdp-plot` source-product discovery and missing-product creation to
+  look for channel-free `gdp-stats` products, while preserving plot output
+  channel/antenna tags.
+- Added `--smode gain` as an alias for `--smode gains`.
+- Updated stats and product documentation to describe the channel-free data
+  product naming convention.
+
+Verification
+- `python3 -m py_compile script/gdp-stats script/gdp-flag script/gdp-plot`
+- Verified default `gdp-stats` and `gdp-plot` source product path helpers omit
+  `-chan_<bchan>_<echan>`.
+
+## 2026-08-11 10:35:00 IST
+
+Prompt / Request
+- Remove the now-unneeded `--bchan` and `--echan` options from stats and
+  plots.
+- Check that no functionality goes missing from the new workflow.
+
+Changes Made
+- Removed `--bchan` and `--echan` from the `gdp-stats` and `gdp-plot`
+  user-facing CLIs.
+- Kept `gdp-stats` products full-channel and channel-free by default:
+  `gdp-gains-<mode>-<scan>.npz`, `gdp-stats-<mode>-<scan>.npz`, and
+  `gdp-ks-<mode>-<scan>.npz`.
+- Kept plot-only channel selection through `gdp-plot -pchans`, so focused
+  bandpass plots can still be made without changing source NPZ names.
+- Kept antenna-specific plot naming for plot modes that create selected-antenna
+  outputs.
+- Preserved the internal channel-window helper arguments used by `gdp-flag`,
+  so legacy flag workflows and manual channel flagging are not broken while
+  stats/plot CLIs stay simplified.
+- Updated the main workflow documentation and HTML examples to stop showing
+  `--bchan` / `--echan` for stats and plot commands.
+
+Functionality Check
+- Source data products are now always full-channel products, so later flagging,
+  stats, and plotting can reuse the same product base.
+- Channel-specific flagging remains available through `gdp-flag --fmode
+  man-chan --man-chan ...`.
+- Plot-only channel windows remain available through `gdp-plot -pchans ...`.
+- `--smode all` remains limited to `gains`, `stats`, and `ks`; self-correlation
+  remains a separate explicit `--smode self-corr` task.

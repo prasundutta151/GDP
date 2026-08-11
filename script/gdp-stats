@@ -22,8 +22,9 @@ COMPONENTS = np.array(["real", "imag"], dtype=object)
 METRICS = np.array(["mean", "std", "skew", "kurtosis", "median", "mad", "min", "max"], dtype=object)
 KS_METRICS = np.array(["d_statistic", "n_sample", "mean", "std"], dtype=object)
 CORR_COMPONENTS = ("real", "imag")
-SMODE_ALL_TASKS = ["gains", "stats", "ks", "self_corr"]
+SMODE_ALL_TASKS = ["gains", "stats", "ks"]
 SMODE_ALIASES = {
+    "gain": "gains",
     "gains": "gains",
     "stats": "stats",
     "ks": "ks",
@@ -146,18 +147,7 @@ def antenna_flag_set(antenna_flags: Optional[List[int]]) -> set[int]:
 
 
 def validate_channel_options_for_mode(mode: str, args: argparse.Namespace) -> None:
-    if mode != "gain":
-        return
-    used = []
-    if args.bchan is not None:
-        used.append("--bchan")
-    if args.echan is not None:
-        used.append("--echan")
-    if used:
-        raise SystemExit(
-            "Channel options are valid only in bandpass mode. "
-            f"Remove {', '.join(used)} or run with --mode bandpass."
-        )
+    return
 
 
 def parse_smode(text: Optional[str]) -> List[str]:
@@ -169,7 +159,7 @@ def parse_smode(text: Optional[str]) -> List[str]:
         if not key:
             continue
         if key not in SMODE_ALIASES:
-            valid = ", ".join(["gains", "stats", "ks", "self-corr", "all", "cross-corr"])
+            valid = ", ".join(["gain", "gains", "stats", "ks", "self-corr", "all", "cross-corr"])
             raise SystemExit(f"Unknown smode '{key}'. Valid modes: {valid}")
         task = SMODE_ALIASES[key]
         if task == "all":
@@ -1388,8 +1378,6 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--scan", default=None, help="Comma-separated scans to process. Default: all scans.")
     p.add_argument("--combine-scans", action="store_true", help="Combine selected scans into one allscans-style product. Default: false, write one product per scan.")
     p.add_argument("--antennas", nargs="+", default=None, help="Antenna list, inclusive range, or mixed selection. Examples: --antennas [0-9] for antennas 0 through 9; --antennas 2,3,4,31 or --antennas 2 3 4 31 for explicit antenna IDs; --antennas \"[1-5]\" 6 \"[9-12]\" 15 16 19 for mixed ranges and single antennas. Default: all antennas.")
-    p.add_argument("--bchan", type=int, default=None, help="Start channel, inclusive.")
-    p.add_argument("--echan", type=int, default=None, help="End channel, exclusive.")
     p.add_argument("--use-flags", action="store_true", help="Apply the matching GDP .flg sidecar to flagged stats, KS, self-corr, or placeholder cross-corr products. Default: false.")
     p.add_argument("--flagver", default=None, help="Flag sidecar version. With --smode gains, write NAME_fV<version>.flg; if omitted, write the next version. With --use-flags consumers, use this version; if omitted, use the highest available version and add _fV<version> to default output product names.")
     p.add_argument(
@@ -1476,7 +1464,7 @@ def run_batch(
     if antenna_flags:
         logger.write("force-flag antennas: " + ",".join(str(ant) for ant in antenna_flags))
     stats_result: Optional[Dict[str, Any]] = None
-    output_label = label_with_channel(scan_label, mode, args.bchan, args.echan)
+    output_label = scan_label
     gains_out = Path(args.output_gains_npz).expanduser().resolve() if args.output_gains_npz else build_default_output(input_table, output_label, mode, "gains", "npz")
     flag_lookup: Optional[Dict[Tuple[int, int, int], bool]] = None
     flag_header: Dict[str, Any] = {}
@@ -1497,7 +1485,7 @@ def run_batch(
 
     if args.gains:
         t0 = logger.start(f"gains {scan_label}")
-        gains = compute_gains(input_table, mode, scans, antennas, antenna_flags, args.use_flags, args.bchan, args.echan, args.flag_chans, None)
+        gains = compute_gains(input_table, mode, scans, antennas, antenna_flags, args.use_flags, None, None, args.flag_chans, None)
         out = gains_out
         write_npz(out, gains)
         logger.write(f"Wrote gains NPZ: {out}")
@@ -1514,7 +1502,7 @@ def run_batch(
 
     if args.stats:
         t0 = logger.start(f"stats {scan_label}")
-        stats_result = compute_stats(input_table, mode, scans, antennas, antenna_flags, args.use_flags, False, args.bchan, args.echan, args.flag_chans, flag_lookup)
+        stats_result = compute_stats(input_table, mode, scans, antennas, antenna_flags, args.use_flags, False, None, None, args.flag_chans, flag_lookup)
         if flag_header:
             stats_result["header"]["flag_file_version"] = flag_header.get("flag_version")
         out = Path(args.output_npz).expanduser().resolve() if args.output_npz else path_with_flag_version(build_default_output(input_table, output_label, mode, "stats", "npz"), applied_flag_version)
@@ -1528,7 +1516,7 @@ def run_batch(
 
     if args.ks:
         t0 = logger.start(f"ks {scan_label}")
-        ks = compute_ks(input_table, mode, scans, antennas, antenna_flags, args.use_flags, args.bchan, args.echan, args.flag_chans, flag_lookup)
+        ks = compute_ks(input_table, mode, scans, antennas, antenna_flags, args.use_flags, None, None, args.flag_chans, flag_lookup)
         if flag_header:
             ks["header"]["flag_file_version"] = flag_header.get("flag_version")
         out = Path(args.output_ks_npz).expanduser().resolve() if args.output_ks_npz else path_with_flag_version(build_default_output(input_table, output_label, mode, "ks", "npz"), applied_flag_version)
@@ -1545,8 +1533,8 @@ def run_batch(
             antennas,
             antenna_flags,
             args.use_flags,
-            args.bchan,
-            args.echan,
+            None,
+            None,
             args.flag_chans,
             args.corr_nbin,
             args.corr_bintype,
@@ -1572,7 +1560,7 @@ def main() -> None:
     apply_smode(args)
     mode = args.mode
     if mode == "auto":
-        mode = "bandpass" if args.bandpass_table or args.bchan is not None or args.echan is not None else "gain"
+        mode = "bandpass" if args.bandpass_table else "gain"
     explicit_input = args.input_table_opt
     mode_input = args.bandpass_table if mode == "bandpass" else args.gain_table
     input_table = resolve_input(explicit_input or mode_input, mode)
