@@ -1143,6 +1143,79 @@ def tcorr_from_s2(tau: np.ndarray, s2: np.ndarray, threshold: float) -> float:
     return float(t[i - 1] + (threshold - y0) * (t[i] - t[i - 1]) / (y1 - y0))
 
 
+def smooth_s2_curve(tau: np.ndarray, s2: np.ndarray, err: Optional[np.ndarray] = None) -> Tuple[np.ndarray, np.ndarray]:
+    x = np.asarray(tau, dtype=float)
+    y = np.asarray(s2, dtype=float)
+    e = np.asarray(err, dtype=float) if err is not None else np.full(y.shape, np.nan, dtype=float)
+    valid = np.isfinite(x) & np.isfinite(y) & (x > 0)
+    x = x[valid]
+    y = y[valid]
+    e = e[valid] if e.shape == valid.shape else np.full(x.shape, np.nan, dtype=float)
+    if x.size < 2:
+        return x, y
+    order = np.argsort(x)
+    x = x[order]
+    y = y[order]
+    e = e[order]
+    logx = np.log10(x)
+    finite_err = np.isfinite(e) & (e > 0)
+    weights = 1.0 / np.square(e[finite_err]) if np.any(finite_err) else None
+    degree = min(3, x.size - 1)
+    if x.size >= 4:
+        try:
+            coeff = np.polyfit(logx[finite_err] if np.any(finite_err) else logx, y[finite_err] if np.any(finite_err) else y, degree, w=weights)
+            grid = np.logspace(float(np.nanmin(logx)), float(np.nanmax(logx)), 512)
+            smooth = np.polyval(coeff, np.log10(grid))
+            return grid, smooth
+        except Exception:
+            pass
+    return x, y
+
+
+def crossing_from_curve(x: np.ndarray, y: np.ndarray, threshold: float) -> float:
+    valid = np.isfinite(x) & np.isfinite(y)
+    x = np.asarray(x, dtype=float)[valid]
+    y = np.asarray(y, dtype=float)[valid]
+    if x.size < 2:
+        return np.nan
+    order = np.argsort(x)
+    x = x[order]
+    y = y[order]
+    if y[0] >= threshold:
+        return float(x[0])
+    above = np.where(y >= threshold)[0]
+    if above.size == 0:
+        return np.nan
+    idx = int(above[0])
+    if idx == 0:
+        return float(x[0])
+    x0, x1 = float(x[idx - 1]), float(x[idx])
+    y0, y1 = float(y[idx - 1]), float(y[idx])
+    if not all(np.isfinite(v) for v in (x0, x1, y0, y1)) or y1 == y0:
+        return x1
+    return float(x0 + (threshold - y0) * (x1 - x0) / (y1 - y0))
+
+
+def estimate_corr_lag(tau: np.ndarray, s2: np.ndarray, err: np.ndarray, threshold: float) -> Tuple[float, float]:
+    x_smooth, y_smooth = smooth_s2_curve(tau, s2, err)
+    corr = crossing_from_curve(x_smooth, y_smooth, threshold)
+    finite = np.isfinite(tau) & np.isfinite(s2) & np.isfinite(err) & (err > 0)
+    if np.count_nonzero(finite) < 3:
+        return corr, np.nan
+    rng = np.random.default_rng(20260812)
+    samples: List[float] = []
+    tau_f = np.asarray(tau, dtype=float)[finite]
+    s2_f = np.asarray(s2, dtype=float)[finite]
+    err_f = np.asarray(err, dtype=float)[finite]
+    for _ in range(64):
+        perturbed = s2_f + rng.normal(0.0, err_f)
+        sx, sy = smooth_s2_curve(tau_f, perturbed, err_f)
+        value = crossing_from_curve(sx, sy, threshold)
+        if np.isfinite(value):
+            samples.append(float(value))
+    return corr, float(np.nanstd(np.asarray(samples, dtype=float))) if len(samples) > 1 else np.nan
+
+
 def read_series(
     input_table: Path,
     mode: str,
@@ -1244,10 +1317,41 @@ def compute_self_corr(
     nbin: int,
     bintype: str,
     njack: int,
+    threshold: float,
     flag_lookup: Optional[Dict[Tuple[int, int, int], bool]] = None,
 ) -> Dict[str, Any]:
     series, meta = read_series(input_table, mode, scans, antennas, antenna_flags, use_flags, bchan, echan, flag_chans, flag_lookup)
+    if mode == "bandpass":
+        spw_info = spectral_window_info(input_table)
+        channel_width_hz = spw_info.get("channel_width_hz")
+        if channel_width_hz is not None:
+            width_slice = np.asarray(channel_width_hz, dtype=float)
+            if bchan is not None or echan is not None:
+                start = 0 if bchan is None else int(bchan)
+                stop = width_slice.size if echan is None else min(int(echan), width_slice.size)
+                width_slice = width_slice[start:stop]
+            finite_widths = np.abs(width_slice[np.isfinite(width_slice) & (width_slice != 0)])
+            if finite_widths.size:
+                meta["channel_width_hz"] = float(np.nanmedian(finite_widths))
+                meta["channel_width_khz"] = float(np.nanmedian(finite_widths) / 1.0e3)
     rows = {k: [] for k in ["scan", "antenna", "stokes", "component", "tau", "s2", "err", "count"]}
+    corr_rows = {
+        k: []
+        for k in [
+            "scan",
+            "antenna",
+            "stokes",
+            "component",
+            "corr_lag",
+            "corr_lag_err",
+            "tcorr_sec",
+            "tcorr_sec_err",
+            "dnucorr_hz",
+            "dnucorr_hz_err",
+            "dnucorr_mhz",
+            "dnucorr_mhz_err",
+        ]
+    }
     skipped: List[Dict[str, Any]] = []
     scan_values = [int(v) for v in np.asarray(meta.get("scan_numbers", []), dtype=int)]
     ant_values = [int(v) for v in np.asarray(meta.get("antennas", []), dtype=int)]
@@ -1296,6 +1400,24 @@ def compute_self_corr(
                         )
                     else:
                         tau, s2, err, count = compute_structure_function(data, None, nbin=nbin, bintype=bintype, njack=njack, edges=edges)
+                    corr_lag, corr_lag_err = estimate_corr_lag(tau, s2, err, threshold)
+                    channel_width_hz = float(meta.get("channel_width_hz", np.nan))
+                    tcorr_sec = corr_lag if mode != "bandpass" else np.nan
+                    tcorr_sec_err = corr_lag_err if mode != "bandpass" else np.nan
+                    dnucorr_hz = corr_lag * channel_width_hz if mode == "bandpass" and np.isfinite(channel_width_hz) else np.nan
+                    dnucorr_hz_err = corr_lag_err * channel_width_hz if mode == "bandpass" and np.isfinite(channel_width_hz) else np.nan
+                    corr_rows["scan"].append(scan)
+                    corr_rows["antenna"].append(ant)
+                    corr_rows["stokes"].append(pol)
+                    corr_rows["component"].append(comp)
+                    corr_rows["corr_lag"].append(float(corr_lag) if np.isfinite(corr_lag) else np.nan)
+                    corr_rows["corr_lag_err"].append(float(corr_lag_err) if np.isfinite(corr_lag_err) else np.nan)
+                    corr_rows["tcorr_sec"].append(float(tcorr_sec) if np.isfinite(tcorr_sec) else np.nan)
+                    corr_rows["tcorr_sec_err"].append(float(tcorr_sec_err) if np.isfinite(tcorr_sec_err) else np.nan)
+                    corr_rows["dnucorr_hz"].append(float(dnucorr_hz) if np.isfinite(dnucorr_hz) else np.nan)
+                    corr_rows["dnucorr_hz_err"].append(float(dnucorr_hz_err) if np.isfinite(dnucorr_hz_err) else np.nan)
+                    corr_rows["dnucorr_mhz"].append(float(dnucorr_hz / 1.0e6) if np.isfinite(dnucorr_hz) else np.nan)
+                    corr_rows["dnucorr_mhz_err"].append(float(dnucorr_hz_err / 1.0e6) if np.isfinite(dnucorr_hz_err) else np.nan)
                     for i in range(tau.size):
                         rows["scan"].append(scan)
                         rows["antenna"].append(ant)
@@ -1314,10 +1436,20 @@ def compute_self_corr(
             "nbin": int(nbin),
             "bintype": bintype,
             "njack": int(njack),
+            "corr_threshold": float(threshold),
+            "corr_estimator": "weighted cubic polynomial smoothing in log10(lag), falling back to linear interpolation when needed",
             "columns": list(rows.keys()),
+            "corr_columns": list(corr_rows.keys()),
             "skipped": skipped,
         },
         **{k: np.asarray(v, dtype=object if k == "component" else float if k in {"tau", "s2", "err"} else int) for k, v in rows.items()},
+        **{
+            (k if k.startswith("corr_") else f"corr_{k}"): np.asarray(
+                v,
+                dtype=object if k == "component" else float if k not in {"scan", "antenna", "stokes"} else int,
+            )
+            for k, v in corr_rows.items()
+        },
     }
 
 
@@ -1456,7 +1588,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--output-self-corr-npz", default=None, help="Self-correlation NPZ path.")
     p.add_argument("--output-cross-corr-npz", default=None, help="Cross-correlation NPZ path.")
     p.add_argument("--output-cross-corr-csv", default=None, help="Reserved for future cross-correlation CSV output.")
-    p.add_argument("--corr-threshold", type=float, default=0.7, help="S2 threshold for correlation-time extraction.")
+    p.add_argument("--corr-threshold", type=float, default=0.7, help="Normalized S2 threshold for self-correlation time/frequency extraction. Default: 0.7.")
     p.add_argument("--corr-nbin", type=int, default=32, help="Structure-function lag bin count.")
     p.add_argument("--corr-bintype", choices=["log", "lin"], default="log", help="Structure-function lag binning.")
     p.add_argument("--corr-njack", type=int, default=32, help="Jackknife folds for structure-function errors.")
@@ -1602,6 +1734,7 @@ def run_batch(
             args.corr_nbin,
             args.corr_bintype,
             args.corr_njack,
+            args.corr_threshold,
             flag_lookup,
         )
         if flag_header:

@@ -916,6 +916,16 @@ def log_per_antenna_flag_summary(
             logger.write(
                 f"{antenna:7d}  {current_percent:8.2f}  {points:>7}  {percent:7.2f}"
             )
+    fully_flagged = [
+        int(antenna)
+        for antenna in sorted(int(ant) for ant in np.unique(antenna_values))
+        if np.count_nonzero(antenna_values == antenna) > 0
+        and np.all(flag_values[antenna_values == antenna])
+    ]
+    logger.write(
+        "Completely flagged antennas: "
+        + (format_int_values(fully_flagged) if fully_flagged else "none")
+    )
 
 
 def format_selection(values: Optional[Sequence[int]]) -> str:
@@ -1230,7 +1240,7 @@ def run_batch(
     logger.write(f"gdp-flag batch={scan_label}")
     gains_out = build_gains_output(input_table, scan_label, mode, args)
     t0 = logger.start(f"read-gains {scan_label}")
-    gains = GSTATS.compute_gains(input_table, mode, scans, selected_antennas, None, False, args.bchan, args.echan, None, None)
+    gains = GSTATS.compute_gains(input_table, mode, scans, selected_antennas, None, False, False, args.bchan, args.echan, None, None)
     if args.write_gains_npz or not gains_out.exists():
         GSTATS.write_npz(gains_out, gains)
         logger.write(f"Wrote gains NPZ for flag dimensions: {gains_out}")
@@ -1369,7 +1379,7 @@ def run_summary_batch(
     gains_out = build_gains_output(input_table, scan_label, mode, args)
     version, path = resolve_summary_flag_version(gains_out, args.summary_version, logger)
     t0 = logger.start(f"summary {scan_label}")
-    gains = GSTATS.compute_gains(input_table, mode, scans, selected_antennas, None, False, args.bchan, args.echan, None, None)
+    gains = GSTATS.compute_gains(input_table, mode, scans, selected_antennas, None, False, False, args.bchan, args.echan, None, None)
     flags, header = load_flag_file(path, gains)
     logger.write(f"Loaded flag file fV{version}: {path} flags={flag_count_text(flags)}")
     log_flag_intents(logger, normalize_flag_intents((header or {}).get("flag-intent")))
@@ -1401,6 +1411,7 @@ def run_apply_batch(
         scans,
         selected_antennas,
         None,
+        False,
         False,
         args.bchan,
         args.echan,

@@ -50,7 +50,7 @@
       <h2>Arrays</h2>
       <table>
         <tr><th>Array</th><th>Description</th></tr>
-        <tr><td><code>header_json</code></td><td>JSON metadata with correlation settings such as lag binning, bin count, jackknife folds, flag policy, GDP <code>.flg</code> flag version metadata.</td></tr>
+        <tr><td><code>header_json</code></td><td>JSON metadata with correlation settings such as lag binning, bin count, jackknife folds, S2 crossing threshold, flag policy, GDP <code>.flg</code> flag version metadata.</td></tr>
         <tr><td><code>scan</code></td><td>Scan number for each lag-bin row.</td></tr>
         <tr><td><code>antenna</code></td><td>Antenna ID for each lag-bin row.</td></tr>
         <tr><td><code>stokes</code></td><td>Stokes/polarization index.</td></tr>
@@ -59,7 +59,9 @@
         <tr><td><code>s2</code></td><td>Normalized order-2 structure-function value.</td></tr>
         <tr><td><code>err</code></td><td>Jackknife uncertainty when requested.</td></tr>
         <tr><td><code>count</code></td><td>Pair count contributing to the lag bin.</td></tr>
+        <tr><td><code>corr_*</code></td><td>One row per scan/antenna/Stokes/component with the fitted threshold crossing. Common arrays include <code>corr_lag</code>, <code>corr_lag_err</code>, <code>corr_tcorr_sec</code> for gain mode, and <code>corr_dnucorr_hz</code>/<code>corr_dnucorr_mhz</code> for bandpass mode.</td></tr>
       </table>
+      <p>The normalized S2 curve is smoothed in log-lag space before the threshold crossing is estimated. Jackknife errors are saved in <code>err</code>, and crossing uncertainties are estimated by perturbing finite S2 bins by their jackknife errors.</p>
       <p>If all samples for an antenna/stokes/component are flagged or non-finite, GDP keeps the expected lag-bin rows with <code>s2</code> and <code>err</code> set to NaN and <code>count</code> set to zero. Plotting code renders those bins as blank or white cells.</p>
     </section>
 

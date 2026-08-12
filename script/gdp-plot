@@ -40,6 +40,7 @@ PRODUCTS = {
     "ks": ("ks", "ks_npz_dir", "ks"),
     "self_corr_colormap": ("self_corr", "self_corr_npz_dir", "self-corr"),
     "self_corr_antenna": ("self_corr", "self_corr_npz_dir", "self-corr"),
+    "self_corr_all_ante": ("self_corr", "self_corr_npz_dir", "self-corr"),
     "cross_corr_colormap": ("cross_corr", "cross_corr_npz_dir", "cross-corr"),
 }
 ALL_PMODE_TASKS = ["gain_colormap", "gain_hist", "stats", "ks"]
@@ -64,6 +65,10 @@ PMODE_ALIASES = {
     "self_corr_colormap": "self_corr_colormap",
     "self-corr-antenna": "self_corr_antenna",
     "self_corr_antenna": "self_corr_antenna",
+    "self-corr-all-ante": "self_corr_all_ante",
+    "self_corr_all_ante": "self_corr_all_ante",
+    "self-corr-all-antenna": "self_corr_all_ante",
+    "self_corr_all_antenna": "self_corr_all_ante",
     "cross-corr-colormap": "cross_corr_colormap",
     "cross_corr_colormap": "cross_corr_colormap",
 }
@@ -440,6 +445,7 @@ def ensure_npz(product: str, mode: str, args: argparse.Namespace, scans: Optiona
         "ks": "ks",
         "self_corr_colormap": "self-corr",
         "self_corr_antenna": "self-corr",
+        "self_corr_all_ante": "self-corr",
         "cross_corr_colormap": "cross-corr",
     }[product]
     output_flag = {
@@ -451,6 +457,7 @@ def ensure_npz(product: str, mode: str, args: argparse.Namespace, scans: Optiona
         "ks": "--output-ks-npz",
         "self_corr_colormap": "--output-self-corr-npz",
         "self_corr_antenna": "--output-self-corr-npz",
+        "self_corr_all_ante": "--output-self-corr-npz",
         "cross_corr_colormap": "--output-cross-corr-npz",
     }[product]
 
@@ -530,6 +537,7 @@ def ensure_npzs(product: str, mode: str, args: argparse.Namespace, scans: Option
         "ks": "ks",
         "self_corr_colormap": "self-corr",
         "self_corr_antenna": "self-corr",
+        "self_corr_all_ante": "self-corr",
         "cross_corr_colormap": "cross-corr",
     }[product]
     cmd = [str(script_dir() / "gdp-stats"), "--mode", mode, "--smode", smode]
@@ -711,6 +719,288 @@ def apply_style(ax: Any, title: str, xlabel: str = "", ylabel: str = "") -> None
     ax.grid(False)
 
 
+def npz_header(z: Dict[str, np.ndarray]) -> Dict[str, Any]:
+    if "header_json" not in z:
+        return {}
+    try:
+        return json.loads(str(np.asarray(z["header_json"]).item()))
+    except Exception:
+        return {}
+
+
+def factor_lag_ticks(values: np.ndarray, factor: float = 4.0, max_ticks: int = 7) -> np.ndarray:
+    finite = np.asarray(values, dtype=float)
+    finite = finite[np.isfinite(finite) & (finite > 0)]
+    if finite.size == 0:
+        return np.asarray([], dtype=float)
+    start = float(np.nanmin(finite))
+    stop = float(np.nanmax(finite))
+    if not np.isfinite(start) or not np.isfinite(stop) or start <= 0.0:
+        return np.asarray([], dtype=float)
+    factor = float(factor) if np.isfinite(factor) and factor > 1.0 else 4.0
+    first = factor ** math.floor(math.log(start, factor))
+    if first < start:
+        first *= factor
+    ticks: List[float] = []
+    value = first
+    while value <= stop * (1.0 + 1.0e-9):
+        ticks.append(float(value))
+        value *= factor
+    if not ticks:
+        ticks = [start]
+    while len(ticks) > max(2, int(max_ticks)):
+        ticks = ticks[::2]
+    return np.asarray(ticks, dtype=float)
+
+
+def compact_tick_label(value: float) -> str:
+    value = float(value)
+    if not np.isfinite(value):
+        return ""
+    if abs(value - round(value)) < 1.0e-6:
+        return str(int(round(value)))
+    if abs(value) >= 10:
+        return f"{value:.1f}".rstrip("0").rstrip(".")
+    return f"{value:.3g}"
+
+
+def value_error_text(value: float, err: float, unit: str) -> str:
+    value = float(value)
+    err = float(err)
+    if not np.isfinite(value):
+        return ""
+    if np.isfinite(err) and err > 0:
+        exponent = math.floor(math.log10(abs(err))) if err != 0 else 0
+        decimals = max(0, 1 - exponent)
+        rounded_err = round(err, decimals)
+        if rounded_err >= 10:
+            decimals = 0
+        rounded_value = round(value, decimals)
+        return f"{rounded_value:.{decimals}f} +/- {rounded_err:.{decimals}f} {unit}"
+    return f"{value:.3g} {unit}"
+
+
+def ceil_channel_value_error_text(value: float, err: float) -> str:
+    value = float(value)
+    err = float(err)
+    if not np.isfinite(value):
+        return ""
+    value_text = str(int(math.ceil(value)))
+    if np.isfinite(err) and err > 0:
+        return f"{value_text} +/- {int(math.ceil(err))} chan"
+    return f"{value_text} chan"
+
+
+def self_corr_integration_time_sec(z: Dict[str, np.ndarray]) -> float:
+    header = npz_header(z)
+    for key in ("integration_time_sec", "interval_sec", "interval"):
+        try:
+            value = float(header.get(key, np.nan))
+        except (TypeError, ValueError):
+            value = np.nan
+        if np.isfinite(value) and value > 0:
+            return value
+    if "interval" in z:
+        intervals = np.asarray(z["interval"], dtype=float)
+        finite = intervals[np.isfinite(intervals) & (intervals > 0)]
+        if finite.size:
+            return float(np.nanmedian(finite))
+    if "time" in z:
+        times = np.unique(np.asarray(z["time"], dtype=float))
+        times = np.sort(times[np.isfinite(times)])
+        diffs = np.diff(times)
+        finite = diffs[np.isfinite(diffs) & (diffs > 0)]
+        if finite.size:
+            return float(np.nanmedian(finite))
+    return np.nan
+
+
+def frequency_delta_unit(width_khz: float, tick_values: np.ndarray) -> Tuple[float, str]:
+    values = np.asarray(tick_values, dtype=float)
+    finite = values[np.isfinite(values) & (values > 0)]
+    max_khz = float(np.nanmax(finite) * float(width_khz)) if finite.size and np.isfinite(width_khz) else np.nan
+    if np.isfinite(max_khz) and max_khz >= 1000.0:
+        return 1000.0, "MHz"
+    return 1.0, "kHz"
+
+
+def self_corr_value_box_text(
+    z: Dict[str, np.ndarray],
+    mode: str,
+    ant: int,
+    stokes: int,
+    comp: str,
+) -> str:
+    required = {"corr_antenna", "corr_stokes", "corr_component"}
+    if not required.issubset(z):
+        return ""
+    selector = (
+        (z["corr_antenna"].astype(int) == int(ant))
+        & (z["corr_stokes"].astype(int) == int(stokes))
+        & (z["corr_component"].astype(str) == str(comp))
+    )
+    if not np.any(selector):
+        return ""
+    idx = int(np.where(selector)[0][0])
+    if mode == "bandpass" and "corr_dnucorr_mhz" in z:
+        value = float(np.asarray(z["corr_dnucorr_mhz"], dtype=float)[idx])
+        err = float(np.asarray(z.get("corr_dnucorr_mhz_err", np.full_like(z["corr_dnucorr_mhz"], np.nan)), dtype=float)[idx])
+        if np.isfinite(value):
+            header = npz_header(z)
+            channel_width_mhz = float(header.get("channel_width_khz", np.nan)) / 1000.0
+            if np.isfinite(channel_width_mhz) and channel_width_mhz > 0:
+                min_err = 2.0 * channel_width_mhz
+                err = max(err, min_err) if np.isfinite(err) else min_err
+            return rf"$\nu_{{corr}}$ = " + value_error_text(value, err, "MHz")
+    if "corr_tcorr_sec" in z:
+        value = float(np.asarray(z["corr_tcorr_sec"], dtype=float)[idx])
+        err = float(np.asarray(z.get("corr_tcorr_sec_err", np.full_like(z["corr_tcorr_sec"], np.nan)), dtype=float)[idx])
+        if np.isfinite(value):
+            integration_time_sec = self_corr_integration_time_sec(z)
+            if np.isfinite(integration_time_sec) and integration_time_sec > 0:
+                min_err = 2.0 * integration_time_sec
+                err = max(err, min_err) if np.isfinite(err) else min_err
+            return rf"$\tau_{{corr}}$ = " + value_error_text(value, err, "sec")
+    lag_key = "corr_lag" if "corr_lag" in z else "corr_corr_lag" if "corr_corr_lag" in z else None
+    if lag_key is not None:
+        value = float(np.asarray(z[lag_key], dtype=float)[idx])
+        if np.isfinite(value):
+            label = r"$\Delta \nu_{corr}$" if mode == "bandpass" else r"$\tau_{corr}$"
+            unit = "chan" if mode == "bandpass" else "sec"
+            return f"{label} = {value:.3g} {unit}"
+    return ""
+
+
+def self_corr_corr_lag(
+    z: Dict[str, np.ndarray],
+    ant: int,
+    stokes: int,
+    comp: str,
+) -> float:
+    required = {"corr_antenna", "corr_stokes", "corr_component"}
+    if not required.issubset(z):
+        return np.nan
+    lag_key = "corr_lag" if "corr_lag" in z else "corr_corr_lag" if "corr_corr_lag" in z else None
+    if lag_key is None:
+        return np.nan
+    selector = (
+        (z["corr_antenna"].astype(int) == int(ant))
+        & (z["corr_stokes"].astype(int) == int(stokes))
+        & (z["corr_component"].astype(str) == str(comp))
+    )
+    if not np.any(selector):
+        return np.nan
+    return float(np.asarray(z[lag_key], dtype=float)[np.where(selector)[0][0]])
+
+
+def self_corr_fully_flagged_antennas(z: Dict[str, np.ndarray]) -> set[int]:
+    required = {"corr_antenna", "corr_lag"}
+    if not required.issubset(z):
+        return set()
+    antennas = np.asarray(z["corr_antenna"], dtype=int)
+    lags = np.asarray(z["corr_lag"], dtype=float)
+    fully_flagged = set()
+    for ant in sorted(int(v) for v in np.unique(antennas)):
+        vals = lags[antennas == ant]
+        if vals.size and not np.any(np.isfinite(vals)):
+            fully_flagged.add(int(ant))
+    return fully_flagged
+
+
+def gpr_kernel_matrix(x1: np.ndarray, x2: np.ndarray, kernel: str, length: float, amplitude: float) -> np.ndarray:
+    x1 = np.asarray(x1, dtype=float)[:, None]
+    x2 = np.asarray(x2, dtype=float)[None, :]
+    r = np.abs(x1 - x2)
+    length = max(float(length), 1.0e-6)
+    amplitude = max(float(amplitude), 1.0e-6)
+    if kernel == "matern32":
+        scaled = np.sqrt(3.0) * r / length
+        return amplitude * (1.0 + scaled) * np.exp(-scaled)
+    if kernel == "exp":
+        return amplitude * np.exp(-r / length)
+    return amplitude * np.exp(-0.5 * (r / length) ** 2)
+
+
+def gpr_fit_curve(x: np.ndarray, y: np.ndarray, yerr: np.ndarray, kernel: str) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    valid = np.isfinite(x) & np.isfinite(y) & (x > 0)
+    x = np.asarray(x, dtype=float)[valid]
+    y = np.asarray(y, dtype=float)[valid]
+    yerr = np.asarray(yerr, dtype=float)[valid] if np.asarray(yerr).shape == valid.shape else np.full(x.shape, np.nan)
+    if x.size < 2:
+        return x, y, np.full(x.shape, np.nan)
+    order = np.argsort(x)
+    x = x[order]
+    y = y[order]
+    yerr = yerr[order]
+    lx = np.log10(x)
+    grid_lx = np.linspace(float(np.nanmin(lx)), float(np.nanmax(lx)), 256)
+    grid = 10.0 ** grid_lx
+    amp = float(np.nanvar(y))
+    if not np.isfinite(amp) or amp <= 0:
+        amp = 0.05
+    length = max(float(np.nanmax(lx) - np.nanmin(lx)) / 3.0, 0.15)
+    noise = np.where(np.isfinite(yerr) & (yerr > 0), yerr, max(0.03, 0.1 * np.sqrt(amp)))
+    k_xx = gpr_kernel_matrix(lx, lx, kernel, length, amp) + np.diag(noise ** 2 + 1.0e-6)
+    k_xs = gpr_kernel_matrix(lx, grid_lx, kernel, length, amp)
+    k_ss_diag = np.diag(gpr_kernel_matrix(grid_lx, grid_lx, kernel, length, amp))
+    mean0 = float(np.nanmedian(y))
+    yc = y - mean0
+    try:
+        alpha = np.linalg.solve(k_xx, yc)
+        pred = mean0 + k_xs.T @ alpha
+        v = np.linalg.solve(k_xx, k_xs)
+        var = np.maximum(k_ss_diag - np.sum(k_xs * v, axis=0), 0.0)
+        return grid, pred, np.sqrt(var)
+    except np.linalg.LinAlgError:
+        pred = np.interp(grid_lx, lx, y)
+        return grid, pred, np.full(grid.shape, np.nan)
+
+
+def crossing_from_arrays(x: np.ndarray, y: np.ndarray, threshold: float) -> float:
+    valid = np.isfinite(x) & np.isfinite(y)
+    if np.count_nonzero(valid) < 2:
+        return np.nan
+    x = np.asarray(x, dtype=float)[valid]
+    y = np.asarray(y, dtype=float)[valid]
+    order = np.argsort(x)
+    x = x[order]
+    y = y[order]
+    if y[0] >= threshold:
+        return float(x[0])
+    above = np.where(y >= threshold)[0]
+    if above.size == 0:
+        return np.nan
+    idx = int(above[0])
+    if idx == 0 or y[idx] == y[idx - 1]:
+        return float(x[idx])
+    return float(x[idx - 1] + (threshold - y[idx - 1]) * (x[idx] - x[idx - 1]) / (y[idx] - y[idx - 1]))
+
+
+def aggregate_corr_box_text(mode: str, corr_lag: float, corr_lag_err: float, channel_width_khz: float, integration_time_sec: float = np.nan) -> str:
+    if not np.isfinite(corr_lag):
+        return ""
+    if mode == "bandpass" and np.isfinite(channel_width_khz) and channel_width_khz > 0:
+        value = corr_lag * channel_width_khz / 1000.0
+        err = corr_lag_err * channel_width_khz / 1000.0 if np.isfinite(corr_lag_err) else np.nan
+        min_err = 2.0 * channel_width_khz / 1000.0
+        err = max(err, min_err) if np.isfinite(err) else min_err
+        chan_err = max(corr_lag_err, 2.0) if np.isfinite(corr_lag_err) else 2.0
+        return (
+            rf"$\nu_{{corr}}$ = "
+            + value_error_text(value, err, "MHz")
+            + "\n"
+            + rf"$\Delta \nu_{{corr}}$ = "
+            + ceil_channel_value_error_text(corr_lag, chan_err)
+        )
+    if mode == "bandpass":
+        chan_err = max(corr_lag_err, 2.0) if np.isfinite(corr_lag_err) else 2.0
+        return rf"$\Delta \nu_{{corr}}$ = " + ceil_channel_value_error_text(corr_lag, chan_err)
+    if np.isfinite(integration_time_sec) and integration_time_sec > 0:
+        min_err = 2.0 * integration_time_sec
+        corr_lag_err = max(corr_lag_err, min_err) if np.isfinite(corr_lag_err) else min_err
+    return rf"$\tau_{{corr}}$ = " + value_error_text(corr_lag, corr_lag_err, "sec")
+
+
 def save_figure(fig: Any, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fig.tight_layout()
@@ -832,7 +1122,7 @@ def plot_gain_colormap(
     nrows = len(stokes_all)
     fig_height = max(6.0, 3.0 * nrows)
     fig = plt.figure(figsize=(fig_height * 4.0 / 3.0, fig_height))
-    grid = fig.add_gridspec(nrows, 4, width_ratios=[1.0, 1.0, 0.32, 0.055], wspace=0.10, hspace=0.34)
+    grid = fig.add_gridspec(nrows, 4, width_ratios=[1.0, 1.0, 0.035, 0.055], wspace=0.015, hspace=0.34)
     axes = np.asarray([[fig.add_subplot(grid[row, col]) for col in range(2)] for row in range(nrows)])
     cax = fig.add_subplot(grid[:, 3])
     cmap = plt.get_cmap("coolwarm").copy()
@@ -2115,14 +2405,25 @@ def plot_self_corr_colormap(npz_path: Path, out: Path, antennas: Optional[List[i
     missing = required - set(z)
     if missing:
         raise ValueError(f"{npz_path} missing arrays: {sorted(missing)}")
+    header = npz_header(z)
+    mode = str(header.get("mode") or "").strip().lower()
+    table_name = Path(str(header.get("input_table", "gain table"))).name
+    if not table_name:
+        table_name = "gain table"
+    channel_width_khz = float(header.get("channel_width_khz", np.nan))
     ant_all = filter_antennas(np.unique(z["antenna"]).astype(int), antennas)
     stokes_all = np.unique(z["stokes"]).astype(int)
     comps = [comp for comp in ("real", "imag") if comp in set(z["component"].astype(str))]
     tau = np.unique(z["tau"].astype(float))
-    tau = tau[np.isfinite(tau)]
+    tau = tau[np.isfinite(tau) & (tau > 0)]
     if ant_all.size == 0 or stokes_all.size == 0 or tau.size == 0 or not comps:
         raise ValueError("No self-correlation panels available.")
-    fig, axes = plt.subplots(len(stokes_all), 2, figsize=(8.2, max(3.6, 2.6 * len(stokes_all))), squeeze=False, constrained_layout=True)
+    nrows = len(stokes_all)
+    fig_height = max(6.0, 3.0 * nrows)
+    fig = plt.figure(figsize=(fig_height * 4.0 / 3.0, fig_height))
+    grid = fig.add_gridspec(nrows, 4, width_ratios=[1.0, 1.0, 0.32, 0.055], wspace=0.10, hspace=0.34)
+    axes = np.asarray([[fig.add_subplot(grid[row, col]) for col in range(2)] for row in range(nrows)])
+    cax = fig.add_subplot(grid[:, 3])
     cmap = plt.get_cmap("coolwarm").copy()
     cmap.set_bad(color="white")
     x_edges = np.arange(0, len(ant_all) + 1, 1)
@@ -2130,8 +2431,31 @@ def plot_self_corr_colormap(npz_path: Path, out: Path, antennas: Optional[List[i
         y_edges = np.concatenate([[tau[0] - (tau[1] - tau[0]) / 2], 0.5 * (tau[:-1] + tau[1:]), [tau[-1] + (tau[-1] - tau[-2]) / 2]])
     else:
         y_edges = np.array([tau[0] * 0.9, tau[0] * 1.1])
+    if np.any(y_edges <= 0):
+        positive_edges = y_edges[y_edges > 0]
+        floor = float(np.nanmin(positive_edges)) if positive_edges.size else float(tau[0] * 0.5)
+        y_edges[y_edges <= 0] = max(floor * 0.5, 1.0e-6)
+    y_plot = tau.copy()
+    y_edges_plot = y_edges.copy()
+    y_label = r"$\Delta t$ [sec]"
+    right_labels: Optional[List[str]] = None
+    dnu_text = ""
+    y_unit_scale = 1.0
+    if mode == "bandpass":
+        y_label = r"$\Delta \nu$ [channel]"
+        if np.isfinite(channel_width_khz) and channel_width_khz > 0:
+            ticks_for_unit = factor_lag_ticks(tau, factor=4.0)
+            scale, unit = frequency_delta_unit(channel_width_khz, ticks_for_unit if ticks_for_unit.size else tau)
+            y_unit_scale = scale
+            y_plot = tau * channel_width_khz / scale
+            y_edges_plot = y_edges * channel_width_khz / scale
+            y_label = rf"$\Delta \nu$ [{unit}]"
+            if channel_width_khz >= 1000.0:
+                dnu_text = f" | $\\Delta \\nu$ = {channel_width_khz / 1000.0:.2f} MHz"
+            else:
+                dnu_text = f" | $\\Delta \\nu$ = {channel_width_khz:.2f} kHz"
+        right_labels = [compact_tick_label(v) for v in tau]
     matrices: Dict[Tuple[int, str], np.ndarray] = {}
-    min_positive = np.inf
     for stokes in stokes_all:
         for comp in ("real", "imag"):
             mat = np.full((len(tau), len(ant_all)), np.nan)
@@ -2148,77 +2472,101 @@ def plot_self_corr_colormap(npz_path: Path, out: Path, antennas: Optional[List[i
                         finite_vals = vals[np.isfinite(vals)]
                         if finite_vals.size:
                             mat[ti, ai] = float(np.median(finite_vals))
-            positives = mat[mat > 0]
-            if positives.size:
-                min_positive = min(min_positive, float(np.nanmin(positives)))
             matrices[(int(stokes), comp)] = mat
-    if not np.isfinite(min_positive) or min_positive <= 0:
-        min_positive = 1e-3
-    positive_groups = [mat[np.isfinite(mat) & (mat > 0)] for mat in matrices.values() if np.any(np.isfinite(mat) & (mat > 0))]
-    positive_values = np.concatenate(positive_groups) if positive_groups else np.asarray([], dtype=float)
-    max_positive = float(np.nanmax(positive_values)) if positive_values.size else 1.5
-    factor_levels = factor_two_levels(max_positive)
-    ticks_log = np.log10(factor_levels)
-    vmin_log = min(np.log10(min_positive), float(ticks_log[0]))
-    vmax_log = max(np.log10(max_positive), float(ticks_log[-1]))
     last_im = None
+    y_ticks = factor_lag_ticks(tau, factor=4.0)
+    y_tick_positions = y_ticks.copy()
+    if mode == "bandpass" and np.isfinite(channel_width_khz) and channel_width_khz > 0:
+        scale, _unit = frequency_delta_unit(channel_width_khz, y_ticks if y_ticks.size else tau)
+        y_tick_positions = y_ticks * channel_width_khz / scale
     for ri, stokes in enumerate(stokes_all):
         for ci, comp in enumerate(("real", "imag")):
             ax = axes[ri, ci]
             mat = matrices[(int(stokes), comp)]
-            log_mat = np.full_like(mat, np.nan, dtype=float)
-            ok = mat > 0
-            log_mat[ok] = np.log10(mat[ok])
-            vis = np.ma.array(log_mat, mask=~np.isfinite(log_mat))
-            x_grid, y_grid = np.meshgrid(x_edges, y_edges)
-            last_im = ax.pcolormesh(x_grid, y_grid, vis, cmap=cmap, shading="auto", vmin=vmin_log, vmax=vmax_log)
+            vis = np.ma.array(mat, mask=~np.isfinite(mat))
+            x_grid, y_grid = np.meshgrid(x_edges, y_edges_plot)
+            last_im = ax.pcolormesh(x_grid, y_grid, vis, cmap=cmap, shading="auto", vmin=0.1, vmax=1.1)
             for ai in range(len(ant_all)):
-                thr = tau_at_threshold(tau, mat[:, ai], threshold)
+                lag = self_corr_corr_lag(z, int(ant_all[ai]), int(stokes), comp)
+                thr = lag
+                if mode == "bandpass" and np.isfinite(channel_width_khz) and channel_width_khz > 0:
+                    thr = lag * channel_width_khz / y_unit_scale
                 if np.isfinite(thr):
-                    ax.hlines(thr, ai, ai + 1, colors="white", linewidth=2)
+                    ax.hlines(thr, ai, ai + 1, colors="black", linewidth=2, linestyle="-")
             ax.set_xticks(np.arange(len(ant_all)) + 0.5)
             ax.set_xticklabels([str(a) if i % 2 == 0 else "" for i, a in enumerate(ant_all)], fontsize=8)
             ax.set_xlim(0, len(ant_all))
-            ax.set_ylim(y_edges[0], y_edges[-1])
-            if tau.size > 1 and np.all(tau > 0) and np.all(y_edges > 0):
+            ax.set_ylim(y_edges_plot[0], y_edges_plot[-1])
+            if tau.size > 1 and np.all(y_edges_plot > 0):
                 ax.set_yscale("log")
+            if y_ticks.size:
+                ax.set_yticks(y_tick_positions)
+                ax.set_yticklabels([compact_tick_label(v) for v in y_tick_positions], fontsize=6)
             ax.set_title(f"Stokes {int(stokes)} {'Real-1' if comp == 'real' else 'Imag'}", fontsize=9)
+            if ci == 0:
+                ax.set_ylabel(y_label, fontsize=8)
             if ci == 1:
-                ax.yaxis.tick_right()
-                ax.yaxis.set_label_position("right")
-                ax.set_ylabel(r"$\tau$ [sec]")
+                ax.tick_params(axis="y", left=False, labelleft=False)
+                if mode == "bandpass" and right_labels is not None:
+                    tax = ax.twinx()
+                    tax.set_yscale("log")
+                    tax.set_ylim(ax.get_ylim())
+                    if y_ticks.size:
+                        tax.set_yticks(y_tick_positions)
+                        tax.set_yticklabels([compact_tick_label(v) for v in y_ticks], fontsize=6)
+                    tax.set_ylabel("Channel Difference", fontsize=8, labelpad=10)
+                    tax.tick_params(axis="y", labelsize=6)
             if ri == len(stokes_all) - 1:
-                ax.set_xlabel("Antenna")
+                ax.set_xlabel("Antenna", fontsize=8)
+            ax.tick_params(axis="both", labelsize=6)
     if last_im is not None:
-        cbar = fig.colorbar(last_im, ax=axes[:, 1], orientation="vertical", fraction=0.08, pad=0.04)
-        cbar.set_ticks(ticks_log)
-        cbar.set_ticklabels([f"{level:.2f}" for level in factor_levels])
+        cbar = fig.colorbar(last_im, cax=cax, orientation="vertical")
+        cbar.ax.set_title("S2", fontsize=8, pad=6)
+        cbar.ax.yaxis.set_ticks_position("left")
+        cbar.ax.tick_params(labelsize=6, labelleft=True, labelright=False)
+        cbar.set_ticks([0.1, 0.3, 0.5, 0.7, 0.9, 1.1])
     scans = np.unique(z["scan"].astype(int)) if "scan" in z else np.array([])
     scan_label = str(int(scans[0])) if scans.size == 1 else "allscans"
-    fig.suptitle(f"Structure Function | Scan: {scan_label}", fontsize=12)
+    fig.suptitle(f"Gain Table: {table_name} | Scan: {scan_label}{dnu_text}", fontsize=12)
     out.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out, dpi=DEFAULT_PLOT_DPI)
+    fig.subplots_adjust(left=0.055, right=0.985, bottom=0.055, top=0.90)
+    fig.savefig(out, dpi=DEFAULT_PLOT_DPI, bbox_inches="tight", pad_inches=0.02)
     plt.close(fig)
     emit(f"Wrote plot: {out}")
 
 
-def plot_self_corr_antenna_products(npz_path: Path, out_base: Path, antennas: Optional[List[int]], threshold: float) -> List[Path]:
+def plot_self_corr_antenna_products(
+    npz_path: Path,
+    out_base: Path,
+    antennas: Optional[List[int]],
+    threshold: float,
+    pchans: Optional[Tuple[int, int]] = None,
+) -> List[Path]:
     z = load_npz(npz_path)
     required = {"antenna", "stokes", "component", "tau", "s2"}
     missing = required - set(z)
     if missing:
         raise ValueError(f"{npz_path} missing arrays: {sorted(missing)}")
 
+    header = npz_header(z)
+    mode = str(header.get("mode") or "").strip().lower()
+    table_name = Path(str(header.get("input_table", "gain table"))).name
+    if not table_name:
+        table_name = "gain table"
+    channel_width_khz = float(header.get("channel_width_khz", np.nan))
     ant_all = filter_antennas(np.unique(z["antenna"]).astype(int), antennas)
     stokes_all = np.unique(z["stokes"]).astype(int)
     comps = [comp for comp in ("real", "imag") if comp in set(z["component"].astype(str))]
     if ant_all.size == 0 or stokes_all.size == 0 or not comps:
         raise ValueError("No antennas/stokes/components available for self-correlation antenna plots.")
+    scans = np.unique(z["scan"].astype(int)) if "scan" in z else np.array([])
+    scan_label = str(int(scans[0])) if scans.size == 1 else "allscans"
 
     out_base.parent.mkdir(parents=True, exist_ok=True)
     written: List[Path] = []
     for ant in ant_all:
-        fig, axes = plt.subplots(len(stokes_all), len(comps), figsize=(5.0 * len(comps), max(3.2, 2.8 * len(stokes_all))), squeeze=False)
+        fig_width = max(8.0, 3.6 * len(comps))
+        fig, axes = plt.subplots(len(stokes_all), len(comps), figsize=(fig_width, fig_width * 3.0 / 4.0), squeeze=False)
         for ri, stokes in enumerate(stokes_all):
             for ci, comp in enumerate(comps):
                 ax = axes[ri, ci]
@@ -2239,13 +2587,68 @@ def plot_self_corr_antenna_products(npz_path: Path, out_base: Path, antennas: Op
                 ax.plot(tx, yy, "-", lw=2, color="blue")
                 ax.axhline(1.0, color="green", lw=2)
                 ax.axhline(float(threshold), color="red", lw=2, linestyle="--")
+                ax.set_ylim(0.1, 1.1)
                 if tx.size and np.all(tx > 0):
                     ax.set_xscale("log")
-                ax.set_xlabel(r"$\tau$ [sec]")
+                    ticks = factor_lag_ticks(tx, factor=4.0)
+                    if ticks.size:
+                        ax.set_xticks(ticks)
+                        ax.set_xticklabels([compact_tick_label(v) for v in ticks], fontsize=8)
+                if mode == "bandpass":
+                    ax.set_xlabel("Channel Difference" if ri == len(stokes_all) - 1 else "")
+                    if ri != len(stokes_all) - 1:
+                        ax.tick_params(axis="x", labelbottom=False)
+                    if np.isfinite(channel_width_khz) and channel_width_khz > 0 and tx.size and np.all(tx > 0):
+                        top_ax = ax.twiny()
+                        top_ax.set_xscale("log")
+                        top_ax.set_xlim(ax.get_xlim())
+                        ticks = np.asarray(ax.get_xticks(), dtype=float)
+                        ticks = ticks[np.isfinite(ticks) & (ticks > 0)]
+                        if ticks.size:
+                            scale, unit = frequency_delta_unit(channel_width_khz, ticks)
+                            top_ax.set_xticks(ticks)
+                            top_ax.set_xticklabels([compact_tick_label(v * channel_width_khz / scale) for v in ticks], fontsize=8)
+                        else:
+                            unit = "kHz"
+                        top_ax.set_xlabel(rf"$\Delta \nu$ [{unit}]" if ri == 0 else "", fontsize=9)
+                        top_ax.tick_params(axis="x", labelsize=8)
+                        if ri != 0:
+                            top_ax.tick_params(axis="x", labeltop=False)
+                else:
+                    ax.set_xlabel(r"$\Delta t$ [sec]" if ri == len(stokes_all) - 1 else "")
+                    if ri != len(stokes_all) - 1:
+                        ax.tick_params(axis="x", labelbottom=False)
                 ax.set_ylabel(r"$S_2 / (2\,\sigma^2)$")
-                ax.set_title(f"antenna:{int(ant)}, stokes:{int(stokes)}, {comp}", fontsize=10)
+                ax.set_title(f"Stokes {int(stokes)} {'Real-1' if comp == 'real' else 'Imag'}", fontsize=10)
+                if ci == 1:
+                    ax.set_ylabel("")
+                    ax.tick_params(axis="y", left=False, labelleft=False)
                 ax.grid(True, which="both", ls=":", alpha=0.4)
-        fig.tight_layout()
+                box_text = self_corr_value_box_text(z, mode, int(ant), int(stokes), str(comp))
+                if box_text:
+                    ax.text(
+                        0.04,
+                        0.94,
+                        box_text,
+                        transform=ax.transAxes,
+                        ha="left",
+                        va="top",
+                        fontsize=8,
+                        bbox={"boxstyle": "round,pad=0.28", "facecolor": "white", "edgecolor": "0.35", "alpha": 0.86},
+                    )
+        dnu_text = ""
+        if mode == "bandpass" and np.isfinite(channel_width_khz) and channel_width_khz > 0:
+            if channel_width_khz >= 1000.0:
+                dnu_text = f" | $\\Delta \\nu$ = {channel_width_khz / 1000.0:.2f} MHz"
+            else:
+                dnu_text = f" | $\\Delta \\nu$ = {channel_width_khz:.2f} kHz"
+        title = (
+            f"Gain Table: {table_name} | Antenna: {int(ant)}\n"
+            f"Scan: {scan_label}{dnu_text}{pchan_title_text(pchans)}"
+        )
+        title_size = max(7.0, 10.0 - max(0, max(len(line) for line in title.splitlines()) - 80) * 0.035)
+        fig.suptitle(title, fontsize=title_size, y=0.995)
+        fig.tight_layout(rect=(0, 0, 1, 0.988), h_pad=0.06, w_pad=0.35)
         out = derived_output_path(out_base, f"ant{int(ant)}")
         fig.savefig(out, dpi=DEFAULT_PLOT_DPI)
         plt.close(fig)
@@ -2253,6 +2656,163 @@ def plot_self_corr_antenna_products(npz_path: Path, out_base: Path, antennas: Op
         emit(f"Wrote plot: {out}")
 
     return written
+
+
+def plot_self_corr_all_antenna(
+    npz_path: Path,
+    out: Path,
+    antennas: Optional[List[int]],
+    threshold: float,
+    kernel: str,
+) -> None:
+    z = load_npz(npz_path)
+    required = {"antenna", "stokes", "component", "tau", "s2"}
+    missing = required - set(z)
+    if missing:
+        raise ValueError(f"{npz_path} missing arrays: {sorted(missing)}")
+    header = npz_header(z)
+    mode = str(header.get("mode") or "").strip().lower()
+    table_name = Path(str(header.get("input_table", "gain table"))).name or "gain table"
+    channel_width_khz = float(header.get("channel_width_khz", np.nan))
+    integration_time_sec = self_corr_integration_time_sec(z)
+    available_antennas = np.unique(z["antenna"]).astype(int)
+    ant_all = filter_antennas(available_antennas, antennas)
+    if ant_all.size == 0:
+        raise ValueError("No antennas available for self-corr-all-ante plot.")
+    fully_flagged = self_corr_fully_flagged_antennas(z)
+    unflagged = [int(ant) for ant in ant_all if int(ant) not in fully_flagged]
+    flagged = [int(ant) for ant in ant_all if int(ant) in fully_flagged]
+    if not unflagged:
+        raise SystemExit("ERROR: self-corr-all-ante requires at least one unflagged antenna with finite self-corr values.")
+    if not flagged:
+        raise SystemExit("ERROR: self-corr-all-ante requires at least one flagged antenna when --use-flags is used; none were found in the self-corr product.")
+
+    stokes_all = np.unique(z["stokes"]).astype(int)
+    comps = [comp for comp in ("real", "imag") if comp in set(z["component"].astype(str))]
+    tau_all = np.unique(z["tau"].astype(float))
+    tau_all = tau_all[np.isfinite(tau_all) & (tau_all > 0)]
+    if stokes_all.size == 0 or not comps or tau_all.size == 0:
+        raise ValueError("No self-correlation all-antenna panels available.")
+
+    nrows, ncols = len(stokes_all), len(comps)
+    fig_width = max(8.0, 3.6 * ncols)
+    fig, axes = plt.subplots(nrows, ncols, figsize=(fig_width, fig_width * 3.0 / 4.0), squeeze=False)
+    antenna_arr = z["antenna"].astype(int)
+    stokes_arr = z["stokes"].astype(int)
+    comp_arr = z["component"].astype(str)
+    tau_arr = z["tau"].astype(float)
+    s2_arr = z["s2"].astype(float)
+    err_arr = z["err"].astype(float) if "err" in z else np.full(s2_arr.shape, np.nan)
+
+    for ri, stokes in enumerate(stokes_all):
+        for ci, comp in enumerate(comps):
+            ax = axes[ri, ci]
+            series_values: List[np.ndarray] = []
+            series_errors: List[np.ndarray] = []
+            for ant in unflagged:
+                values = np.full(tau_all.shape, np.nan, dtype=float)
+                errors = np.full(tau_all.shape, np.nan, dtype=float)
+                for ti, tau in enumerate(tau_all):
+                    selector = (
+                        (antenna_arr == int(ant))
+                        & (stokes_arr == int(stokes))
+                        & (comp_arr == str(comp))
+                        & (tau_arr == float(tau))
+                    )
+                    vals = s2_arr[selector]
+                    errs = err_arr[selector]
+                    finite_vals = vals[np.isfinite(vals)]
+                    finite_errs = errs[np.isfinite(errs)]
+                    if finite_vals.size:
+                        values[ti] = float(np.nanmedian(finite_vals))
+                    if finite_errs.size:
+                        errors[ti] = float(np.nanmedian(finite_errs))
+                if np.any(np.isfinite(values)):
+                    ax.plot(tau_all, values, color="0.72", linewidth=3.0, alpha=0.65, zorder=1)
+                    series_values.append(values)
+                    series_errors.append(errors)
+
+            if not series_values:
+                continue
+            data = np.asarray(series_values, dtype=float)
+            err_data = np.asarray(series_errors, dtype=float)
+            med = np.nanmedian(data, axis=0)
+            scatter = np.nanstd(data, axis=0)
+            jack = np.nanmedian(err_data, axis=0)
+            yerr = np.where(np.isfinite(jack) & (jack > 0), jack, scatter)
+            finite_med = np.isfinite(med)
+            if np.any(finite_med):
+                ax.errorbar(tau_all[finite_med], med[finite_med], yerr=yerr[finite_med], color="black", linewidth=2, elinewidth=1, capsize=2, marker="o", markersize=3, zorder=3)
+                grid, pred, pred_err = gpr_fit_curve(tau_all[finite_med], med[finite_med], yerr[finite_med], kernel)
+                if grid.size and pred.size:
+                    ax.plot(grid, pred, color="blue", linewidth=2, zorder=4, label=f"GPR {kernel}")
+                    if pred_err.size and np.any(np.isfinite(pred_err)):
+                        ax.fill_between(grid, pred - pred_err, pred + pred_err, color="lightskyblue", alpha=0.35, linewidth=0, zorder=2)
+                    corr = crossing_from_arrays(grid, pred, threshold)
+                    corr_err = float(np.interp(corr, grid, pred_err)) if np.isfinite(corr) and pred_err.size and np.any(np.isfinite(pred_err)) else np.nan
+                    box_text = aggregate_corr_box_text(mode, corr, corr_err, channel_width_khz, integration_time_sec)
+                    if box_text:
+                        ax.text(
+                            0.04,
+                            0.94,
+                            box_text,
+                            transform=ax.transAxes,
+                            ha="left",
+                            va="top",
+                            fontsize=8,
+                            bbox={"boxstyle": "round,pad=0.28", "facecolor": "white", "edgecolor": "0.35", "alpha": 0.86},
+                        )
+            ax.axhline(float(threshold), color="red", lw=2, linestyle="--")
+            ax.axhline(1.0, color="green", lw=2)
+            ax.set_ylim(0.1, 1.1)
+            if np.all(tau_all > 0):
+                ax.set_xscale("log")
+                ticks = factor_lag_ticks(tau_all, factor=4.0)
+                if ticks.size:
+                    ax.set_xticks(ticks)
+                    ax.set_xticklabels([compact_tick_label(v) for v in ticks], fontsize=8)
+            if mode == "bandpass":
+                ax.set_xlabel("Channel Difference" if ri == nrows - 1 else "")
+                if ri != nrows - 1:
+                    ax.tick_params(axis="x", labelbottom=False)
+                if np.isfinite(channel_width_khz) and channel_width_khz > 0 and np.all(tau_all > 0):
+                    top_ax = ax.twiny()
+                    top_ax.set_xscale("log")
+                    top_ax.set_xlim(ax.get_xlim())
+                    ticks = np.asarray(ax.get_xticks(), dtype=float)
+                    ticks = ticks[np.isfinite(ticks) & (ticks > 0)]
+                    if ticks.size:
+                        scale, unit = frequency_delta_unit(channel_width_khz, ticks)
+                        top_ax.set_xticks(ticks)
+                        top_ax.set_xticklabels([compact_tick_label(v * channel_width_khz / scale) for v in ticks], fontsize=8)
+                    else:
+                        unit = "kHz"
+                    top_ax.set_xlabel(rf"$\Delta \nu$ [{unit}]" if ri == 0 else "", fontsize=9)
+                    if ri != 0:
+                        top_ax.tick_params(axis="x", labeltop=False)
+            else:
+                ax.set_xlabel(r"$\Delta t$ [sec]" if ri == nrows - 1 else "")
+                if ri != nrows - 1:
+                    ax.tick_params(axis="x", labelbottom=False)
+            ax.set_ylabel(r"$S_2 / (2\,\sigma^2)$")
+            ax.set_title(f"Stokes {int(stokes)} {'Real-1' if comp == 'real' else 'Imag'}", fontsize=10)
+            if ci == 1:
+                ax.set_ylabel("")
+                ax.tick_params(axis="y", left=False, labelleft=False)
+            ax.grid(True, which="both", ls=":", alpha=0.4)
+
+    scans = np.unique(z["scan"].astype(int)) if "scan" in z else np.array([])
+    scan_label = str(int(scans[0])) if scans.size == 1 else "allscans"
+    dnu_text = ""
+    if mode == "bandpass" and np.isfinite(channel_width_khz) and channel_width_khz > 0:
+        dnu_text = f" | $\\Delta \\nu$ = {channel_width_khz / 1000.0:.2f} MHz" if channel_width_khz >= 1000 else f" | $\\Delta \\nu$ = {channel_width_khz:.2f} kHz"
+    title = f"Gain Table: {table_name} | Antennas: all usable ({len(unflagged)}), flagged ({len(flagged)})\nScan: {scan_label}{dnu_text}"
+    fig.suptitle(title, fontsize=10, y=0.995)
+    fig.tight_layout(rect=(0, 0, 1, 0.988), h_pad=0.06, w_pad=0.35)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out, dpi=DEFAULT_PLOT_DPI)
+    plt.close(fig)
+    emit(f"Wrote plot: {out}")
 
 
 def plot_cross_corr_colormap(npz_path: Path, out: Path, antennas: Optional[List[int]]) -> None:
@@ -2308,6 +2868,7 @@ def selected_tasks(args: argparse.Namespace) -> List[str]:
         (args.ks, "ks"),
         (args.self_corr_colormap, "self_corr_colormap"),
         (args.self_corr_antenna, "self_corr_antenna"),
+        (args.self_corr_all_ante, "self_corr_all_ante"),
         (args.cross_corr_colormap, "cross_corr_colormap"),
     ]:
         if flag and task not in tasks:
@@ -2331,7 +2892,7 @@ def parse_args() -> argparse.Namespace:
         help=(
             "Plot mode(s), comma or space separated: all, colormap, hist, "
             "reim, antenna, stats, ks, self-corr-colormap, "
-            "self-corr-antenna, cross-corr-colormap. all expands to "
+            "self-corr-antenna, self-corr-all-ante, cross-corr-colormap. all expands to "
             "colormap, hist, stats, and ks. Legacy names gain-colormap and "
             "gain-hist are accepted as aliases."
         ),
@@ -2353,11 +2914,13 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--adjust-mean", action="store_true", help="For -pmode stats, divide real samples by the all-antenna mean and subtract the all-antenna mean from imaginary samples for each stokes. Default: false.")
     p.add_argument("--hist-bins", type=int, default=64, help="Gain histogram bin count. Default: 64.")
     p.add_argument("--hist-range", default=None, help="Optional gain histogram value range as min,max in percent.")
-    p.add_argument("--s2-thr", type=float, default=0.9, help="S2 threshold for self-correlation reference markers. Default: 0.9.")
+    p.add_argument("--s2-thr", type=float, default=0.7, help="S2 threshold for self-correlation reference markers. Default: 0.7.")
+    p.add_argument("--gpr-kernel", choices=["rbf", "matern32", "exp"], default="rbf", help="Kernel for self-corr-all-ante GPR fit. Default: rbf.")
     p.add_argument("--stats", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--ks", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--self-corr-colormap", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--self-corr-antenna", action="store_true", help=argparse.SUPPRESS)
+    p.add_argument("--self-corr-all-ante", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--cross-corr-colormap", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--all", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--plot-dir", default=None, help="Output plot directory. Default: configured plots/<format> directory.")
@@ -2400,7 +2963,10 @@ def main() -> None:
                 t0 = time.perf_counter()
                 plot_flagver = plot_output_flag_version(npz, args)
                 plot_label_base = f"{label}{flag_version_suffix(plot_flagver)}"
-                plot_label = label_with_plot_channels(plot_label_base, pchans if task in {"gain_colormap", "gain_hist", "reim", "antenna", "stats"} else None)
+                plot_label = label_with_plot_channels(
+                    plot_label_base,
+                    pchans if task in {"gain_colormap", "gain_hist", "reim", "antenna", "stats", "self_corr_antenna", "self_corr_all_ante"} else None,
+                )
                 out = stats_output_path(plot_dir, mode, plot_label, args.format, args.adjust_mean) if task == "stats" else output_path(plot_dir, task, mode, plot_label, args.format)
                 emit(f"START plot {task} mode={mode} scan={label}")
                 if task == "gain_colormap":
@@ -2418,7 +2984,9 @@ def main() -> None:
                 elif task == "self_corr_colormap":
                     plot_self_corr_colormap(npz, out, ants, args.s2_thr)
                 elif task == "self_corr_antenna":
-                    plot_self_corr_antenna_products(npz, out, ants, args.s2_thr)
+                    plot_self_corr_antenna_products(npz, out, ants, args.s2_thr, pchans)
+                elif task == "self_corr_all_ante":
+                    plot_self_corr_all_antenna(npz, out, ants, args.s2_thr, args.gpr_kernel)
                 elif task == "cross_corr_colormap":
                     plot_cross_corr_colormap(npz, out, ants)
                 emit(f"DONE  plot {task} elapsed_sec={time.perf_counter() - t0:.3f}")
