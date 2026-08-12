@@ -76,6 +76,11 @@ the delete list, or `script/gdp-setup --clean no-stop` for scripted cleanup
 without the prompt. Setup JSON files in the runtime root and `.gdp-config.json`
 are kept.
 
+Add `--relative-path` to GDP commands when terminal/log output should first
+state the runtime directory and then refer to generated runtime files relative
+to that directory. This is a display-only option: actual filenames, write
+locations, and machine-readable JSON output are unchanged.
+
 ## Examples
 
 Set up GDP:
@@ -98,8 +103,10 @@ Read a CASA table header:
 
 ```bash
 script/gdp-util --input-table /path/to/table.g --header
-script/gdp-util --gain-table --header
-script/gdp-util --bandpass-table --header
+script/gdp-util --mode gain --header
+script/gdp-util --mode bandpass --header
+script/gdp-util --mode gain --scans --antenna
+script/gdp-util --mode gain --timeinfo
 ```
 
 Compute GDP statistics:
@@ -109,6 +116,7 @@ casa --nogui --nologger --nologfile --log2term -c script/gdp-stats --smode gains
 script/gdp-stats --smode all
 script/gdp-stats --smode self-corr
 script/gdp-stats --mode gain --scan 17 --smode gains
+script/gdp-stats --mode gain --scan 17 --smode gain --adjust-mean
 script/gdp-plot --mode gain --scan 17 -pmode colormap --range 20
 script/gdp-plot --mode bandpass -pmode colormap -pchans "[16-64]" --range 20
 script/gdp-stats --mode gain --scan 17 --smode gains --flagver 1
@@ -220,13 +228,15 @@ script/gdp-plot --mode bandpass --scan 18 -pmode antenna -pchans "[800-3000]" --
 Read gain-table integration time and bandpass-table channel/band widths:
 
 ```bash
-script/gdp-util --gain-table --integration-time
-script/gdp-util --bandpass-table --channelwidth --bandwidth
+script/gdp-util --mode gain --integration-time
+script/gdp-util --mode bandpass --channelwidth --bandwidth
+script/gdp-util --mode bandpass --chaninfo
 ```
 
-Width values are printed in kHz or MHz as appropriate. Integration time is
-printed as `integration-time_sec` from the median positive spacing between
-unique gain-table `TIME` values in one scan.
+Width and frequency values are printed in kHz or MHz as appropriate. Integration
+time is printed as `integration-time_sec`; `--timeinfo` also prints `NTime`,
+`delta-T_sec`, and start/end times in IST and GMT. Channel information requires
+`--mode bandpass`; time information requires `--mode gain`.
 
 Create a version archive, commit, and push:
 

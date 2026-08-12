@@ -1,62 +1,60 @@
 setup-file: /Users/prasun/Documents/GDP/.gdp-config.json
 
+---
+mode: bandpass
+scan: 18
+use: true
+out-fver: 3
+---
 
 intent: gdp-flag
- name: manual antenna trailing value
- mode: gain
- scan: 19
- fmode: man-antenna 9
- 
+ out-fver: 2
+ use: true
+ name: manual channel flag
+ fmode: man-chan "[0-800]" "[3001-10000]"
 end
 
 intent: gdp-flag
- name: manual antenna option list
- mode: gain
- scan: 19
- fmode: man-antenna
- man-antenna: "[1-5]" 6 "[9-12]" 15
-end
-
-intent: gdp-flag
- name: manual channel option list
- mode: bandpass
+ use: false
+ name: auto all antenna std thrsld
+ fmode: all-std-thrsld 
  scan: 18
- fmode: man-chan
- man-chan: "[900-1200]:1" 1300:0
 end
 
 intent: gdp-flag
- name: all standard threshold trailing alpha
- mode: gain
- scan: 19
- fmode: all-std-thrsld 1.5
-end
-
-intent: gdp-flag
- name: antenna standard threshold explicit alpha
- mode: gain
- scan: 19
+ use: false
+ name: auto  antenna std thrsld
  fmode: ante-std-thrsld
- alpha: 2
+ out-fver: 3
+ scan: 18
 end
 
 intent: gdp-flag
- name: antenna mean threshold trailing value
- mode: gain
- scan: 19
- fmode: ante-mean-thrsld 6
+ iter: 3
+ use: true
+ name: auto  antenna mean thrsld
+ fmode: ante-mean-thrsld 1.5
+ scan: 18
+ out-fver: 3
 end
 
 intent: gdp-flag
- name: antenna fraction threshold trailing percent
- mode: gain
- scan: 19
- fmode: ante-thrsld 40
+ iter: 3
+ use: true
+ name: auto  antenna mean thrsld
+ fmode: ante-mean-thrsld 2.
+ scan: 18
+ out-fver: 3
 end
 
+
 intent: gdp-flag
- name: ks threshold trailing factor
- mode: gain
- scan: 19
- fmode: ks-thrsld 1.5
+ use: false
+ name: auto  antenna thrsld
+ fmode: ante-thrsld 
+ scan: 18
+ out-fver: 3
 end
+
+
+

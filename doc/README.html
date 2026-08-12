@@ -39,6 +39,7 @@
     <section>
       <h2>Runtime Layout</h2>
       <p>The default repository runtime directory is <code>rundir/</code>. A user may choose a different runtime directory with <code>gdp-setup</code>. <code>script/gdp-setup --clean</code> removes generated outputs under <code>data-product/</code>, <code>plots/</code>, <code>logs/</code>, and <code>gaintable/</code>, then recreates the standard runtime folders. It asks for confirmation by default; use <code>--clean --dry-run</code> to preview the delete list or <code>--clean no-stop</code> for scripted cleanup without the prompt. Setup JSON files in the runtime root and <code>.gdp-config.json</code> are kept.</p>
+      <p>Add <code>--relative-path</code> to GDP commands when terminal/log output should first state the runtime directory and then refer to generated runtime files relative to that directory. This is a display-only option: actual filenames, write locations, and machine-readable JSON output are unchanged.</p>
       <table>
         <tr><th>Subfolder</th><th>Purpose</th></tr>
         <tr><td><code>data-product/gains/npz</code></td><td>Raw selected gain/bandpass sample products.</td></tr>
@@ -69,8 +70,11 @@ script/gdp-setup --clean --dry-run  [preview generated runtime outputs that woul
 script/gdp-setup --clean  [ask for confirmation, then remove generated runtime outputs]
 script/gdp-setup --clean no-stop  [remove generated runtime outputs without prompting]
 script/gdp-util --input-table /path/to/table.g --header  [inspect table metadata]
-script/gdp-util --gain-table --header  [inspect the saved gain table]
-script/gdp-util --bandpass-table --header  [inspect the saved bandpass table]
+script/gdp-util --mode gain --header  [inspect the saved gain table]
+script/gdp-util --mode bandpass --header  [inspect the saved bandpass table]
+script/gdp-util --mode gain --scans --antenna  [inspect scans and antennas]
+script/gdp-util --mode gain --timeinfo  [inspect gain-table time count, spacing, and start/end times]
+script/gdp-util --mode bandpass --chaninfo  [inspect bandpass channel width, bandwidth, channel count, and frequency range]
 script/gdp-stats --smode stats,ks  [compute stats and KS products from the saved input]
 script/gdp-stats --smode all  [run gains, stats, and KS]
 script/gdp-stats --smode self-corr  [run self-correlation separately]
@@ -80,6 +84,7 @@ script/gdp-stats --antennas "[1-5]" 6 "[9-12]" 15 16 19 --smode stats  [compute 
 script/gdp-stats --smode stats --csv  [compute stats and optional CSV from the saved input]
 script/gdp-stats --smode stats --combine-scans  [write one combined allscans stats product]
 script/gdp-stats --mode gain --scan 17 --smode gains  [create the gains NPZ for plotting]
+script/gdp-stats --mode gain --scan 17 --smode gain --adjust-mean  [create a mean-adjusted gains NPZ]
 script/gdp-plot --mode gain --scan 17 -pmode colormap --range 20  [plot gain Real-1/Imag colormaps with fixed percent saturation]
 script/gdp-stats --mode gain --scan 17 --smode gains --flagver 1  [write gains NPZ and matching fV1 flag sidecar]
 script/gdp-flag --mode gain --scan 17 --fmode man-antenna --man-antenna 3,4 --use-flags  [create the next flag version by carrying the highest old version and adding antennas 3 and 4]

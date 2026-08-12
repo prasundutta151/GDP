@@ -29,6 +29,7 @@ CONFIG_NAME = ".gdp-config.json"
 ACTIVE_CONFIG: Optional[Dict[str, Any]] = None
 ACTIVE_FLAGVER: Optional[int] = None
 APPLY_FLAG_FILES: bool = False
+RELATIVE_PATHS = False
 DEFAULT_PLOT_DPI = 320
 PRODUCTS = {
     "gain_colormap": ("gains", "gains_npz_dir", "gains"),
@@ -111,6 +112,27 @@ def activate_config(setup_file: Optional[str] = None) -> Dict[str, Any]:
 
 def load_config() -> Dict[str, Any]:
     return ACTIVE_CONFIG if ACTIVE_CONFIG is not None else activate_config()
+
+
+def runtime_dir() -> Path:
+    cfg = load_config()
+    return Path(str(cfg.get("rundir") or (project_root() / "rundir"))).expanduser().resolve()
+
+
+def format_path_text(text: object) -> str:
+    value = str(text)
+    if not RELATIVE_PATHS:
+        return value
+    prefix = str(runtime_dir()) + "/"
+    return value.replace(prefix, "")
+
+
+def display_path(path: object) -> str:
+    return format_path_text(path)
+
+
+def emit(message: object) -> None:
+    print(format_path_text(message))
 
 
 def config_path(key: str) -> Optional[Path]:
@@ -406,7 +428,7 @@ def ensure_npz(product: str, mode: str, args: argparse.Namespace, scans: Optiona
     product_flagver = product_file_flag_version(product, mode, scan_label, args)
     path = default_product_path(product, mode, scan_label, flagver=product_flagver)
     if path.exists() and not args.recompute and not (product_requires_flagged_file(product, args) and product_flagver is None):
-        print(f"Using existing {product_message_name(product)}: {path}")
+        emit(f"Using existing {product_message_name(product)}: {path}")
         return path
 
     smode = {
@@ -435,6 +457,8 @@ def ensure_npz(product: str, mode: str, args: argparse.Namespace, scans: Optiona
     cmd = [str(script_dir() / "gdp-stats"), "--mode", mode, "--combine-scans", "--smode", smode, output_flag, str(path)]
     if args.setup_file:
         cmd.extend(["--setup-file", args.setup_file])
+    if args.relative_path:
+        cmd.append("--relative-path")
     if args.input_table:
         cmd.extend(["--input-table", args.input_table])
     elif mode == "bandpass" and args.bandpass_table:
@@ -450,13 +474,13 @@ def ensure_npz(product: str, mode: str, args: argparse.Namespace, scans: Optiona
     if args.flagver is not None:
         cmd.extend(["--flagver", str(args.flagver)])
 
-    print("Creating missing NPZ with gdp-stats:")
-    print("$ " + " ".join(cmd))
+    emit("Creating missing NPZ with gdp-stats:")
+    emit("$ " + " ".join(cmd))
     if args.dry_run:
         return path
     subprocess.run(cmd, cwd=str(project_root()), check=True)
     if not path.exists():
-        raise FileNotFoundError(f"gdp-stats completed but expected product is missing: {path}")
+        raise FileNotFoundError(f"gdp-stats completed but expected product is missing: {display_path(path)}")
     return path
 
 
@@ -464,8 +488,8 @@ def ensure_npzs(product: str, mode: str, args: argparse.Namespace, scans: Option
     if args.npz_path:
         path = Path(args.npz_path).expanduser().resolve()
         if not path.exists():
-            raise FileNotFoundError(f"--npz-path does not exist: {path}")
-        print(f"Using supplied NPZ for {product.replace('_', '-')}: {path}")
+            raise FileNotFoundError(f"--npz-path does not exist: {display_path(path)}")
+        emit(f"Using supplied NPZ for {product.replace('_', '-')}: {path}")
         return [(label_from_npz_path(path, product, mode), path)]
 
     if args.combine_scans:
@@ -494,7 +518,7 @@ def ensure_npzs(product: str, mode: str, args: argparse.Namespace, scans: Option
         labels = [label for label, _ in existing]
     if existing and not args.recompute and all(path.exists() for _, path in existing):
         for _, path in existing:
-            print(f"Using existing {product_message_name(product)}: {path}")
+            emit(f"Using existing {product_message_name(product)}: {path}")
         return existing
 
     smode = {
@@ -511,6 +535,8 @@ def ensure_npzs(product: str, mode: str, args: argparse.Namespace, scans: Option
     cmd = [str(script_dir() / "gdp-stats"), "--mode", mode, "--smode", smode]
     if args.setup_file:
         cmd.extend(["--setup-file", args.setup_file])
+    if args.relative_path:
+        cmd.append("--relative-path")
     if args.input_table:
         cmd.extend(["--input-table", args.input_table])
     elif mode == "bandpass" and args.bandpass_table:
@@ -526,8 +552,8 @@ def ensure_npzs(product: str, mode: str, args: argparse.Namespace, scans: Option
     if args.flagver is not None:
         cmd.extend(["--flagver", str(args.flagver)])
 
-    print("Creating missing per-scan NPZ products with gdp-stats:")
-    print("$ " + " ".join(cmd))
+    emit("Creating missing per-scan NPZ products with gdp-stats:")
+    emit("$ " + " ".join(cmd))
     if args.dry_run:
         return existing
     subprocess.run(cmd, cwd=str(project_root()), check=True)
@@ -550,7 +576,7 @@ def ensure_npzs(product: str, mode: str, args: argparse.Namespace, scans: Option
             result = discover_flagged_scan_products(product, mode)
         else:
             result = discover_scan_products(product, mode, flagver=discover_flagver)
-    missing = [str(path) for _, path in result if not path.exists()]
+    missing = [display_path(path) for _, path in result if not path.exists()]
     if missing:
         raise FileNotFoundError(f"Missing expected per-scan products: {missing}")
     if not result:
@@ -597,11 +623,11 @@ def resolve_flag_file(npz_path: Path, flagver: Optional[int]) -> Tuple[int, Path
     if flagver is not None:
         path = flag_file_for_npz(npz_path, flagver)
         if not path.exists():
-            raise SystemExit(f"ERROR: requested flag version fV{int(flagver)} does not exist: {path}")
+            raise SystemExit(f"ERROR: requested flag version fV{int(flagver)} does not exist: {display_path(path)}")
         return flagver, path
     versions = flag_file_versions(npz_path)
     if not versions:
-        raise SystemExit(f"ERROR: no flag versions found for {npz_path}. Run gdp-stats --smode gains first.")
+        raise SystemExit(f"ERROR: no flag versions found for {display_path(npz_path)}. Run gdp-stats --smode gains first.")
     return versions[-1]
 
 
@@ -613,7 +639,7 @@ def apply_flag_file_to_gains(z: Dict[str, np.ndarray], npz_path: Path, flagver: 
     flag_data = load_npz(flag_path)
     missing = {"row", "stokes", "channel", "flag"} - set(flag_data)
     if missing:
-        raise RuntimeError(f"{flag_path} missing arrays: {sorted(missing)}")
+        raise RuntimeError(f"{display_path(flag_path)} missing arrays: {sorted(missing)}")
     lookup = {
         (int(row), int(pol), int(chan)): bool(flag)
         for row, pol, chan, flag in zip(
@@ -636,7 +662,7 @@ def apply_flag_file_to_gains(z: Dict[str, np.ndarray], npz_path: Path, flagver: 
     )
     out = dict(z)
     out["flagged"] = flags
-    print(f"Using flag file fV{version}: {flag_path}")
+    emit(f"Using flag file fV{version}: {flag_path}")
     return out
 
 
@@ -690,7 +716,7 @@ def save_figure(fig: Any, path: Path) -> None:
     fig.tight_layout()
     fig.savefig(path, dpi=DEFAULT_PLOT_DPI, bbox_inches="tight")
     plt.close(fig)
-    print(f"Wrote plot: {path}")
+    emit(f"Wrote plot: {path}")
 
 
 def plot_gain_colormap(
@@ -932,7 +958,7 @@ def plot_gain_colormap(
     fig.subplots_adjust(top=0.88)
     fig.savefig(out, dpi=DEFAULT_PLOT_DPI)
     plt.close(fig)
-    print(f"Wrote plot: {out}")
+    emit(f"Wrote plot: {out}")
 
 
 def compact_number(value: float) -> str:
@@ -1192,14 +1218,14 @@ def plot_reim_products(
     ant_all = filter_antennas(available_antennas, antennas)
     stokes_all = np.unique(z["stokes"]).astype(int)
     if ant_all.size == 0:
-        print("SKIP reim plots: none of the requested antennas are present in the gains NPZ.")
+        emit("SKIP reim plots: none of the requested antennas are present in the gains NPZ.")
         return []
     if antennas is not None:
         missing_ants = [int(ant) for ant in antennas if int(ant) not in set(int(a) for a in ant_all)]
         for ant in missing_ants:
-            print(f"SKIP reim antenna {ant}: antenna is not present in the gains NPZ.")
+            emit(f"SKIP reim antenna {ant}: antenna is not present in the gains NPZ.")
     if stokes_all.size == 0:
-        print("SKIP reim plots: no Stokes values are present in the gains NPZ.")
+        emit("SKIP reim plots: no Stokes values are present in the gains NPZ.")
         return []
 
     header = gain_product_header(z)
@@ -1223,7 +1249,7 @@ def plot_reim_products(
         panels.append((int(stokes), real_vals[finite], imag_vals[finite]))
 
     if not any(real_vals.size for _, real_vals, _ in panels):
-        print("SKIP reim plot: selected antennas/stokes have no finite unflagged real/imag pairs.")
+        emit("SKIP reim plot: selected antennas/stokes have no finite unflagged real/imag pairs.")
         return []
 
     panel_specs = [
@@ -1317,7 +1343,7 @@ def plot_reim_products(
     out = derived_output_path(out_base, antenna_selection_tag(antennas, ant_all, antenna_text))
     fig.savefig(out, dpi=DEFAULT_PLOT_DPI)
     plt.close(fig)
-    print(f"Wrote plot: {out}")
+    emit(f"Wrote plot: {out}")
     return [out]
 
 
@@ -1473,7 +1499,7 @@ def plot_gain_histogram(
     fig.subplots_adjust(left=0.06, right=0.95, bottom=0.075, top=0.9)
     fig.savefig(out, dpi=DEFAULT_PLOT_DPI)
     plt.close(fig)
-    print(f"Wrote plot: {out}")
+    emit(f"Wrote plot: {out}")
 
 
 def derived_output_path(base: Path, suffix: str) -> Path:
@@ -1500,14 +1526,14 @@ def plot_single_antenna_gain_products(
         requested = np.asarray(antennas, dtype=int)
         missing_antennas = [int(ant) for ant in requested if ant not in set(available_antennas.tolist())]
         for ant in missing_antennas:
-            print(f"SKIP antenna {ant}: not present in {npz_path}")
+            emit(f"SKIP antenna {ant}: not present in {npz_path}")
         ant_all = filter_antennas(available_antennas, antennas)
     stokes_all = np.unique(z["stokes"]).astype(int)
     if ant_all.size == 0:
-        print("SKIP antenna plots: none of the requested antennas are present in the gains NPZ.")
+        emit("SKIP antenna plots: none of the requested antennas are present in the gains NPZ.")
         return []
     if stokes_all.size == 0:
-        print("SKIP antenna plots: no Stokes values are present in the gains NPZ.")
+        emit("SKIP antenna plots: no Stokes values are present in the gains NPZ.")
         return []
 
     header = {}
@@ -1615,7 +1641,7 @@ def plot_single_antenna_gain_products(
         if not antenna_panels:
             total = int(np.count_nonzero((ant_arr == int(ant)) & pchan_mask))
             flagged = int(np.count_nonzero((ant_arr == int(ant)) & pchan_mask & flagged_arr))
-            print(
+            emit(
                 f"SKIP antenna {int(ant)}: no finite unflagged samples "
                 f"(samples={total}, flagged={flagged}, pchans={pchans})"
             )
@@ -1696,10 +1722,10 @@ def plot_single_antenna_gain_products(
         fig.savefig(out, dpi=DEFAULT_PLOT_DPI)
         plt.close(fig)
         written.append(out)
-        print(f"Wrote plot: {out}")
+        emit(f"Wrote plot: {out}")
 
     if not written:
-        print("SKIP antenna plots: no selected antenna had finite unflagged data to plot.")
+        emit("SKIP antenna plots: no selected antenna had finite unflagged data to plot.")
     return written
 
 
@@ -1920,7 +1946,7 @@ def plot_antenna_gain_stats_grid(
     out.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out, dpi=DEFAULT_PLOT_DPI)
     plt.close(fig)
-    print(f"Wrote plot: {out}")
+    emit(f"Wrote plot: {out}")
 
 
 def normal_ks_d(vals: np.ndarray) -> float:
@@ -2057,7 +2083,7 @@ def plot_antenna_gain_ks_grid(npz_path: Path, out: Path, antennas: Optional[List
     fig.subplots_adjust(left=0.07, right=0.985, bottom=0.105, top=0.92)
     fig.savefig(out, dpi=DEFAULT_PLOT_DPI)
     plt.close(fig)
-    print(f"Wrote plot: {out}")
+    emit(f"Wrote plot: {out}")
 
 
 def tau_at_threshold(tau: np.ndarray, s2: np.ndarray, threshold: float) -> float:
@@ -2173,7 +2199,7 @@ def plot_self_corr_colormap(npz_path: Path, out: Path, antennas: Optional[List[i
     out.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out, dpi=DEFAULT_PLOT_DPI)
     plt.close(fig)
-    print(f"Wrote plot: {out}")
+    emit(f"Wrote plot: {out}")
 
 
 def plot_self_corr_antenna_products(npz_path: Path, out_base: Path, antennas: Optional[List[int]], threshold: float) -> List[Path]:
@@ -2224,7 +2250,7 @@ def plot_self_corr_antenna_products(npz_path: Path, out_base: Path, antennas: Op
         fig.savefig(out, dpi=DEFAULT_PLOT_DPI)
         plt.close(fig)
         written.append(out)
-        print(f"Wrote plot: {out}")
+        emit(f"Wrote plot: {out}")
 
     return written
 
@@ -2314,6 +2340,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--gain-table", default=None, help="Gain table passed to gdp-stats when gain products are missing.")
     p.add_argument("--bandpass-table", default=None, help="Bandpass table passed to gdp-stats when bandpass products are missing.")
     p.add_argument("--setup-file", default=None, help="Setup JSON file to use. Relative names are resolved under the active runtime directory.")
+    p.add_argument("--relative-path", action="store_true", help="Print runtime-relative file references after reporting the runtime directory; file writes are unchanged.")
     p.add_argument("--npz-path", default=None, help="Use this NPZ file directly for the selected plot mode instead of discovering or creating the default GDP product.")
     p.add_argument("--scan", default=None, help="Comma-separated scans. Must match or create the corresponding GDP products.")
     p.add_argument("--combine-scans", action="store_true", help="Plot one combined allscans-style product. Default: false, make one plot per scan.")
@@ -2344,9 +2371,10 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
-    global ACTIVE_FLAGVER, APPLY_FLAG_FILES
+    global ACTIVE_FLAGVER, APPLY_FLAG_FILES, RELATIVE_PATHS
     args = parse_args()
     activate_config(args.setup_file)
+    RELATIVE_PATHS = bool(args.relative_path)
     args.flagver = parse_flag_version(args.flagver)
     ACTIVE_FLAGVER = args.flagver
     APPLY_FLAG_FILES = bool(args.use_flags)
@@ -2359,6 +2387,8 @@ def main() -> None:
     antenna_text = antenna_from_pmode_values(args, tasks)
     args.antenna = antenna_text
     ants = parse_antenna_list(antenna_text, "--antenna")
+    if args.relative_path:
+        emit(f"Runtime directory: {runtime_dir()}")
 
     for mode in modes_from_arg(args.mode):
         validate_channel_options_for_mode(mode, args, pchans)
@@ -2372,7 +2402,7 @@ def main() -> None:
                 plot_label_base = f"{label}{flag_version_suffix(plot_flagver)}"
                 plot_label = label_with_plot_channels(plot_label_base, pchans if task in {"gain_colormap", "gain_hist", "reim", "antenna", "stats"} else None)
                 out = stats_output_path(plot_dir, mode, plot_label, args.format, args.adjust_mean) if task == "stats" else output_path(plot_dir, task, mode, plot_label, args.format)
-                print(f"START plot {task} mode={mode} scan={label}")
+                emit(f"START plot {task} mode={mode} scan={label}")
                 if task == "gain_colormap":
                     plot_gain_colormap(npz, out, ants, mode, pchans, args.plot_range)
                 elif task == "gain_hist":
@@ -2391,7 +2421,7 @@ def main() -> None:
                     plot_self_corr_antenna_products(npz, out, ants, args.s2_thr)
                 elif task == "cross_corr_colormap":
                     plot_cross_corr_colormap(npz, out, ants)
-                print(f"DONE  plot {task} elapsed_sec={time.perf_counter() - t0:.3f}")
+                emit(f"DONE  plot {task} elapsed_sec={time.perf_counter() - t0:.3f}")
 
 
 if __name__ == "__main__":

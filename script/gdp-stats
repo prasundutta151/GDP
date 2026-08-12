@@ -18,6 +18,7 @@ import numpy as np
 
 CONFIG_NAME = ".gdp-config.json"
 ACTIVE_CONFIG: Optional[Dict[str, Any]] = None
+RELATIVE_PATHS = False
 COMPONENTS = np.array(["real", "imag"], dtype=object)
 METRICS = np.array(["mean", "std", "skew", "kurtosis", "median", "mad", "min", "max"], dtype=object)
 KS_METRICS = np.array(["d_statistic", "n_sample", "mean", "std"], dtype=object)
@@ -75,6 +76,23 @@ def activate_config(setup_file: Optional[str] = None) -> Dict[str, Any]:
 
 def load_config() -> Dict[str, Any]:
     return ACTIVE_CONFIG if ACTIVE_CONFIG is not None else activate_config()
+
+
+def runtime_dir() -> Path:
+    cfg = load_config()
+    return Path(str(cfg.get("rundir") or (project_root() / "rundir"))).expanduser().resolve()
+
+
+def format_path_text(text: object) -> str:
+    value = str(text)
+    if not RELATIVE_PATHS:
+        return value
+    prefix = str(runtime_dir()) + "/"
+    return value.replace(prefix, "")
+
+
+def display_path(path: object) -> str:
+    return format_path_text(path)
 
 
 def casatable_factory():
@@ -252,12 +270,12 @@ def resolve_flag_file(npz_path: Path, flagver: Optional[int]) -> Tuple[int, Path
     if flagver is not None:
         path = flag_file_for_npz(npz_path, flagver)
         if not path.exists():
-            raise SystemExit(f"ERROR: requested flag version fV{int(flagver)} does not exist: {path}")
+            raise SystemExit(f"ERROR: requested flag version fV{int(flagver)} does not exist: {display_path(path)}")
         return flagver, path
     versions = flag_file_versions(npz_path)
     if not versions:
         raise SystemExit(
-            f"ERROR: no flag versions found for {npz_path}. Run gdp-stats --smode gains first to create a .flg file."
+            f"ERROR: no flag versions found for {display_path(npz_path)}. Run gdp-stats --smode gains first to create a .flg file."
         )
     return versions[-1]
 
@@ -387,7 +405,7 @@ class TaskLogger:
         self.path.parent.mkdir(parents=True, exist_ok=True)
 
     def write(self, message: str) -> None:
-        line = f"{datetime.now().isoformat(timespec='seconds')} {message}"
+        line = format_path_text(f"{datetime.now().isoformat(timespec='seconds')} {message}")
         print(line)
         with self.path.open("a", encoding="utf-8") as f:
             f.write(line + "\n")
@@ -658,6 +676,21 @@ def compute_stats(
             data = data[:, ch0:ch1, :]
             flag = flag[:, ch0:ch1, :]
             npol = data.shape[0]
+            scan_means: Dict[Tuple[int, str], float] = {}
+            if subtract_mean:
+                selected_row_mask = np.isin(ant, np.asarray(selected_antennas, dtype=int))
+                if forced_flag_antennas:
+                    selected_row_mask &= ~np.isin(ant, np.asarray(sorted(forced_flag_antennas), dtype=int))
+                for p_idx in range(npol):
+                    selected_data = data[p_idx, :, selected_row_mask].astype(np.complex128, copy=True)
+                    selected_flag = flag[p_idx, :, selected_row_mask]
+                    selected_data[selected_flag] = np.nan + 1j * np.nan
+                    real_vals = np.real(selected_data).ravel()
+                    imag_vals = np.imag(selected_data).ravel()
+                    real_vals = real_vals[np.isfinite(real_vals)]
+                    imag_vals = imag_vals[np.isfinite(imag_vals)]
+                    scan_means[(p_idx, "real")] = float(np.mean(real_vals)) if real_vals.size else np.nan
+                    scan_means[(p_idx, "imag")] = float(np.mean(imag_vals)) if imag_vals.size else np.nan
             if stokes_count is None:
                 stokes_count = npol
                 stats = np.full((len(selected_scans), len(selected_antennas), npol, len(COMPONENTS), len(METRICS)), np.nan)
@@ -680,13 +713,14 @@ def compute_stats(
                 for p_idx in range(npol):
                     z = arr[p_idx].ravel()
                     flagged = int(np.count_nonzero(flg[p_idx].ravel())) if (use_flags or int(antenna) in forced_flag_antennas) else 0
-                    r = np.real(z) - 1.0
-                    i = np.imag(z)
                     if subtract_mean:
-                        r_finite = r[np.isfinite(r)]
-                        i_finite = i[np.isfinite(i)]
-                        r = r - (float(np.mean(r_finite)) if r_finite.size else 0.0)
-                        i = i - (float(np.mean(i_finite)) if i_finite.size else 0.0)
+                        real_mean = scan_means.get((p_idx, "real"), np.nan)
+                        imag_mean = scan_means.get((p_idx, "imag"), np.nan)
+                        r = (np.real(z) / real_mean) - 1.0 if np.isfinite(real_mean) and real_mean != 0.0 else np.full(z.shape, np.nan)
+                        i = np.imag(z) - imag_mean if np.isfinite(imag_mean) else np.full(z.shape, np.nan)
+                    else:
+                        r = np.real(z) - 1.0
+                        i = np.imag(z)
                     for c_idx, vals in enumerate((r, i)):
                         vals = np.asarray(vals, dtype=float)
                         stats[s_idx, a_idx, p_idx, c_idx, :] = metric_values(vals, percent_scale=True)
@@ -707,6 +741,7 @@ def compute_stats(
                 "flag_source": "flg" if flag_lookup is not None and use_flags else "casa-table" if use_flags else "none",
                 "antenna_flags": sorted(forced_flag_antennas),
                 "subtract_mean": bool(subtract_mean),
+                "adjust_mean_convention": "If subtract_mean is true, real gain samples are divided by the finite unflagged all-selected-antenna mean per scan/Stokes before Real-1 statistics; imaginary samples subtract the finite unflagged all-selected-antenna mean per scan/Stokes.",
                 "statistics_convention": "AntStat-style: real samples are real(gain)-1, imag samples are imag(gain); mean/std/median/mad/min/max are saved in percent, skew/kurtosis are dimensionless.",
                 "bchan": bchan,
                 "echan": echan,
@@ -734,6 +769,7 @@ def compute_gains(
     antennas: Optional[List[int]],
     antenna_flags: Optional[List[int]],
     use_flags: bool,
+    adjust_mean: bool,
     bchan: Optional[int],
     echan: Optional[int],
     flag_chans: Optional[Tuple[int, int]],
@@ -818,6 +854,28 @@ def compute_gains(
                     rows["imag"].append(float(np.imag(data[pol, chan])))
                     rows["flagged"].append(bool(flag[pol, chan]))
                     rows["table_flagged"].append(bool(table_flag[pol, chan]))
+        adjustment_means: Dict[str, Dict[int, float]] = {"real": {}, "imag": {}}
+        if adjust_mean and rows["real"]:
+            stokes_arr = np.asarray(rows["stokes"], dtype=int)
+            flagged_arr = np.asarray(rows["flagged"], dtype=bool)
+            real_arr = np.asarray(rows["real"], dtype=float)
+            imag_arr = np.asarray(rows["imag"], dtype=float)
+            for stokes in sorted(set(int(item) for item in rows["stokes"])):
+                mask = (stokes_arr == int(stokes)) & ~flagged_arr
+                real_vals = real_arr[mask]
+                real_vals = real_vals[np.isfinite(real_vals)]
+                imag_vals = imag_arr[mask]
+                imag_vals = imag_vals[np.isfinite(imag_vals)]
+                real_mean = float(np.mean(real_vals)) if real_vals.size else np.nan
+                imag_mean = float(np.mean(imag_vals)) if imag_vals.size else np.nan
+                adjustment_means["real"][int(stokes)] = real_mean
+                adjustment_means["imag"][int(stokes)] = imag_mean
+                if np.isfinite(real_mean) and real_mean != 0.0:
+                    real_arr[stokes_arr == int(stokes)] = real_arr[stokes_arr == int(stokes)] / real_mean
+                if np.isfinite(imag_mean):
+                    imag_arr[stokes_arr == int(stokes)] = imag_arr[stokes_arr == int(stokes)] - imag_mean
+            rows["real"] = real_arr.tolist()
+            rows["imag"] = imag_arr.tolist()
         return {
             "header": {
                 "format": "GDP_GAINS_NPZ",
@@ -829,6 +887,9 @@ def compute_gains(
                 "use_flags": bool(use_flags),
                 "flag_source": "flg" if flag_lookup is not None else "casa-table" if has_flag_column else "none",
                 "antenna_flags": sorted(forced_flag_antennas),
+                "adjust_mean": bool(adjust_mean),
+                "adjust_mean_convention": "If true, real gain samples are divided by the finite unflagged all-antenna mean per Stokes; imaginary samples subtract the finite unflagged all-antenna mean per Stokes.",
+                "adjust_mean_values": adjustment_means,
                 "bchan": bchan,
                 "echan": echan,
                 "flag_chans": flag_chans,
@@ -1374,6 +1435,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--gain-table", default=None, help="Input gain table. Defaults to saved gdp-setup gain_table in gain mode.")
     p.add_argument("--bandpass-table", default=None, help="Input bandpass table. Defaults to saved gdp-setup bandpass_table in bandpass mode.")
     p.add_argument("--setup-file", default=None, help="Setup JSON file to use. Relative names are resolved under the active runtime directory.")
+    p.add_argument("--relative-path", action="store_true", help="Print runtime-relative file references after reporting the runtime directory; file writes are unchanged.")
     p.add_argument("--mode", choices=["auto", "gain", "bandpass"], default="auto", help="Statistics mode. Default: auto.")
     p.add_argument("--scan", default=None, help="Comma-separated scans to process. Default: all scans.")
     p.add_argument("--combine-scans", action="store_true", help="Combine selected scans into one allscans-style product. Default: false, write one product per scan.")
@@ -1398,6 +1460,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--corr-nbin", type=int, default=32, help="Structure-function lag bin count.")
     p.add_argument("--corr-bintype", choices=["log", "lin"], default="log", help="Structure-function lag binning.")
     p.add_argument("--corr-njack", type=int, default=32, help="Jackknife folds for structure-function errors.")
+    p.add_argument("--adjust-mean", action="store_true", help="For --smode gain/gains or stats, adjust selected samples by the all-antenna finite unflagged mean per Stokes before writing the product. Real gain samples are divided by the real mean; imaginary samples subtract the imaginary mean.")
     p.add_argument("--csv", action="store_true", help="Also write optional CSV products for selected subtasks that support CSV.")
     p.add_argument("--output-csv", default=None, help="Stats CSV path; implies --csv.")
     return p.parse_args()
@@ -1485,7 +1548,7 @@ def run_batch(
 
     if args.gains:
         t0 = logger.start(f"gains {scan_label}")
-        gains = compute_gains(input_table, mode, scans, antennas, antenna_flags, args.use_flags, None, None, args.flag_chans, None)
+        gains = compute_gains(input_table, mode, scans, antennas, antenna_flags, args.use_flags, args.adjust_mean, None, None, args.flag_chans, None)
         out = gains_out
         write_npz(out, gains)
         logger.write(f"Wrote gains NPZ: {out}")
@@ -1502,7 +1565,7 @@ def run_batch(
 
     if args.stats:
         t0 = logger.start(f"stats {scan_label}")
-        stats_result = compute_stats(input_table, mode, scans, antennas, antenna_flags, args.use_flags, False, None, None, args.flag_chans, flag_lookup)
+        stats_result = compute_stats(input_table, mode, scans, antennas, antenna_flags, args.use_flags, args.adjust_mean, None, None, args.flag_chans, flag_lookup)
         if flag_header:
             stats_result["header"]["flag_file_version"] = flag_header.get("flag_version")
         out = Path(args.output_npz).expanduser().resolve() if args.output_npz else path_with_flag_version(build_default_output(input_table, output_label, mode, "stats", "npz"), applied_flag_version)
@@ -1555,8 +1618,10 @@ def run_batch(
 
 
 def main() -> None:
+    global RELATIVE_PATHS
     args = parse_args()
     activate_config(args.setup_file)
+    RELATIVE_PATHS = bool(args.relative_path)
     apply_smode(args)
     mode = args.mode
     if mode == "auto":
@@ -1576,6 +1641,8 @@ def main() -> None:
     if not any([args.gains, args.stats, args.ks, args.self_corr, args.cross_corr]):
         args.stats = True
     logger = TaskLogger(default_log_path(input_table))
+    if args.relative_path:
+        logger.write(f"Runtime directory: {runtime_dir()}")
     logger.write(f"gdp-stats input={input_table} mode={mode}")
     batches = scan_batches(input_table, scans, args.combine_scans)
     if len(batches) > 1 and explicit_outputs(args):

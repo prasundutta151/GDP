@@ -40,6 +40,9 @@ MULTI_VALUE_OPTIONS = {
     "use-flags",
     "use_flags",
 }
+RELATIVE_PATH_COMMANDS = {"gdp-stats", "gdp-plot", "gdp-flag", "gdp-setup", "gdp-util"}
+ITER_KEYS = {"iter", "iiter", "Iiter"}
+INTENT_METADATA_KEYS = {"name", "description", "use", *ITER_KEYS}
 
 
 def project_root() -> Path:
@@ -85,6 +88,23 @@ def activate_config(setup_file: Optional[str] = None) -> Dict[str, Any]:
 
 def load_config() -> Dict[str, Any]:
     return ACTIVE_CONFIG if ACTIVE_CONFIG is not None else activate_config()
+
+
+def runtime_dir() -> Path:
+    cfg = load_config()
+    return Path(str(cfg.get("rundir") or (project_root() / "rundir"))).expanduser().resolve()
+
+
+def format_path_text(text: object, relative_paths: bool = False, rundir: Optional[Path] = None) -> str:
+    value = str(text)
+    if not relative_paths:
+        return value
+    root = rundir or runtime_dir()
+    return value.replace(str(root.resolve()) + "/", "")
+
+
+def emit(message: object, relative_paths: bool = False, rundir: Optional[Path] = None) -> None:
+    print(format_path_text(message, relative_paths, rundir))
 
 
 def strip_comment(line: str) -> str:
@@ -140,6 +160,8 @@ def parse_key_value(line: str, lineno: int) -> Tuple[str, Any]:
 def parse_plan(path: Path) -> Tuple[Dict[str, Any], List[Dict[str, Any]], Dict[str, Any]]:
     variables: Dict[str, Any] = {}
     settings: Dict[str, Any] = {}
+    defaults: Dict[str, Any] = {}
+    pending_intent_args: Dict[str, Any] = {}
     intents: List[Dict[str, Any]] = []
     section: Optional[str] = None
     current: Optional[Dict[str, Any]] = None
@@ -149,11 +171,24 @@ def parse_plan(path: Path) -> Tuple[Dict[str, Any], List[Dict[str, Any]], Dict[s
         if not line:
             continue
 
-        if line in {"---", "end"}:
+        if line == "end":
             if current is not None:
                 intents.append(current)
                 current = None
             section = None
+            continue
+
+        if re.fullmatch(r"-{3,}", line):
+            if current is not None:
+                intents.append(current)
+                current = None
+                section = None
+            elif section == "defaults":
+                section = None
+            elif section in {"variables", None}:
+                section = "defaults" if section is None else None
+            else:
+                section = None
             continue
 
         if line == "variables:":
@@ -167,7 +202,10 @@ def parse_plan(path: Path) -> Tuple[Dict[str, Any], List[Dict[str, Any]], Dict[s
             if current is not None:
                 intents.append(current)
             _, command = parse_key_value(line, lineno)
-            current = {"command": str(command), "args": {}, "lineno": lineno}
+            args = dict(defaults)
+            args.update(pending_intent_args)
+            pending_intent_args = {}
+            current = {"command": str(command), "args": args, "lineno": lineno}
             section = "intent"
             continue
 
@@ -175,20 +213,27 @@ def parse_plan(path: Path) -> Tuple[Dict[str, Any], List[Dict[str, Any]], Dict[s
         if line.endswith(":") and line[:-1].strip().startswith("gdp-"):
             if current is not None:
                 intents.append(current)
-            current = {"command": line[:-1].strip(), "args": {}, "lineno": lineno}
+            args = dict(defaults)
+            args.update(pending_intent_args)
+            pending_intent_args = {}
+            current = {"command": line[:-1].strip(), "args": args, "lineno": lineno}
             section = "intent"
             continue
 
         key, value = parse_key_value(line, lineno)
         if section == "variables":
             variables[key] = value
+        elif section == "defaults":
+            defaults[key] = value
         elif section == "intent" and current is not None:
             current["args"][key] = value
+        elif section is None and key in ITER_KEYS:
+            pending_intent_args["iter"] = value
         elif section is None and key in {"setup-file", "setup_file"}:
             settings["setup_file"] = value
         else:
             raise ValueError(
-                f"Line {lineno}: key/value line must be inside variables:, an intent block, or a supported top-level setting"
+                f"Line {lineno}: key/value line must be inside variables:, a defaults block, an intent block, or a supported top-level setting"
             )
 
     if current is not None:
@@ -251,7 +296,7 @@ def command_path(command: str) -> Path:
 def args_to_cli(args: Dict[str, Any], variables: Dict[str, Any]) -> List[str]:
     cli: List[str] = []
     for key, raw_value in args.items():
-        if key in {"name", "description"}:
+        if key in INTENT_METADATA_KEYS:
             continue
         value = resolve_value(raw_value, variables)
         if key in {"arg", "args", "positional"}:
@@ -284,10 +329,53 @@ def normalize_intent_args(command: str, args: Dict[str, Any]) -> Dict[str, Any]:
     return dict(args)
 
 
-def run_plan(plan_path: Path, dry_run: bool = False, only: Optional[str] = None, setup_file: Optional[str] = None) -> None:
+def intent_enabled(intent: Dict[str, Any], variables: Dict[str, Any]) -> bool:
+    args = intent.get("args", {})
+    if "use" not in args:
+        return True
+    value = resolve_value(args["use"], variables)
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in {"true", "yes", "on", "1"}:
+        return True
+    if text in {"false", "no", "off", "0"}:
+        return False
+    raise ValueError(f"Intent use must be true or false near line {intent.get('lineno')}: {value}")
+
+
+def intent_iterations(intent: Dict[str, Any], variables: Dict[str, Any]) -> int:
+    args = intent.get("args", {})
+    raw_value = None
+    for key in ITER_KEYS:
+        if key in args:
+            raw_value = args[key]
+            break
+    if raw_value is None:
+        return 1
+    value = resolve_value(raw_value, variables)
+    try:
+        count = int(str(value).strip())
+    except Exception as exc:
+        raise ValueError(f"Intent iter must be a positive integer near line {intent.get('lineno')}: {value}") from exc
+    if count < 1:
+        raise ValueError(f"Intent iter must be a positive integer near line {intent.get('lineno')}: {value}")
+    return count
+
+
+def run_plan(
+    plan_path: Path,
+    dry_run: bool = False,
+    only: Optional[str] = None,
+    setup_file: Optional[str] = None,
+    relative_paths: bool = False,
+) -> None:
     plan_vars, intents, settings = parse_plan(plan_path)
     selected_setup_file = setup_file or settings.get("setup_file")
     activate_config(str(selected_setup_file) if selected_setup_file else None)
+    rundir = runtime_dir()
+    if relative_paths:
+        print(f"Runtime directory: {rundir}")
     variables = {
         "project_root": str(project_root()),
         "script_dir": str(script_dir()),
@@ -302,17 +390,26 @@ def run_plan(plan_path: Path, dry_run: bool = False, only: Optional[str] = None,
         label = str(intent["args"].get("name", command))
         if only is not None and only not in {command, label, str(index)}:
             continue
+        if not intent_enabled(intent, variables):
+            emit(f"[{index}] {label}", relative_paths, rundir)
+            emit("SKIP use=false", relative_paths, rundir)
+            continue
         exe = command_path(command)
         intent_args = normalize_intent_args(command, intent["args"])
         if selected_setup_file and command in {"gdp-stats", "gdp-plot", "gdp-flag"} and "setup-file" not in intent_args and "setup_file" not in intent_args:
             intent_args["setup-file"] = selected_setup_file
+        if relative_paths and command in RELATIVE_PATH_COMMANDS and "relative-path" not in intent_args and "relative_path" not in intent_args:
+            intent_args["relative-path"] = True
+        repeat = intent_iterations(intent, variables)
         cli = args_to_cli(intent_args, variables)
         cmd = [str(exe), *cli]
-        print(f"[{index}] {label}")
-        print("$ " + " ".join(cmd))
-        if dry_run:
-            continue
-        subprocess.run(cmd, cwd=str(project_root()), check=True)
+        for iteration in range(1, repeat + 1):
+            iter_suffix = f" iter={iteration}/{repeat}" if repeat > 1 else ""
+            emit(f"[{index}] {label}{iter_suffix}", relative_paths, rundir)
+            emit("$ " + " ".join(cmd), relative_paths, rundir)
+            if dry_run:
+                continue
+            subprocess.run(cmd, cwd=str(project_root()), check=True)
 
 
 def parse_args() -> argparse.Namespace:
@@ -321,6 +418,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--setup-file", default=None, help="Setup JSON file to use. Relative names are resolved under the active runtime directory.")
     p.add_argument("--dry-run", action="store_true", help="Print commands without running them.")
     p.add_argument("--only", default=None, help="Run only the matching intent index, command, or name.")
+    p.add_argument("--relative-path", action="store_true", help="Print runtime-relative file references and pass --relative-path to GDP child commands.")
     return p.parse_args()
 
 
@@ -330,7 +428,7 @@ def main() -> None:
     if not plan.exists():
         raise FileNotFoundError(f"Plan file not found: {plan}")
     try:
-        run_plan(plan, dry_run=args.dry_run, only=args.only, setup_file=args.setup_file)
+        run_plan(plan, dry_run=args.dry_run, only=args.only, setup_file=args.setup_file, relative_paths=args.relative_path)
     except subprocess.CalledProcessError as exc:
         raise SystemExit(exc.returncode) from exc
     except (ValueError, KeyError) as exc:

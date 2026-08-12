@@ -18,6 +18,7 @@ variables:
 
 intent: gdp-stats
   name: gain samples for plotting
+  use: true
   mode: gain
   combine-scans: false
   smode: gains
@@ -29,6 +30,7 @@ end
 
 #intent: gdp-flag
 #  name: manual antenna flags
+#  use: false
 #  mode: gain
 #  scan: 17
 #  fmode: man-antenna

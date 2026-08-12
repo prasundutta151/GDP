@@ -2588,6 +2588,151 @@ Verification
 - `python3 -m py_compile script/gdp-util`
 - `script/gdp-util --help`
 
+## 2026-08-12 13:20:00 IST
+
+Prompt / Request
+- In `gdp-plan-run`, add an intent-level `use: true|false` switch.
+- If omitted, the intent should run. If `use: false`, keep the intent in the
+  plan but skip it.
+
+Changes Made
+- Added `use` as reserved plan intent metadata alongside `name` and
+  `description`.
+- `use: false` now prints `SKIP use=false` and does not build or execute the
+  child command.
+- `use: true` and omitted `use` run normally.
+- Invalid `use` values produce a plan-run error.
+- Updated `doc/gdp-plan-run.html` and `pipelines/sample_stats.plan`.
+
+Verification
+- `python3 -m py_compile script/gdp-plan-run`
+- Dry-run plan with one enabled and one disabled intent.
+
+## 2026-08-12 13:35:00 IST
+
+Prompt / Request
+- In `gdp-plan-run`, allow key/value defaults written between hyphen delimiter
+  lines to apply to all following intents unless overridden inside an intent.
+
+Changes Made
+- Added defaults block parsing using delimiter lines made of three or more
+  hyphens, for example `-----`.
+- Defaults are copied into each following intent when the intent starts.
+- Intent-local keys override defaults.
+- Later defaults blocks update defaults for later intents.
+- Updated `doc/gdp-plan-run.html`.
+
+Verification
+- `python3 -m py_compile script/gdp-plan-run`
+- Dry-run plan with defaults inherited by one intent and overridden by another.
+
+## 2026-08-12 14:40:00 IST
+
+Prompt / Request
+- Add a way to run an intent block N times by writing `iter: 4` before the
+  intent block.
+
+Changes Made
+- Added intent metadata `iter`, accepted before an intent or inside the intent.
+- `iter` defaults to `1`, must be a positive integer, and is not forwarded to
+  the child GDP command.
+- Repeated output labels include `iter=i/N`.
+- Also accepted `Iiter` as a spelling variant.
+- Updated `doc/gdp-plan-run.html`.
+
+Verification
+- `python3 -m py_compile script/gdp-plan-run`
+- Dry-run plans for `iter` before an intent, `iter` inside an intent, and an
+  invalid `iter` value.
+
+## 2026-08-12 13:50:00 IST
+
+Prompt / Request
+- When the per-antenna final flag summary is written to the terminal/log, also
+  show how much was flagged by the current flagging fmode.
+
+Changes Made
+- Extended the completed `gdp-flag` flagging summary with
+  `fmode_flagged_points` and `fmode_flagged_percent` per antenna.
+- Kept existing summary-only mode unchanged because it reads an already-written
+  flag file and has no current fmode mask.
+- Updated `doc/gdp-flag.html`.
+
+Verification
+- `python3 -m py_compile script/gdp-flag`
+- In-memory logger formatting check for final and current-fmode percentages.
+
+## 2026-08-12 14:10:00 IST
+
+Prompt / Request
+- Rework `gdp-flag --fmode ante-mean-thrsld` so it thresholds antenna means.
+- For each antenna, calculate mean Real-1 and mean Imag over all selected
+  time/channel samples. Then calculate the standard deviation of those antenna
+  means.
+- Require more than seven valid antennas; otherwise log the insufficient
+  antenna count and antenna list.
+- Calculate a Gaussian `gamma` where only one antenna is expected outside the
+  cutoff, then flag antennas outside `gamma * threshold`.
+- Default threshold should be `1`.
+
+Changes Made
+- Changed `ante-mean-thrsld` to compute per-antenna Real-1/Imag means and the
+  standard deviation of those antenna means per Stokes.
+- Added the two-sided Gaussian one-expected-antenna cutoff using
+  `NormalDist().inv_cdf(1 - 1/(2N))`.
+- Flags antenna/Stokes groups when either Real-1 or Imag antenna-mean offset
+  exceeds `threshold * gamma * std_of_antenna_means`.
+- Changed the default `--alpha` for `ante-mean-thrsld` from `5` to `1`.
+- Added insufficient-antenna logging when valid antenna count is <= 7.
+- Updated `doc/gdp-flag.html`.
+
+Verification
+- `python3 -m py_compile script/gdp-flag`
+- Synthetic gain-array checks for insufficient antennas and promoted outlier
+  antennas.
+
+## 2026-08-12 14:25:00 IST
+
+Prompt / Request
+- Compact the per-antenna final flag summary table.
+- Remove `fmode_flagged_points`, `final_flagged_points`, and `total_points`.
+- Use the header names `fmod-per`, `pts`, and `fin_per`, where `pts` is
+  `flagged/total`.
+
+Changes Made
+- Changed active flagging summaries to
+  `antenna  fmod-per  pts  fin_per`.
+- Changed summary-only tables to `antenna  pts  fin_per`.
+- Updated `doc/gdp-flag.html`.
+
+Verification
+- `python3 -m py_compile script/gdp-flag`
+- In-memory summary formatting check.
+
+## 2026-08-12 13:05:00 IST
+
+Prompt / Request
+- Restrict `gdp-util --chaninfo` to `--mode bandpass`.
+- Add `gdp-util --timeinfo` for gain mode, reporting number of time points,
+  delta-T, and start/end times in IST and GMT.
+- If a mode-specific action is used with the wrong mode, print a terminal error
+  and exit.
+
+Changes Made
+- Added `--timeinfo` with `NTime`, `delta-T_sec`, `time-start_IST`,
+  `time-end_IST`, `time-start_GMT`, and `time-end_GMT`.
+- Added early validation so channel actions (`--chaninfo`, `--channelwidth`,
+  `--bandwidth`) require `--mode bandpass`.
+- Added early validation so time actions (`--timeinfo`, `--integration-time`)
+  require `--mode gain`.
+- Updated utility docs and README examples.
+
+Verification
+- `python3 -m py_compile script/gdp-util`
+- `script/gdp-util --help`
+- `script/gdp-util --mode gain --chaninfo`
+- `script/gdp-util --mode bandpass --timeinfo`
+
 ## 2026-08-10 17:25:00 IST
 
 Prompt / Request
@@ -2780,3 +2925,52 @@ Verification
 - `python3 -m py_compile script/gdp-plan-run`
 - Verified `script/gdp-plan-run pipelines/sample_flag.plan --dry-run` expands
   list and trailing threshold values into separate CLI tokens.
+
+Documentation Follow-up
+- Clarified in `doc/gdp-plan-run.html` that `end` closes an intent block.
+- Documented that a missing `end` is accepted when another block marker or EOF
+  is reached, but any intervening key/value lines remain part of the still-open
+  intent.
+
+## 2026-08-12 12:35:00 IST
+
+Prompt / Request
+- Add a `--relative-path` display mode across GDP commands so terminal/log
+  messages print the runtime directory once and then refer to generated runtime
+  files relative to it.
+
+Changes Made
+- Added `--relative-path` to `gdp-stats`, `gdp-flag`, `gdp-plot`,
+  `gdp-setup`, `gdp-util`, and `gdp-plan-run`.
+- Kept actual output filenames and write locations unchanged.
+- Updated `gdp-plan-run --relative-path` to pass the flag to GDP child
+  commands.
+- Updated command docs and README notes for the display-only behavior.
+
+Verification
+- `python3 -m py_compile script/gdp-plan-run script/gdp-flag script/gdp-stats script/gdp-plot script/gdp-setup script/gdp-util`
+- `script/gdp-setup --clean no-stop --dry-run --relative-path`
+- `script/gdp-plan-run pipelines/sample_flag.plan --dry-run --relative-path`
+- Simulated a `gdp-stats` logger write and confirmed logfile output uses
+  runtime-relative file references.
+
+## 2026-08-12 12:45:00 IST
+
+Prompt / Request
+- In `gdp-util`, replace `--gain-table` / `--bandpass-table` selection with
+  `--mode gain|bandpass`.
+- Add `--scans`, `--antenna`, and `--chaninfo`.
+
+Changes Made
+- Added `gdp-util --mode {gain,bandpass}` for saved setup table selection when
+  `--input-table` is omitted.
+- Removed the `gdp-util` CLI options `--gain-table` and `--bandpass-table`.
+- Added `--scans` to print available scan numbers and `--antenna` to print
+  available antenna numbers from the selected table.
+- Added `--chaninfo` to print bandpass channel count, mean channel width, mean
+  total bandwidth, and start/end frequency with kHz/MHz-scaled keys.
+- Updated `doc/gdp-util.html`, README, and step-by-step examples.
+
+Verification
+- `python3 -m py_compile script/gdp-util`
+- `script/gdp-util --help`

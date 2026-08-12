@@ -125,6 +125,22 @@ def build_paths(rundir: Path) -> Dict[str, str]:
     }
 
 
+def format_path_text(text: object, rundir: Path, relative_paths: bool) -> str:
+    value = str(text)
+    if not relative_paths:
+        return value
+    root = str(rundir.resolve())
+    return value.replace(root + "/", "").replace(root, ".")
+
+
+def display_path(path: object, rundir: Path, relative_paths: bool) -> str:
+    return format_path_text(path, rundir, relative_paths)
+
+
+def emit(message: object, rundir: Path, relative_paths: bool) -> None:
+    print(format_path_text(message, rundir, relative_paths))
+
+
 def ensure_rundir(rundir: Path, dry_run: bool = False) -> List[str]:
     created: List[str] = []
     for rel in [""] + RUNDIR_SUBDIRS:
@@ -176,14 +192,14 @@ def clean_without_prompt(clean_value: object) -> bool:
     raise SystemExit("--clean accepts only the optional value 'no-stop'.")
 
 
-def confirm_clean(rundir: Path, removed: List[str]) -> bool:
-    print(f"Clean GDP runtime outputs under: {rundir}")
+def confirm_clean(rundir: Path, removed: List[str], relative_paths: bool = False) -> bool:
+    emit(f"Clean GDP runtime outputs under: {rundir}", rundir, relative_paths)
     if removed:
-        print("This will permanently remove:")
+        emit("This will permanently remove:", rundir, relative_paths)
         for item in removed:
-            print(f"  {item}")
+            emit(f"  {item}", rundir, relative_paths)
     else:
-        print("No GDP runtime outputs found to remove.")
+        emit("No GDP runtime outputs found to remove.", rundir, relative_paths)
         return True
     answer = input("Type 'yes' to continue: ").strip().lower()
     return answer == "yes"
@@ -238,6 +254,11 @@ def parse_args() -> argparse.Namespace:
         "--show",
         action="store_true",
         help="Show the current saved configuration and exit.",
+    )
+    p.add_argument(
+        "--relative-path",
+        action="store_true",
+        help="Print runtime-relative file references after reporting the runtime directory; file writes are unchanged.",
     )
     p.add_argument(
         "--clean",
@@ -298,40 +319,42 @@ def main() -> None:
         or (project_root() / "rundir")
     ).expanduser().resolve()
     setup_file = resolve_setup_file(rundir, args.setup_file)
+    if args.relative_path:
+        print(f"Runtime directory: {rundir}")
 
     if args.clean is not None:
         no_stop = clean_without_prompt(args.clean)
         removed = clean_runtime_products(rundir, dry_run=True)
         if args.dry_run:
             created = ensure_rundir(rundir, dry_run=True)
-            print(f"Would clean GDP runtime outputs under: {rundir}")
+            emit(f"Would clean GDP runtime outputs under: {rundir}", rundir, args.relative_path)
             if removed:
-                print("Would remove:")
+                emit("Would remove:", rundir, args.relative_path)
                 for item in removed:
-                    print(f"  {item}")
+                    emit(f"  {item}", rundir, args.relative_path)
             else:
-                print("No GDP runtime outputs found to remove.")
+                emit("No GDP runtime outputs found to remove.", rundir, args.relative_path)
             if created:
-                print("Would recreate directories:")
+                emit("Would recreate directories:", rundir, args.relative_path)
                 for item in created:
-                    print(f"  {item}")
+                    emit(f"  {item}", rundir, args.relative_path)
             return
-        if not no_stop and not confirm_clean(rundir, removed):
-            print("Clean cancelled.")
+        if not no_stop and not confirm_clean(rundir, removed, args.relative_path):
+            emit("Clean cancelled.", rundir, args.relative_path)
             return
         removed = clean_runtime_products(rundir, dry_run=False)
         created = ensure_rundir(rundir, dry_run=args.dry_run)
-        print(f"Cleaned GDP runtime outputs under: {rundir}")
+        emit(f"Cleaned GDP runtime outputs under: {rundir}", rundir, args.relative_path)
         if removed:
-            print("Removed:")
+            emit("Removed:", rundir, args.relative_path)
             for item in removed:
-                print(f"  {item}")
+                emit(f"  {item}", rundir, args.relative_path)
         else:
-            print("No GDP runtime outputs found to remove.")
+            emit("No GDP runtime outputs found to remove.", rundir, args.relative_path)
         if created:
-            print("Recreated directories:")
+            emit("Recreated directories:", rundir, args.relative_path)
             for item in created:
-                print(f"  {item}")
+                emit(f"  {item}", rundir, args.relative_path)
         return
 
     allow_missing = args.allow_missing_table or args.allow_missing_source
@@ -365,35 +388,36 @@ def main() -> None:
 
     if args.dry_run:
         archived = archive_default_setup_file(setup_file, dry_run=True)
-        print("Would create directories:")
+        emit("Would create directories:", rundir, args.relative_path)
         for item in created:
-            print(f"  {item}")
+            emit(f"  {item}", rundir, args.relative_path)
         if archived is not None:
-            print(f"\nWould archive default setup file:\n  {setup_file} -> {archived}")
-        print("\nWould write configuration:")
-        print(f"  setup file:  {setup_file}")
-        print(f"  active file: {cfg_path}")
+            emit(f"\nWould archive default setup file:\n  {setup_file} -> {archived}", rundir, args.relative_path)
+        emit("\nWould write configuration:", rundir, args.relative_path)
+        emit(f"  setup file:  {setup_file}", rundir, args.relative_path)
+        emit(f"  active file: {cfg_path}", rundir, args.relative_path)
         print(json.dumps(config, indent=2, sort_keys=True))
         return
 
     archived = archive_default_setup_file(setup_file)
     write_config(setup_file, config)
     write_config(cfg_path, config)
-    print(f"GDP setup file written: {setup_file}")
-    print(f"GDP active configuration written: {cfg_path}")
+    emit(f"GDP setup file written: {setup_file}", rundir, args.relative_path)
+    emit(f"GDP active configuration written: {cfg_path}", rundir, args.relative_path)
     if archived is not None:
-        print(f"Previous default setup file archived: {archived}")
-    print(f"Runtime directory: {rundir}")
+        emit(f"Previous default setup file archived: {archived}", rundir, args.relative_path)
+    if not args.relative_path:
+        print(f"Runtime directory: {rundir}")
     if gain_table is not None:
-        print(f"Gain table:        {gain_table}")
+        emit(f"Gain table:        {gain_table}", rundir, args.relative_path)
     if bandpass_table is not None:
-        print(f"Bandpass table:    {bandpass_table}")
+        emit(f"Bandpass table:    {bandpass_table}", rundir, args.relative_path)
     if created:
-        print("Created directories:")
+        emit("Created directories:", rundir, args.relative_path)
         for item in created:
-            print(f"  {item}")
+            emit(f"  {item}", rundir, args.relative_path)
     else:
-        print("Runtime directory structure already existed.")
+        emit("Runtime directory structure already existed.", rundir, args.relative_path)
 
 
 if __name__ == "__main__":

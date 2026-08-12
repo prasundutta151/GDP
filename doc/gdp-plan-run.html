@@ -63,6 +63,7 @@ script/gdp-plan-run pipelines/sample_stats.plan --only gdp-stats  [run only inte
         <tr><td><code>--setup-file NAME</code></td><td>Setup JSON file to use for plan variables and for <code>gdp-stats</code>, <code>gdp-flag</code>, and <code>gdp-plot</code> intents. Relative names are resolved under the active runtime directory.</td></tr>
         <tr><td><code>--dry-run</code></td><td>Print commands without running them.</td></tr>
         <tr><td><code>--only VALUE</code></td><td>Run only the matching intent index, command name, or intent <code>name</code>.</td></tr>
+        <tr><td><code>--relative-path</code></td><td>Print the runtime directory near startup, show runtime file references relative to that directory, and pass <code>--relative-path</code> to GDP child commands in the plan.</td></tr>
       </table>
     </section>
 
@@ -74,9 +75,15 @@ script/gdp-plan-run pipelines/sample_stats.plan --only gdp-stats  [run only inte
 variables:
   stats_npz: ${stats_npz_dir}/sample_gain_stats.npz
 
+-----
+mode: gain
+scan: 18
+-----
+
+iter: 4
 intent: gdp-stats
   name: gain statistics
-  mode: gain
+  use: true
   combine-scans: true
   smode: stats
   output-npz: ${stats_npz}
@@ -85,11 +92,16 @@ end
 
 intent: gdp-plot
   name: plot gain statistics
-  mode: gain
+  use: false
+  scan: 19
   combine-scans: true
   pmode: stats
 end</code></pre>
-      <p>Intent keys become CLI flags. For example, <code>output-npz</code> becomes <code>--output-npz</code>. Boolean <code>true</code> values become standalone flags, while <code>false</code> and <code>null</code> values are omitted. For <code>gdp-stats</code>, task selection should be written as <code>smode: stats,ks</code> rather than older boolean task keys.</p>
+      <p>Intent keys become CLI flags. For example, <code>output-npz</code> becomes <code>--output-npz</code>. Boolean <code>true</code> values become standalone flags, while <code>false</code> and <code>null</code> values are omitted. The metadata keys <code>name</code>, <code>description</code>, <code>use</code>, and <code>iter</code> are not forwarded to the GDP child command. For <code>gdp-stats</code>, task selection should be written as <code>smode: stats,ks</code> rather than older boolean task keys.</p>
+      <p>Key/value lines between delimiter lines made of hyphens, such as <code>-----</code>, become defaults for all intents that follow. Intent-local keys override defaults before <code>end</code>. Defaults are cumulative, so a later defaults block updates the defaults used by later intents.</p>
+      <p><code>use: false</code> disables an intent without deleting it from the plan. Omitted <code>use</code> is treated as <code>true</code>. When an intent is disabled, <code>gdp-plan-run</code> prints the intent label followed by <code>SKIP use=false</code> and moves to the next intent.</p>
+      <p><code>iter: N</code> repeats an intent <code>N</code> times. It can be written immediately before an intent block or inside the intent block. If omitted, GDP uses <code>iter: 1</code>. Repeated dry-run/output labels include <code>iter=i/N</code>. The spelling <code>Iiter</code> is also accepted.</p>
+      <p>The <code>end</code> line closes the current intent block. Use it after every intent so the plan is easy to read and so later key/value lines cannot accidentally become part of the previous command. If <code>end</code> is not written, GDP still closes the current intent when it sees the next <code>intent:</code> block, a <code>variables:</code> block, a separator line <code>---</code>, or the end of the plan file. This means a missing <code>end</code> is accepted in simple plans, but any extra lines before the next block are treated as more arguments for the still-open intent.</p>
       <p>Options that accept multiple command-line tokens can be written as shell-style values in the plan. This includes antenna lists, plot channel windows, manual flag selections, and <code>gdp-flag --fmode</code> trailing values. Quote bracketed ranges when they should remain one token.</p>
       <pre><code>intent: gdp-flag
   mode: gain

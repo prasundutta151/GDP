@@ -44,20 +44,23 @@
 
     <section>
       <h2>Purpose</h2>
-      <p><code>gdp-util</code> provides small metadata utilities behind one command. It can print table headers, observing dates, channel-width, band-width, integration-time summaries, and the saved GDP setup configuration. It also updates the GDP version file and provides <code>--git-push</code> for the GDP release/git workflow.</p>
+      <p><code>gdp-util</code> provides small metadata utilities behind one command. It can print table headers, observing dates, scan lists, antenna lists, channel summaries, channel-width, band-width, integration-time summaries, and the saved GDP setup configuration. It also updates the GDP version file and provides <code>--git-push</code> for the GDP release/git workflow.</p>
     </section>
 
     <section>
       <h2>Usage</h2>
       <pre><code>script/gdp-util --input-table /path/to/table.g --header  [show table rows, columns, IDs, and data-column descriptions]
-script/gdp-util --gain-table --header  [show header metadata from the saved gain table]
-script/gdp-util --bandpass-table --header --date  [show header and date metadata from the saved bandpass table]
-script/gdp-util --gain-table /path/to/other.g --header --json  [show metadata from an explicit gain table path]
+script/gdp-util --mode gain --header  [show header metadata from the saved gain table]
+script/gdp-util --mode bandpass --header --date  [show header and date metadata from the saved bandpass table]
+script/gdp-util --input-table /path/to/other.g --mode gain --header --json  [show metadata from an explicit gain table path]
 script/gdp-util --input-table /path/to/table.g --header --keywords --json  [write header and keyword metadata as JSON]
 script/gdp-util --input-table /path/to/table.g --date  [show observing date and time span]
-script/gdp-util --bandpass-table --channelwidth  [show channel width in kHz or MHz from the bandpass table]
-script/gdp-util --bandpass-table --bandwidth  [show bandwidth in kHz or MHz from the bandpass table]
-script/gdp-util --gain-table --integration-time  [show integration-time_sec from median TIME spacing in one scan]
+script/gdp-util --mode gain --scans --antenna  [show scans and antennas in the saved gain table]
+script/gdp-util --mode gain --timeinfo  [show NTime, delta-T, and start/end times in IST and GMT]
+script/gdp-util --mode bandpass --chaninfo  [show bandpass bandwidth, channel width, channel count, and frequency range]
+script/gdp-util --mode bandpass --channelwidth  [show channel width in kHz or MHz from the saved bandpass table]
+script/gdp-util --mode bandpass --bandwidth  [show bandwidth in kHz or MHz from the saved bandpass table]
+script/gdp-util --mode gain --integration-time  [show integration-time_sec from median TIME spacing in the saved gain table]
 script/gdp-util --config  [print the saved GDP setup configuration]
 script/gdp-util --version  [bump the lower/patch version number]
 script/gdp-util --version main  [bump the main/major version number and reset lower numbers]
@@ -71,11 +74,14 @@ script/gdp-util --git-push -m "Describe the change"  [build the version archive,
       <table>
         <tr><th>Option</th><th>Description</th></tr>
         <tr><td><code>--input-table PATH</code></td><td>Explicit CASA table or MeasurementSet path.</td></tr>
-        <tr><td><code>--gain-table [PATH]</code></td><td>Use a gain table for <code>--header</code>, <code>--date</code>, or <code>--integration-time</code>. Without <code>PATH</code>, use the saved <code>gain_table</code> from <code>gdp-setup</code>.</td></tr>
-        <tr><td><code>--bandpass-table [PATH]</code></td><td>Use a bandpass table for metadata utilities. Without <code>PATH</code>, use the saved <code>bandpass_table</code> from <code>gdp-setup</code>. Channel-width and band-width summaries are read from this table by default.</td></tr>
+        <tr><td><code>--mode {gain,bandpass}</code></td><td>Saved setup table to use when <code>--input-table</code> is omitted. Default: <code>gain</code>. Channel actions require <code>--mode bandpass</code>; time actions require <code>--mode gain</code>. If the wrong mode is used, GDP prints an <code>ERROR:</code> message and exits before reading the table.</td></tr>
         <tr><td><code>--header</code></td><td>Print row count, columns, common IDs, data columns, and column descriptions.</td></tr>
         <tr><td><code>--keywords</code></td><td>Include CASA table keywords in header output.</td></tr>
         <tr><td><code>--date</code></td><td>Print IST observing dates and time span from the <code>TIME</code> column.</td></tr>
+        <tr><td><code>--scans</code></td><td>Print the scan numbers present in the selected table.</td></tr>
+        <tr><td><code>--antenna</code></td><td>Print the antenna numbers present in the selected table.</td></tr>
+        <tr><td><code>--chaninfo</code></td><td>Bandpass mode only. Print bandpass channel information: mean channel width, mean total bandwidth, number of channels, and start/end frequency, using kHz or MHz keys as appropriate.</td></tr>
+        <tr><td><code>--timeinfo</code></td><td>Gain mode only. Print <code>NTime</code>, median <code>delta-T_sec</code>, and start/end times in IST and GMT from the gain-table <code>TIME</code> column.</td></tr>
         <tr><td><code>--channel-width</code>, <code>--channelwidth</code></td><td>Print only the mean channel width from the bandpass table as <code>chan-width_kHz</code> or <code>chan-width_MHz</code>. If no explicit table is supplied, GDP uses the saved <code>bandpass_table</code>.</td></tr>
         <tr><td><code>--band-width</code>, <code>--bandwidth</code></td><td>Print only the mean total bandwidth from the bandpass table as <code>band-width_kHz</code> or <code>band-width_MHz</code>. If no explicit table is supplied, GDP uses the saved <code>bandpass_table</code>.</td></tr>
         <tr><td><code>--integration-time</code></td><td>Print only <code>integration-time_sec</code>, calculated as the median positive spacing between unique gain-table <code>TIME</code> values in one scan. If no explicit table is supplied, GDP uses the saved <code>gain_table</code>.</td></tr>
@@ -84,6 +90,7 @@ script/gdp-util --git-push -m "Describe the change"  [build the version archive,
         <tr><td><code>--git-push</code></td><td>Create <code>gdp-&lt;VERSION&gt;.tgz</code>, stage GDP source/docs/notes/archive files, commit, and push the current branch.</td></tr>
         <tr><td><code>-m</code>, <code>--message TEXT</code></td><td>Commit message for <code>--git-push</code>. Defaults to <code>GDP update &lt;version&gt;</code>.</td></tr>
         <tr><td><code>--no-push</code></td><td>With <code>--git-push</code>, create the archive and commit without pushing.</td></tr>
+        <tr><td><code>--relative-path</code></td><td>For human-readable output, print the runtime directory near startup, then show saved runtime file references relative to that directory. JSON output remains machine-readable and unchanged.</td></tr>
         <tr><td><code>--json</code></td><td>Write machine-readable JSON output.</td></tr>
       </table>
     </section>

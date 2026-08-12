@@ -32,6 +32,29 @@ def load_config() -> Dict[str, Any]:
         return json.load(f)
 
 
+def runtime_dir() -> Path:
+    cfg = load_config()
+    return Path(str(cfg.get("rundir") or (project_root() / "rundir"))).expanduser().resolve()
+
+
+def format_path_text(text: object, relative_paths: bool = False, rundir: Optional[Path] = None) -> str:
+    value = str(text)
+    if not relative_paths:
+        return value
+    root = rundir or runtime_dir()
+    return value.replace(str(root.resolve()) + "/", "")
+
+
+def display_value(value: Any, relative_paths: bool = False, rundir: Optional[Path] = None) -> Any:
+    if isinstance(value, str):
+        return format_path_text(value, relative_paths, rundir)
+    if isinstance(value, dict):
+        return {key: display_value(val, relative_paths, rundir) for key, val in value.items()}
+    if isinstance(value, list):
+        return [display_value(item, relative_paths, rundir) for item in value]
+    return value
+
+
 def version_text() -> str:
     version_path = project_root() / "VERSION"
     if not version_path.exists():
@@ -293,6 +316,46 @@ def table_dates(path: Path) -> Dict[str, Any]:
     }
 
 
+def format_time(dt: datetime) -> str:
+    return dt.strftime("%Y-%m-%d %H:%M:%S.") + f"{int(dt.microsecond / 1000):03d}"
+
+
+def table_time_info(path: Path) -> Dict[str, Any]:
+    casatable = casatable_factory()
+    tb = casatable()
+    tb.open(str(path))
+    try:
+        cols = list(tb.colnames())
+        if "TIME" not in cols:
+            raise RuntimeError(f"No TIME column in {path}")
+        times = np.asarray(tb.getcol("TIME"), dtype=float).ravel()
+        if "SCAN_NUMBER" in cols:
+            scans = np.asarray(tb.getcol("SCAN_NUMBER"), dtype=int).ravel()
+            valid_scan = scans[np.isfinite(times)]
+            if valid_scan.size:
+                scan = int(np.min(valid_scan))
+                times = times[scans == scan]
+    finally:
+        tb.close()
+
+    unique_times = np.unique(times[np.isfinite(times)])
+    if unique_times.size == 0:
+        raise RuntimeError(f"No finite TIME values found in {path}")
+    sorted_times = np.sort(unique_times)
+    valid_dt = positive_finite(np.diff(sorted_times)) if sorted_times.size > 1 else np.asarray([], dtype=float)
+    delta_t = float(np.median(valid_dt)) if valid_dt.size else 0.0
+    start_utc = mjdsec_to_utc(float(sorted_times[0]))
+    end_utc = mjdsec_to_utc(float(sorted_times[-1]))
+    return {
+        "NTime": int(sorted_times.size),
+        "delta-T_sec": delta_t,
+        "time-start_IST": format_time(start_utc.astimezone(IST)),
+        "time-end_IST": format_time(end_utc.astimezone(IST)),
+        "time-start_GMT": format_time(start_utc),
+        "time-end_GMT": format_time(end_utc),
+    }
+
+
 def open_table_for_spw(path: Path) -> Path:
     spw = path / "SPECTRAL_WINDOW"
     return spw if spw.is_dir() else path
@@ -327,6 +390,33 @@ def scaled_frequency_value(prefix: str, value_hz: float) -> Dict[str, float]:
     if abs_value >= 1e6:
         return {f"{prefix}_MHz": float(value_hz) / 1e6}
     return {f"{prefix}_kHz": float(value_hz) / 1e3}
+
+
+def scaled_frequency_key_value(prefix: str, value_hz: float) -> tuple[str, float]:
+    item = scaled_frequency_value(prefix, value_hz)
+    return next(iter(item.items()))
+
+
+def table_unique_column(path: Path, column: str, label: str) -> Dict[str, Any]:
+    casatable = casatable_factory()
+    tb = casatable()
+    tb.open(str(path))
+    try:
+        cols = list(tb.colnames())
+        if column not in cols:
+            raise RuntimeError(f"No {column} column in {path}")
+        values = unique_ints(tb.getcol(column))
+    finally:
+        tb.close()
+    return {label: values}
+
+
+def table_scans(path: Path) -> Dict[str, Any]:
+    return table_unique_column(path, "SCAN_NUMBER", "scans")
+
+
+def table_antennas(path: Path) -> Dict[str, Any]:
+    return table_unique_column(path, "ANTENNA1", "antenna")
 
 
 def channel_width_values_hz(table_path: Path) -> np.ndarray:
@@ -385,6 +475,56 @@ def band_width(path: Path) -> Dict[str, Any]:
     return scaled_frequency_value("band-width", mean_positive_finite(np.abs(widths)))
 
 
+def channel_info(path: Path) -> Dict[str, Any]:
+    table_path = open_table_for_spw(path)
+    casatable = casatable_factory()
+    tb = casatable()
+    tb.open(str(table_path))
+    try:
+        cols = list(tb.colnames())
+        if "CHAN_FREQ" not in cols:
+            raise RuntimeError(f"No CHAN_FREQ column in {table_path}")
+        freqs = np.asarray(tb.getcol("CHAN_FREQ"), dtype=float)
+        widths: Optional[np.ndarray] = None
+        total_widths: Optional[np.ndarray] = None
+        if "CHANNEL_WIDTH" in cols:
+            widths = np.abs(np.asarray(tb.getcol("CHANNEL_WIDTH"), dtype=float))
+        elif "CHAN_WIDTH" in cols:
+            widths = np.abs(np.asarray(tb.getcol("CHAN_WIDTH"), dtype=float))
+        if "TOTAL_BANDWIDTH" in cols:
+            total_widths = np.abs(np.asarray(tb.getcol("TOTAL_BANDWIDTH"), dtype=float))
+        elif "BANDWIDTH" in cols:
+            total_widths = np.abs(np.asarray(tb.getcol("BANDWIDTH"), dtype=float))
+    finally:
+        tb.close()
+
+    freq_values = freqs[np.isfinite(freqs)]
+    if freq_values.size == 0:
+        raise RuntimeError(f"No finite CHAN_FREQ values found in {table_path}")
+
+    if widths is not None:
+        chan_width_hz = mean_positive_finite(widths)
+        nchan = int(widths.shape[0]) if widths.ndim > 1 else int(widths.size)
+        if total_widths is not None:
+            band_width_hz = mean_positive_finite(total_widths)
+        else:
+            band_width_hz = float(chan_width_hz * nchan)
+    else:
+        chan_width_hz = mean_positive_finite(np.diff(np.sort(np.unique(freq_values))))
+        nchan = int(freqs.shape[0]) if freqs.ndim > 1 else int(freq_values.size)
+        band_width_hz = float(np.nanmax(freq_values) - np.nanmin(freq_values))
+
+    info: Dict[str, Any] = {"nchan": nchan}
+    for key, value in [
+        scaled_frequency_key_value("chan-width", chan_width_hz),
+        scaled_frequency_key_value("band-width", band_width_hz),
+        scaled_frequency_key_value("freq-start", float(np.nanmin(freq_values))),
+        scaled_frequency_key_value("freq-end", float(np.nanmax(freq_values))),
+    ]:
+        info[key] = value
+    return info
+
+
 def integration_time(path: Path) -> Dict[str, Any]:
     casatable = casatable_factory()
     tb = casatable()
@@ -413,59 +553,37 @@ def integration_time(path: Path) -> Dict[str, Any]:
     return {"integration-time_sec": float(np.median(valid_dt))}
 
 
-SAVED_TABLE = "__GDP_SAVED_TABLE__"
-
-
-def resolve_input(value: Optional[str], gain_table: Optional[str], bandpass_table: Optional[str]) -> Path:
-    if value:
-        return Path(value).expanduser().resolve()
-    if gain_table and bandpass_table:
-        raise SystemExit("Use only one of --gain-table or --bandpass-table for gdp-util input selection.")
-    cfg = load_config()
-    if gain_table:
-        source = cfg.get("gain_table") if gain_table == SAVED_TABLE else gain_table
-        if not source:
-            raise SystemExit("No saved gain_table is available. Run gdp-setup first or pass --gain-table PATH.")
-        return Path(str(source)).expanduser().resolve()
-    if bandpass_table:
-        source = cfg.get("bandpass_table") if bandpass_table == SAVED_TABLE else bandpass_table
-        if not source:
-            raise SystemExit("No saved bandpass_table is available. Run gdp-setup first or pass --bandpass-table PATH.")
-        return Path(str(source)).expanduser().resolve()
-    source = cfg.get("gain_table") or cfg.get("bandpass_table")
-    if not source:
-        raise SystemExit("No input table supplied and no saved gain/bandpass table is available. Run gdp-setup first or pass --input-table.")
-    return Path(str(source)).expanduser().resolve()
-
-
-def resolve_bandpass_input(value: Optional[str], bandpass_table: Optional[str]) -> Path:
-    if bandpass_table:
-        return resolve_input(None, None, bandpass_table)
+def resolve_mode_input(value: Optional[str], mode: str) -> Path:
     if value:
         return Path(value).expanduser().resolve()
     cfg = load_config()
-    source = cfg.get("bandpass_table")
+    key = "bandpass_table" if mode == "bandpass" else "gain_table"
+    source = cfg.get(key)
     if not source:
-        raise SystemExit("No saved bandpass_table is available. Run gdp-setup first or pass --bandpass-table PATH.")
+        raise SystemExit(f"No saved {key} is available. Run gdp-setup first or pass --input-table PATH.")
     return Path(str(source)).expanduser().resolve()
 
 
-def resolve_gain_input(value: Optional[str], gain_table: Optional[str]) -> Path:
-    if gain_table:
-        return resolve_input(None, gain_table, None)
-    if value:
-        return Path(value).expanduser().resolve()
-    cfg = load_config()
-    source = cfg.get("gain_table")
-    if not source:
-        raise SystemExit("No saved gain_table is available. Run gdp-setup first or pass --gain-table PATH.")
-    return Path(str(source)).expanduser().resolve()
+def resolve_bandpass_input(value: Optional[str]) -> Path:
+    return resolve_mode_input(value, "bandpass")
 
 
-def print_human(title: str, data: Dict[str, Any]) -> None:
+def resolve_gain_input(value: Optional[str]) -> Path:
+    return resolve_mode_input(value, "gain")
+
+
+def print_human(title: str, data: Dict[str, Any], relative_paths: bool = False, rundir: Optional[Path] = None) -> None:
+    data = display_value(data, relative_paths, rundir)
     if all(str(key).startswith(("chan-width_", "band-width_", "integration-time_sec")) for key in data):
         for key, value in data.items():
             print(f"{key}: {value}")
+        return
+    if set(data) <= {"scans", "antenna"}:
+        for key, value in data.items():
+            if isinstance(value, list):
+                print(f"{key}: " + " ".join(str(item) for item in value))
+            else:
+                print(f"{key}: {value}")
         return
     print(title)
     print("=" * len(title))
@@ -481,22 +599,7 @@ def parse_args() -> argparse.Namespace:
         description="Read useful metadata from CASA gain, bandpass, or MeasurementSet tables."
     )
     p.add_argument("--input-table", dest="input_table_opt", default=None, help="Input CASA table/MS path.")
-    p.add_argument(
-        "--gain-table",
-        nargs="?",
-        const=SAVED_TABLE,
-        default=None,
-        metavar="PATH",
-        help="Use a gain table for metadata utilities. Without PATH, use the saved gdp-setup gain_table.",
-    )
-    p.add_argument(
-        "--bandpass-table",
-        nargs="?",
-        const=SAVED_TABLE,
-        default=None,
-        metavar="PATH",
-        help="Use a bandpass table for metadata utilities. Without PATH, use the saved gdp-setup bandpass_table.",
-    )
+    p.add_argument("--mode", choices=["gain", "bandpass"], default="gain", help="Saved setup table to use when --input-table is omitted. Default: gain.")
     p.add_argument(
         "--version",
         nargs="?",
@@ -508,6 +611,10 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--header", action="store_true", help="Print table header, columns, row count, and common IDs.")
     p.add_argument("--keywords", action="store_true", help="Include table keywords in --header output.")
     p.add_argument("--date", action="store_true", help="Print IST observing date/time span from TIME column.")
+    p.add_argument("--scans", action="store_true", help="Print scan numbers present in the selected table.")
+    p.add_argument("--antenna", action="store_true", help="Print antenna numbers present in the selected table.")
+    p.add_argument("--chaninfo", action="store_true", help="Print bandpass channel information: bandwidth, channel width, number of channels, and start/end frequency.")
+    p.add_argument("--timeinfo", action="store_true", help="Print gain time information: NTime, median delta-T, and start/end times in IST and GMT.")
     p.add_argument("--channel-width", "--channelwidth", dest="channel_width", action="store_true", help="Print mean bandpass-table channel width in kHz or MHz.")
     p.add_argument("--band-width", "--bandwidth", dest="band_width", action="store_true", help="Print mean bandpass-table total bandwidth in kHz or MHz.")
     p.add_argument("--integration-time", action="store_true", help="Print median gain-table integration time from TIME differences in one scan.")
@@ -524,6 +631,7 @@ def parse_args() -> argparse.Namespace:
         help="Commit message for --git-push. Default: GDP update <version>.",
     )
     p.add_argument("--no-push", action="store_true", help="With --git-push, commit but do not push.")
+    p.add_argument("--relative-path", action="store_true", help="Print runtime-relative file references after reporting the runtime directory; file writes are unchanged.")
     p.add_argument("--json", action="store_true", help="Write machine-readable JSON output.")
     return p.parse_args()
 
@@ -539,7 +647,25 @@ def main() -> None:
         git_push_release(message=message, no_push=args.no_push)
         return
 
-    actions = [args.header, args.date, args.channel_width, args.band_width, args.integration_time, args.config]
+    bandpass_actions = [args.chaninfo, args.channel_width, args.band_width]
+    gain_actions = [args.timeinfo, args.integration_time]
+    if args.mode != "bandpass" and any(bandpass_actions):
+        raise SystemExit("ERROR: --chaninfo, --channelwidth/--channel-width, and --bandwidth/--band-width require --mode bandpass.")
+    if args.mode != "gain" and any(gain_actions):
+        raise SystemExit("ERROR: --timeinfo and --integration-time require --mode gain.")
+
+    actions = [
+        args.header,
+        args.date,
+        args.scans,
+        args.antenna,
+        args.chaninfo,
+        args.timeinfo,
+        args.channel_width,
+        args.band_width,
+        args.integration_time,
+        args.config,
+    ]
     if not any(actions):
         args.header = True
 
@@ -547,25 +673,34 @@ def main() -> None:
     if args.config:
         results["config"] = load_config()
 
-    if args.header or args.date:
-        table = resolve_input(args.input_table_opt, args.gain_table, args.bandpass_table)
+    if args.header or args.date or args.scans or args.antenna:
+        table = resolve_mode_input(args.input_table_opt, args.mode)
         if not table.exists():
             raise FileNotFoundError(f"Input table not found: {table}")
         if args.header:
             results["header"] = table_header(table, include_keywords=args.keywords)
         if args.date:
             results["date"] = table_dates(table)
+        if args.scans:
+            results["scans"] = table_scans(table)
+        if args.antenna:
+            results["antenna"] = table_antennas(table)
 
-    if args.integration_time:
-        table = resolve_gain_input(args.input_table_opt, args.gain_table)
+    if args.integration_time or args.timeinfo:
+        table = resolve_mode_input(args.input_table_opt, args.mode)
         if not table.exists():
             raise FileNotFoundError(f"Gain table not found: {table}")
-        results["integration_time"] = integration_time(table)
+        if args.timeinfo:
+            results["timeinfo"] = table_time_info(table)
+        if args.integration_time:
+            results["integration_time"] = integration_time(table)
 
-    if args.channel_width or args.band_width:
-        table = resolve_bandpass_input(args.input_table_opt, args.bandpass_table)
+    if args.channel_width or args.band_width or args.chaninfo:
+        table = resolve_mode_input(args.input_table_opt, args.mode)
         if not table.exists():
             raise FileNotFoundError(f"Bandpass table not found: {table}")
+        if args.chaninfo:
+            results["chaninfo"] = channel_info(table)
         if args.channel_width:
             results["channel_width"] = channel_width(table)
         if args.band_width:
@@ -575,8 +710,13 @@ def main() -> None:
         print(json.dumps(results, indent=2, sort_keys=True))
         return
 
+    rundir = runtime_dir()
+    if args.relative_path:
+        print(f"Runtime directory: {rundir}")
+        if results:
+            print()
     for name, data in results.items():
-        print_human(name, data)
+        print_human(name, data, args.relative_path, rundir)
         print()
 
 

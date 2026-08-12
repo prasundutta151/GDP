@@ -1,0 +1,52 @@
+
+intent: gdp-flag
+ name: manual antenna option list
+ mode: gain
+ scan: 19
+ fmode: man-antenna
+ man-antenna: "[1-5]" 6 "[9-12]" 15
+end
+
+intent: gdp-flag
+ name: manual channel option list
+ mode: bandpass
+ scan: 18
+ fmode: man-chan
+ man-chan: "[900-1200]:1" 1300:0
+end
+
+intent: gdp-flag
+ name: all standard threshold trailing alpha
+ mode: gain
+ scan: 19
+ fmode: all-std-thrsld 1.5
+end
+
+intent: gdp-flag
+ name: antenna standard threshold explicit alpha
+ mode: gain
+ scan: 19
+ fmode: ante-std-thrsld
+ alpha: 2
+end
+
+intent: gdp-flag
+ name: antenna mean threshold trailing value
+ mode: gain
+ scan: 19
+ fmode: ante-mean-thrsld 6
+end
+
+intent: gdp-flag
+ name: antenna fraction threshold trailing percent
+ mode: gain
+ scan: 19
+ fmode: ante-thrsld 40
+end
+
+intent: gdp-flag
+ name: ks threshold trailing factor
+ mode: gain
+ scan: 19
+ fmode: ks-thrsld 1.5
+end

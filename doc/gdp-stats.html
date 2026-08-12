@@ -77,6 +77,7 @@ script/gdp-stats --antennas "[1-5]" 6 "[9-12]" 15 16 19 --smode stats  [use mixe
         <tr><td><code>--gain-table PATH</code></td><td>Named gain table path. Defaults to saved <code>gain_table</code> in gain mode.</td></tr>
         <tr><td><code>--bandpass-table PATH</code></td><td>Named bandpass table path. Defaults to saved <code>bandpass_table</code> in bandpass mode.</td></tr>
         <tr><td><code>--setup-file NAME</code></td><td>Setup JSON file to use. Relative names are resolved under the active runtime directory. If omitted, GDP uses the setup file last activated by <code>gdp-setup</code>.</td></tr>
+        <tr><td><code>--relative-path</code></td><td>Print the runtime directory near startup, then show generated runtime file references relative to that directory in terminal and log messages. Actual output filenames and write locations are unchanged.</td></tr>
         <tr><td><code>--mode {auto,gain,bandpass}</code></td><td>Statistics mode. Default: <code>auto</code>.</td></tr>
         <tr><td><code>--scan LIST</code></td><td>Comma-separated scans. Default: all scans.</td></tr>
         <tr><td><code>--combine-scans</code></td><td>Combine selected scans into one <code>allscans</code>-style product. Default: false, so GDP writes one product per scan.</td></tr>
@@ -100,6 +101,7 @@ script/gdp-stats --antennas "[1-5]" 6 "[9-12]" 15 16 19 --smode stats  [use mixe
         <tr><td><code>--corr-nbin INT</code></td><td>Structure-function lag bin count. Default: <code>32</code>.</td></tr>
         <tr><td><code>--corr-bintype {log,lin}</code></td><td>Structure-function lag binning. Default: <code>log</code>.</td></tr>
         <tr><td><code>--corr-njack INT</code></td><td>Jackknife folds for structure-function errors. Default: <code>32</code>.</td></tr>
+        <tr><td><code>--adjust-mean</code></td><td>For <code>--smode gain</code>, <code>--smode gains</code>, or <code>--smode stats</code>, adjust selected finite unflagged samples by the all-antenna mean per Stokes before writing the product. Real gain samples are divided by the real mean; imaginary samples subtract the imaginary mean.</td></tr>
         <tr><td><code>--csv</code></td><td>Also write optional CSV products for selected subtasks that support CSV, including stats and cross-correlation.</td></tr>
         <tr><td><code>--output-csv PATH</code></td><td>Write CSV to a specific path; implies <code>--csv</code>.</td></tr>
       </table>

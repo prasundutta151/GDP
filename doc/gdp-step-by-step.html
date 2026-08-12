@@ -79,10 +79,12 @@ plots directories: created or already present</code></pre>
       <h2>2. Inspect The Table</h2>
       <p>Use <code>gdp-util</code> to verify scans, antennas, columns, and observing time coverage before generating products.</p>
       <pre><code>script/gdp-util --header
-script/gdp-util --gain-table --header
-script/gdp-util --bandpass-table --header
+script/gdp-util --mode gain --header
+script/gdp-util --mode bandpass --header
+script/gdp-util --mode gain --scans --antenna
+script/gdp-util --mode gain --timeinfo
 script/gdp-util --date
-script/gdp-util --channel-width</code></pre>
+script/gdp-util --mode bandpass --chaninfo</code></pre>
       <p>Expected runtime output pattern:</p>
       <pre><code>header
 ======
