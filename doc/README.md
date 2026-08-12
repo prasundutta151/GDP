@@ -27,7 +27,8 @@ flag-product generation.
 ## Active Commands
 
 - `script/gdp-setup`: initializes and remembers the GDP runtime directory and
-  separate gain and bandpass table locations.
+  separate gain and bandpass table locations, and can clean generated runtime
+  outputs with confirmation.
 - `script/gdp-util`: reads useful metadata from CASA gain, bandpass, or
   MeasurementSet tables, and provides `--git-push` release/git workflow
   support.
@@ -60,12 +61,20 @@ subfolders are:
 - `data-product/cross-corr/csv`
 - `data-product/flag/npz`
 - `data-product/flag/csv`
+- `logs`
+- `gaintable`
 - `plots/png`
 - `plots/eps`
 - `plots/pdf`
 
 Inside this repository the default runtime directory is `rundir/`, but
-`gdp-setup` can configure a different runtime location.
+`gdp-setup` can configure a different runtime location. `script/gdp-setup
+--clean` removes generated outputs under `data-product/`, `plots/`, `logs/`,
+and `gaintable/`, then recreates the standard runtime folders. It asks for
+confirmation by default; use `script/gdp-setup --clean --dry-run` to preview
+the delete list, or `script/gdp-setup --clean no-stop` for scripted cleanup
+without the prompt. Setup JSON files in the runtime root and `.gdp-config.json`
+are kept.
 
 ## Examples
 
@@ -74,6 +83,9 @@ Set up GDP:
 ```bash
 script/gdp-setup --gain-table /path/to/gain/table.g --bandpass-table /path/to/bandpass/table.b --rundir /path/to/rundir
 script/gdp-setup --setup-file project-a-setup.json --gain-table /path/to/table.g --rundir /path/to/rundir
+script/gdp-setup --clean --dry-run
+script/gdp-setup --clean
+script/gdp-setup --clean no-stop
 ```
 
 Show the saved setup:

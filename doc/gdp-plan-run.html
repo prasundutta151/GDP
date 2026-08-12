@@ -90,6 +90,32 @@ intent: gdp-plot
   pmode: stats
 end</code></pre>
       <p>Intent keys become CLI flags. For example, <code>output-npz</code> becomes <code>--output-npz</code>. Boolean <code>true</code> values become standalone flags, while <code>false</code> and <code>null</code> values are omitted. For <code>gdp-stats</code>, task selection should be written as <code>smode: stats,ks</code> rather than older boolean task keys.</p>
+      <p>Options that accept multiple command-line tokens can be written as shell-style values in the plan. This includes antenna lists, plot channel windows, manual flag selections, and <code>gdp-flag --fmode</code> trailing values. Quote bracketed ranges when they should remain one token.</p>
+      <pre><code>intent: gdp-flag
+  mode: gain
+  scan: 19
+  fmode: man-antenna 9
+end
+
+intent: gdp-flag
+  mode: gain
+  scan: 19
+  fmode: man-antenna
+  man-antenna: "[1-5]" 6 "[9-12]" 15
+end
+
+intent: gdp-flag
+  mode: bandpass
+  scan: 18
+  fmode: man-chan
+  man-chan: "[900-1200]:1" 1300:0
+end
+
+intent: gdp-flag
+  mode: gain
+  scan: 19
+  fmode: ks-thrsld 1.5
+end</code></pre>
     </section>
 
     <section>

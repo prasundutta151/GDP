@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -16,6 +17,29 @@ from typing import Any, Dict, List, Optional, Tuple
 CONFIG_NAME = ".gdp-config.json"
 ACTIVE_CONFIG: Optional[Dict[str, Any]] = None
 VAR_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
+MULTI_VALUE_OPTIONS = {
+    "antenna",
+    "antennas",
+    "args",
+    "arg",
+    "apply-flag",
+    "apply_flag",
+    "clean",
+    "fmode",
+    "man-antenna",
+    "man-antennas",
+    "man_antenna",
+    "man_antennas",
+    "man-chan",
+    "man-channel",
+    "man_chan",
+    "man_channel",
+    "pchans",
+    "pmode",
+    "positional",
+    "use-flags",
+    "use_flags",
+}
 
 
 def project_root() -> Path:
@@ -204,6 +228,16 @@ def resolve_value(value: Any, variables: Dict[str, Any]) -> Any:
     raise ValueError(f"Variable expansion appears recursive: {value}")
 
 
+def value_to_tokens(value: Any) -> List[str]:
+    if value is True or value is False or value is None:
+        return []
+    if isinstance(value, (list, tuple)):
+        return [str(item) for item in value]
+    if isinstance(value, str):
+        return shlex.split(value)
+    return [str(value)]
+
+
 def command_path(command: str) -> Path:
     if "/" in command:
         path = Path(command).expanduser()
@@ -221,18 +255,19 @@ def args_to_cli(args: Dict[str, Any], variables: Dict[str, Any]) -> List[str]:
             continue
         value = resolve_value(raw_value, variables)
         if key in {"arg", "args", "positional"}:
-            if isinstance(value, str):
-                cli.extend(value.split())
-            elif isinstance(value, list):
-                cli.extend(str(x) for x in value)
-            else:
-                cli.append(str(value))
+            cli.extend(value_to_tokens(value))
             continue
         flag = "--" + key.replace("_", "-")
         if value is True:
             cli.append(flag)
         elif value is False or value is None:
             continue
+        elif key in MULTI_VALUE_OPTIONS:
+            tokens = value_to_tokens(value)
+            if tokens:
+                cli.extend([flag, *tokens])
+            else:
+                cli.append(flag)
         else:
             cli.extend([flag, str(value)])
     return cli

@@ -44,7 +44,7 @@
 
     <section>
       <h2>Purpose</h2>
-      <p><code>gdp-setup</code> creates the runtime directory structure and saves separate gain and bandpass table locations so later GDP commands can reuse the correct default for each mode. It stores a setup JSON file inside the runtime directory, initializes a <code>gaintable/</code> folder for CASA table copies, and updates the active GDP configuration used by the other commands.</p>
+      <p><code>gdp-setup</code> creates the runtime directory structure and saves separate gain and bandpass table locations so later GDP commands can reuse the correct default for each mode. It stores a setup JSON file inside the runtime directory, initializes a <code>gaintable/</code> folder for CASA table copies, and updates the active GDP configuration used by the other commands. It can also clean GDP-generated runtime outputs when a fresh product run is needed.</p>
     </section>
 
     <section>
@@ -53,7 +53,10 @@
 script/gdp-setup --gain-table /path/to/gain/table.g --rundir /path/to/work/rundir  [save only the gain table and runtime directory]
 script/gdp-setup --bandpass-table /path/to/bandpass/table.b --rundir /path/to/work/rundir  [save only the bandpass table and runtime directory]
 script/gdp-setup --setup-file project-a-setup.json --gain-table /path/to/table.g --rundir /path/to/work/rundir  [write a named setup file under the runtime directory]
-script/gdp-setup --show  [print the saved GDP setup]</code></pre>
+script/gdp-setup --show  [print the saved GDP setup]
+script/gdp-setup --clean --dry-run  [preview GDP runtime files that would be removed]
+script/gdp-setup --clean  [ask for confirmation, then remove GDP runtime outputs]
+script/gdp-setup --clean no-stop  [remove GDP runtime outputs without prompting]</code></pre>
     </section>
 
     <section>
@@ -66,10 +69,20 @@ script/gdp-setup --show  [print the saved GDP setup]</code></pre>
         <tr><td><code>--setup-file NAME</code></td><td>Setup JSON file name to store inside the runtime directory. If omitted, GDP writes <code>gdp-setup.json</code>. Before overwriting that default file, the previous copy is archived with a <code>.YYYYMMDDTHHMMSS</code> suffix.</td></tr>
         <tr><td><code>--config PATH</code></td><td>Active configuration JSON path used by GDP commands. Defaults to <code>&lt;GDP&gt;/.gdp-config.json</code>.</td></tr>
         <tr><td><code>--show</code></td><td>Print the saved configuration and exit.</td></tr>
-        <tr><td><code>--dry-run</code></td><td>Show the directories and configuration that would be written.</td></tr>
+        <tr><td><code>--clean [no-stop]</code></td><td>Delete GDP-generated runtime outputs under <code>data-product/</code>, <code>plots/</code>, <code>logs/</code>, and <code>gaintable/</code>, then recreate the standard runtime directory structure. By default, GDP prints the delete list and asks for confirmation; type <code>yes</code> to continue. Use <code>--clean no-stop</code> only for batch runs where confirmation is not wanted.</td></tr>
+        <tr><td><code>--dry-run</code></td><td>Show the directories and configuration that would be written. With <code>--clean</code>, preview the files and directories that would be removed without deleting them.</td></tr>
         <tr><td><code>--allow-missing-table</code></td><td>Allow gain or bandpass table paths to be recorded before they exist.</td></tr>
       </table>
-      <p>The runtime directory includes <code>data-product/</code>, <code>logs/</code>, <code>plots/</code>, and <code>gaintable/</code>. <code>gdp-flag --apply-flag</code> writes copied CASA gain or bandpass tables under <code>gaintable/</code> unless <code>--output-table</code> is supplied.</p>
+      <p>The runtime directory includes <code>data-product/</code>, <code>logs/</code>, <code>plots/</code>, and <code>gaintable/</code>. <code>gdp-flag --apply-flag</code> writes copied CASA gain or bandpass tables under <code>gaintable/</code> unless <code>--output-table</code> is supplied. The clean command removes generated products, plots, logs, and copied gain tables, but keeps setup JSON files in the runtime root and the active <code>.gdp-config.json</code>.</p>
+    </section>
+
+    <section>
+      <h2>Clean Runtime Outputs</h2>
+      <p>Use <code>--clean</code> when the runtime directory should be reset before a new GDP run. The command only targets generated output folders under the selected runtime directory: <code>data-product/</code>, <code>plots/</code>, <code>logs/</code>, and <code>gaintable/</code>.</p>
+      <pre><code>script/gdp-setup --clean --dry-run
+script/gdp-setup --clean
+script/gdp-setup --clean no-stop</code></pre>
+      <p>Plain <code>--clean</code> prints the delete list and waits for the user to type <code>yes</code>. <code>--clean no-stop</code> performs the same cleanup without the confirmation prompt, which is useful for scripted workflows. <code>--dry-run</code> can be combined with either form to preview the cleanup without deleting files.</p>
     </section>
 
     <section class="sample-plots" aria-labelledby="sample-plots">

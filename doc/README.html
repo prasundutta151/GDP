@@ -38,7 +38,7 @@
     </section>
     <section>
       <h2>Runtime Layout</h2>
-      <p>The default repository runtime directory is <code>rundir/</code>. A user may choose a different runtime directory with <code>gdp-setup</code>.</p>
+      <p>The default repository runtime directory is <code>rundir/</code>. A user may choose a different runtime directory with <code>gdp-setup</code>. <code>script/gdp-setup --clean</code> removes generated outputs under <code>data-product/</code>, <code>plots/</code>, <code>logs/</code>, and <code>gaintable/</code>, then recreates the standard runtime folders. It asks for confirmation by default; use <code>--clean --dry-run</code> to preview the delete list or <code>--clean no-stop</code> for scripted cleanup without the prompt. Setup JSON files in the runtime root and <code>.gdp-config.json</code> are kept.</p>
       <table>
         <tr><th>Subfolder</th><th>Purpose</th></tr>
         <tr><td><code>data-product/gains/npz</code></td><td>Raw selected gain/bandpass sample products.</td></tr>
@@ -52,6 +52,8 @@
         <tr><td><code>data-product/cross-corr/csv</code></td><td>Optional cross structure-function CSV products.</td></tr>
         <tr><td><code>data-product/flag/npz</code></td><td>Antenna-based flag products in NPZ format.</td></tr>
         <tr><td><code>data-product/flag/csv</code></td><td>Optional flag CSV summaries.</td></tr>
+        <tr><td><code>logs</code></td><td>Task logs written by GDP commands.</td></tr>
+        <tr><td><code>gaintable</code></td><td>Copied CASA gain or bandpass tables written by <code>gdp-flag --apply-flag</code>.</td></tr>
         <tr><td><code>plots/png</code></td><td>Default PNG diagnostic plots.</td></tr>
         <tr><td><code>plots/eps</code></td><td>Optional EPS diagnostic plots.</td></tr>
         <tr><td><code>plots/pdf</code></td><td>Optional PDF diagnostic plots.</td></tr>
@@ -63,6 +65,9 @@
       <pre><code>script/gdp-setup --gain-table /path/to/gain/table.g --bandpass-table /path/to/bandpass/table.b --rundir /path/to/rundir  [save separate gain and bandpass defaults plus runtime directory]
 script/gdp-setup --setup-file project-a-setup.json --gain-table /path/to/table.g --rundir /path/to/rundir  [write a named setup file under the runtime directory]
 script/gdp-setup --show  [print the saved GDP setup]
+script/gdp-setup --clean --dry-run  [preview generated runtime outputs that would be removed]
+script/gdp-setup --clean  [ask for confirmation, then remove generated runtime outputs]
+script/gdp-setup --clean no-stop  [remove generated runtime outputs without prompting]
 script/gdp-util --input-table /path/to/table.g --header  [inspect table metadata]
 script/gdp-util --gain-table --header  [inspect the saved gain table]
 script/gdp-util --bandpass-table --header  [inspect the saved bandpass table]

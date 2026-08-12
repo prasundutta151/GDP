@@ -2725,3 +2725,58 @@ Functionality Check
 - Plot-only channel windows remain available through `gdp-plot -pchans ...`.
 - `--smode all` remains limited to `gains`, `stats`, and `ks`; self-correlation
   remains a separate explicit `--smode self-corr` task.
+
+## 2026-08-11 11:05:00 IST
+
+Prompt / Request
+- Add `gdp-setup --clean` to delete GDP-created runtime files from stats,
+  plots, and flags.
+- Because cleanup is destructive, require confirmation by default and support
+  `--clean no-stop` for non-interactive cleanup.
+- Update documentation for the new setup cleanup behavior.
+
+Changes Made
+- Added `script/gdp-setup --clean [no-stop]`.
+- Cleanup targets generated runtime output roots only: `data-product/`,
+  `plots/`, `logs/`, and `gaintable/`.
+- Plain `--clean` prints the delete list and requires the user to type `yes`
+  before removing files.
+- `--clean no-stop` performs the same cleanup without prompting for scripted
+  runs.
+- `--clean --dry-run` previews the delete list and recreate list without
+  deleting files.
+- The cleanup recreates the standard runtime folder tree afterward and keeps
+  setup JSON files in the runtime root plus the active `.gdp-config.json`.
+- Updated `doc/gdp-setup.html`, `doc/README.md`, `doc/README.html`, and
+  `doc/gdp-step-by-step.html`.
+
+Verification
+- `python3 -m py_compile script/gdp-setup`
+- `script/gdp-setup --help`
+- Exercised `--clean --dry-run`, cancelled plain `--clean`, and
+  `--clean no-stop` against a temporary runtime directory.
+
+## 2026-08-12 09:30:00 IST
+
+Prompt / Request
+- In plan intents, parameters such as `fmode: man-antenna 9`,
+  `man-antenna: ...`, `man-chan: ...`, and threshold trailing values were
+  being passed as one argument.
+- Fix this in `gdp-plan-run`, not in the individual `gdp-*` commands.
+
+Changes Made
+- Updated `script/gdp-plan-run` so known multi-token GDP options are expanded
+  with shell-style parsing.
+- Covered `fmode`, manual antenna/channel selections, antenna selections,
+  `-pchans`, `pmode`, optional flag-version arguments, positional args, and
+  `gdp-setup --clean no-stop`.
+- Quoted values remain grouped, so plan lines can use examples such as
+  `man-antenna: "[1-5]" 6 "[9-12]" 15`.
+- Updated `pipelines/sample_flag.plan` with examples for manual antenna,
+  manual channel, threshold alpha/percent/factor, and trailing fmode values.
+- Updated `doc/gdp-plan-run.html` to document multi-token plan values.
+
+Verification
+- `python3 -m py_compile script/gdp-plan-run`
+- Verified `script/gdp-plan-run pipelines/sample_flag.plan --dry-run` expands
+  list and trailing threshold values into separate CLI tokens.

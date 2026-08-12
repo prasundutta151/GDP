@@ -60,6 +60,11 @@ script/gdp-setup --gain-table /path/to/gain/table.g --bandpass-table /path/to/ba
       <pre><code>script/gdp-setup --setup-file project-a-setup.json --gain-table /path/to/gain/table.g --bandpass-table /path/to/bandpass/table.b --rundir /path/to/GDP_RUN</code></pre>
       <p>Check the saved setup:</p>
       <pre><code>script/gdp-setup --show</code></pre>
+      <p>Clean generated runtime outputs before a fresh run:</p>
+      <pre><code>script/gdp-setup --clean --dry-run
+script/gdp-setup --clean
+script/gdp-setup --clean no-stop</code></pre>
+      <p><code>--clean</code> removes GDP-generated files under <code>data-product/</code>, <code>plots/</code>, <code>logs/</code>, and <code>gaintable/</code>, then recreates the standard folders. Plain <code>--clean</code> asks for confirmation and continues only after the user types <code>yes</code>. Use <code>--clean --dry-run</code> to preview the delete list, or <code>--clean no-stop</code> for scripted cleanup without the prompt. Setup JSON files and the active GDP config are kept.</p>
       <p>Expected runtime output pattern:</p>
       <pre><code>GDP setup file written: /path/to/GDP_RUN/gdp-setup.json
 GDP active configuration written: /Users/prasun/Documents/GDP/.gdp-config.json
