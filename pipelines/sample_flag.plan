@@ -9,29 +9,14 @@ out-fver: 3
 
 intent: gdp-flag
  out-fver: 2
- use: true
+ use: false
  name: manual channel flag
  fmode: man-chan "[0-800]" "[3001-10000]"
 end
 
 intent: gdp-flag
- use: false
- name: auto all antenna std thrsld
- fmode: all-std-thrsld 
- scan: 18
-end
-
-intent: gdp-flag
- use: false
- name: auto  antenna std thrsld
- fmode: ante-std-thrsld
- out-fver: 3
- scan: 18
-end
-
-intent: gdp-flag
  iter: 3
- use: true
+ use: false
  name: auto  antenna mean thrsld
  fmode: ante-mean-thrsld 1.5
  scan: 18
@@ -39,12 +24,19 @@ intent: gdp-flag
 end
 
 intent: gdp-flag
- iter: 3
- use: true
- name: auto  antenna mean thrsld
- fmode: ante-mean-thrsld 2.
+ out-fver: 4
+ use: false
+ name: auto all antenna std thrsld
+ fmode: all-std-thrsld 2.
  scan: 18
- out-fver: 3
+end
+
+intent: gdp-flag
+ use: false
+ name: auto  antenna std thrsld
+ fmode: ante-std-thrsld 2.
+ out-fver: 4
+ scan: 18
 end
 
 
@@ -53,8 +45,15 @@ intent: gdp-flag
  name: auto  antenna thrsld
  fmode: ante-thrsld 
  scan: 18
- out-fver: 3
+ out-fver: 4
 end
 
+intent: gdp-flag
+ use: true
+ name: auto ks
+ fmode: ks-thrsld  2.
+ scan: 18
+ out-fver: 5
+end
 
 

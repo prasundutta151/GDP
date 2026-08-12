@@ -1086,31 +1086,13 @@ class TaskLogger:
 
         if stripped.startswith("ante-thrsld "):
             if " unflagged_" in stripped and " promote=" in stripped:
-                antenna = self._token(stripped, "antenna")
-                promote = self._token(stripped, "promote")
-                parts = ["ante-thrsld"]
-                if antenna is not None:
-                    parts.append(f"antenna={antenna}")
-                if promote is not None:
-                    parts.append(f"promote={promote}")
-                return " ".join(parts)
+                return ""
 
         if stripped.startswith("ks-thrsld "):
             if " gaussian_mean_ks=" in stripped:
-                antenna = self._token(stripped, "antenna")
-                stokes = self._token(stripped, "stokes")
-                component = self._token(stripped, "component")
-                flag = self._token(stripped, "flag")
-                parts = ["ks-thrsld"]
-                if antenna is not None:
-                    parts.append(f"antenna={antenna}")
-                if stokes is not None:
-                    parts.append(f"stokes={stokes}")
-                if component is not None:
-                    parts.append(f"component={component}")
-                if flag is not None:
-                    parts.append(f"flag={flag}")
-                return " ".join(parts)
+                return ""
+            if " promote=" in stripped and "antenna=" in stripped and "stokes=" in stripped:
+                return ""
 
         return None
 
