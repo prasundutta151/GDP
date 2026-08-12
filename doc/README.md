@@ -175,12 +175,14 @@ but calculates the standard deviations and `R` separately for each antenna and
 Stokes. If alpha is omitted, it is `1`; terminal and task logs report the
 percentage of data flagged.
 `ante-mean-thrsld` works on antenna means instead of individual points: for
-each Stokes, GDP computes the global Real-1 and Imag standard deviations from
-all unflagged finite samples across all antennas, then computes the Real-1 and
-Imag mean for each antenna. The full antenna/Stokes group is flagged when the
-modulus of that antenna mean point, `sqrt(mean_real^2 + mean_imag^2)`, is
-greater than `threshold * sqrt(std_real^2 + std_imag^2)`. If the threshold is
-omitted, it is `5`.
+each Stokes, GDP computes each antenna's mean Real-1 and mean Imag over the
+selected finite unflagged samples, then computes the center and standard
+deviation of those antenna means. With `N` valid antennas, GDP derives the
+two-sided Gaussian cutoff where only one antenna is expected outside the range.
+The full antenna/Stokes group is flagged when its Real-1 or Imag antenna mean
+lies outside `threshold * gamma * std_of_antenna_means`. If the threshold is
+omitted, it is `1`. Fewer than eight valid antennas is treated as insufficient
+for this fmode.
 `ante-thrsld` promotes partially flagged antennas to fully flagged antennas:
 in bandpass mode, GDP compares each antenna's unflagged `(Stokes, channel)`
 availability against the maximum unflagged `(Stokes, channel)` count seen for
