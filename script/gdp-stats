@@ -5,10 +5,13 @@ from __future__ import annotations
 
 import argparse
 import csv
+import os
 import json
 import math
 import re
+import tempfile
 import time
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -190,6 +193,92 @@ def parse_smode(text: Optional[str]) -> List[str]:
     return modes
 
 
+def split_selector_tokens(value: object) -> List[str]:
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple)):
+        text = " ".join(str(item) for item in value)
+    else:
+        text = str(value)
+    return [part.strip() for part in re.split(r"[\s,]+", text) if part.strip()]
+
+
+def parse_pair_selector(value: object, available: Sequence[int], option_name: str) -> List[Tuple[int, int]]:
+    values = sorted(int(v) for v in available)
+    if not values:
+        return []
+    tokens = split_selector_tokens(value)
+    if not tokens or any(token.lower() == "all" for token in tokens):
+        return [(a, b) for a in values for b in values]
+    available_set = set(values)
+    pairs: List[Tuple[int, int]] = []
+    for token in tokens:
+        text = token.strip()
+        if re.fullmatch(r"\d{2}", text):
+            pair = (int(text[0]), int(text[1]))
+        elif re.fullmatch(r"\d+", text):
+            pair = (int(text), int(text))
+        elif re.fullmatch(r"\d+\s*[-:]\s*\d+", text):
+            left, right = re.split(r"[-:]", text, maxsplit=1)
+            pair = (int(left.strip()), int(right.strip()))
+        else:
+            raise SystemExit(f"{option_name} accepts values like 0, 1, 01, 0-1, or all.")
+        if pair[0] not in available_set or pair[1] not in available_set:
+            raise SystemExit(
+                f"{option_name} pair {pair[0]}{pair[1]} is not present in the gains NPZ. "
+                f"Available stokes: {', '.join(str(v) for v in values)}"
+            )
+        if pair not in pairs:
+            pairs.append(pair)
+    return pairs
+
+
+def normalize_component_token(text: str) -> str:
+    key = text.strip().lower().replace("_", "").replace("-", "")
+    aliases = {
+        "re": "real",
+        "real": "real",
+        "r": "real",
+        "im": "imag",
+        "imag": "imag",
+        "i": "imag",
+        "image": "imag",
+    }
+    if key in aliases:
+        return aliases[key]
+    raise SystemExit("--complex accepts re, im, reim, imre, real, imag, or all.")
+
+
+def parse_complex_pair_selector(value: object) -> List[Tuple[str, str]]:
+    tokens = split_selector_tokens(value)
+    if not tokens or any(token.lower() == "all" for token in tokens):
+        return [(a, b) for a in CORR_COMPONENTS for b in CORR_COMPONENTS]
+    pairs: List[Tuple[str, str]] = []
+    for token in tokens:
+        key = token.strip().lower().replace("_", "").replace("-", "")
+        if key in {"reim", "realimag", "rimi"}:
+            pair = ("real", "imag")
+        elif key in {"imre", "imagreal", "imir"}:
+            pair = ("imag", "real")
+        elif ":" in token:
+            left, right = token.split(":", 1)
+            pair = (normalize_component_token(left), normalize_component_token(right))
+        else:
+            comp = normalize_component_token(token)
+            pair = (comp, comp)
+        if pair not in pairs:
+            pairs.append(pair)
+    return pairs
+
+
+def format_bytes(num_bytes: float) -> str:
+    value = float(num_bytes)
+    for unit in ("B", "KiB", "MiB", "GiB", "TiB"):
+        if abs(value) < 1024.0 or unit == "TiB":
+            return f"{value:.2f} {unit}" if unit != "B" else f"{value:.0f} {unit}"
+        value /= 1024.0
+
+
 def json_safe(value: Any) -> Any:
     if isinstance(value, np.ndarray):
         return [json_safe(v) for v in value.tolist()]
@@ -216,7 +305,7 @@ def default_output_dir(product: str, kind: str) -> Path:
     if configured is not None:
         return configured
     folder = product.replace("_", "-")
-    return project_root() / "rundir" / "data-product" / folder / kind
+    return runtime_dir() / "data-product" / folder / kind
 
 
 def build_default_output(input_table: Path, scan_text: str, mode: str, product: str, kind: str) -> Path:
@@ -371,7 +460,7 @@ def label_with_channel(scan_label: str, mode: str, bchan: Optional[int], echan: 
 
 
 def default_log_path(input_table: Path) -> Path:
-    logs_dir = config_path("logs_dir") or (project_root() / "rundir" / "logs")
+    logs_dir = config_path("logs_dir") or (runtime_dir() / "logs")
     return logs_dir / f"{input_table.name.rstrip('/')}_gdp-stats_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
 
 
@@ -1453,55 +1542,569 @@ def compute_self_corr(
     }
 
 
-def compute_cross_corr(
+def load_npz_dict(path: Path) -> Dict[str, Any]:
+    if not path.exists():
+        raise SystemExit(f"ERROR: gains NPZ not found: {display_path(path)}")
+    with np.load(path, allow_pickle=True) as z:
+        header = json.loads(str(z["header_json"])) if "header_json" in z.files else {}
+        out: Dict[str, Any] = {"header": header}
+        for key in z.files:
+            if key != "header_json":
+                out[key] = np.asarray(z[key])
+    return out
+
+
+def load_gains_for_cross_corr(gains_npz: Path, use_flags: bool, flag_path: Optional[Path]) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    gains = load_npz_dict(gains_npz)
+    required = {"scan", "antenna", "stokes", "channel", "row", "time", "real", "imag"}
+    missing = required - set(gains)
+    if missing:
+        raise SystemExit(f"ERROR: {display_path(gains_npz)} is missing gains arrays: {', '.join(sorted(missing))}")
+    flag_header: Dict[str, Any] = {}
+    if use_flags:
+        if flag_path is None:
+            version, resolved = resolve_flag_file(gains_npz, None)
+            flag_path = resolved
+            flag_header["flag_version"] = int(version)
+        lookup, loaded_header = load_flag_lookup(flag_path)
+        flag_header.update(loaded_header)
+        rows = np.asarray(gains["row"], dtype=int)
+        stokes = np.asarray(gains["stokes"], dtype=int)
+        channels = np.asarray(gains["channel"], dtype=int)
+        flags = np.asarray([lookup.get((int(row), int(pol), int(chan)), False) for row, pol, chan in zip(rows, stokes, channels)], dtype=bool)
+        gains["flagged"] = flags
+        real = np.asarray(gains["real"], dtype=float).copy()
+        imag = np.asarray(gains["imag"], dtype=float).copy()
+        real[flags] = np.nan
+        imag[flags] = np.nan
+        gains["real"] = real
+        gains["imag"] = imag
+    return gains, flag_header
+
+
+def gains_npz_series(
+    gains: Dict[str, Any],
+    mode: str,
+    scan: int,
+    antenna: int,
+    stokes: int,
+    component: str,
+) -> Tuple[np.ndarray, np.ndarray]:
+    scans = np.asarray(gains["scan"], dtype=int)
+    antennas = np.asarray(gains["antenna"], dtype=int)
+    stokes_arr = np.asarray(gains["stokes"], dtype=int)
+    mask = (scans == int(scan)) & (antennas == int(antenna)) & (stokes_arr == int(stokes))
+    if not np.any(mask):
+        return np.array([], dtype=float), np.array([], dtype=float)
+    axis = np.asarray(gains["channel" if mode == "bandpass" else "time"], dtype=float)[mask]
+    if component == "real":
+        values = (np.asarray(gains["real"], dtype=float)[mask] - 1.0) * 100.0
+    else:
+        values = np.asarray(gains["imag"], dtype=float)[mask] * 100.0
+    finite_axis = np.isfinite(axis)
+    axis = axis[finite_axis]
+    values = values[finite_axis]
+    if axis.size == 0:
+        return axis, values
+    unique_axis = np.unique(axis)
+    grouped = np.full(unique_axis.shape, np.nan, dtype=float)
+    for idx, value in enumerate(unique_axis):
+        grouped[idx] = nanmean_no_warning(values[axis == value], axis=0)
+    return unique_axis, grouped
+
+
+def median_positive(values: np.ndarray) -> float:
+    arr = np.asarray(values, dtype=float)
+    arr = np.abs(arr[np.isfinite(arr) & (arr != 0)])
+    return float(np.nanmedian(arr)) if arr.size else np.nan
+
+
+def cross_corr_channel_width_hz(gains: Dict[str, Any]) -> float:
+    if "channel_width_hz" in gains:
+        return median_positive(np.asarray(gains["channel_width_hz"], dtype=float))
+    header = gains.get("header", {})
+    value = header.get("channel_width_hz")
+    try:
+        return float(value)
+    except Exception:
+        return np.nan
+
+
+def cross_corr_option_path(base: Path, mode: str, option: Dict[str, Any], flag_version: Optional[int]) -> Path:
+    if base.suffix == ".npz":
+        return base
+    suffix = flag_version_suffix(flag_version)
+    name = (
+        f"gdp-cross-corr-{mode}-scan{int(option['scan'])}{suffix}-"
+        f"ant{int(option['ant1'])}_{int(option['ant2'])}-"
+        f"stokes{int(option['stokes1'])}{int(option['stokes2'])}-"
+        f"comp{str(option['component1'])[:2]}{str(option['component2'])[:2]}.npz"
+    )
+    return base / name
+
+
+def cross_corr_summary_path(base: Path, mode: str, scan_label: str, flag_version: Optional[int]) -> Path:
+    directory = base.parent if base.suffix == ".npz" else base
+    suffix = flag_version_suffix(flag_version)
+    scan_text = scan_label[4:] if scan_label.startswith("scan") else scan_label
+    return directory / f"gdp-cross-corr-{mode}-scan{scan_text}{suffix}-summary.npz"
+
+
+def enumerate_cross_corr_options(
+    gains: Dict[str, Any],
+    mode: str,
+    scans: Optional[List[int]],
+    antennas: Optional[List[int]],
+    stokes_arg: object,
+    complex_arg: object,
+) -> List[Dict[str, Any]]:
+    scan_values = sorted(int(v) for v in np.unique(np.asarray(gains["scan"], dtype=int)))
+    if scans is not None:
+        wanted = {int(v) for v in scans}
+        scan_values = [scan for scan in scan_values if scan in wanted]
+    antenna_values = sorted(int(v) for v in np.unique(np.asarray(gains["antenna"], dtype=int)))
+    if antennas is not None:
+        wanted_ant = {int(v) for v in antennas}
+        antenna_values = [ant for ant in antenna_values if ant in wanted_ant]
+    if len(antenna_values) < 2:
+        raise SystemExit("ERROR: cross-corr needs at least two selected antennas in the gains NPZ.")
+    stokes_values = sorted(int(v) for v in np.unique(np.asarray(gains["stokes"], dtype=int)))
+    stokes_pairs = parse_pair_selector(stokes_arg, stokes_values, "--stokes")
+    component_pairs = parse_complex_pair_selector(complex_arg)
+    options: List[Dict[str, Any]] = []
+    for scan in scan_values:
+        scan_mask = np.asarray(gains["scan"], dtype=int) == int(scan)
+        scan_ants = sorted(set(int(v) for v in np.asarray(gains["antenna"], dtype=int)[scan_mask]) & set(antenna_values))
+        for i, ant1 in enumerate(scan_ants):
+            for ant2 in scan_ants[i + 1 :]:
+                for stokes1, stokes2 in stokes_pairs:
+                    for component1, component2 in component_pairs:
+                        options.append(
+                            {
+                                "scan": int(scan),
+                                "ant1": int(ant1),
+                                "ant2": int(ant2),
+                                "stokes1": int(stokes1),
+                                "stokes2": int(stokes2),
+                                "component1": str(component1),
+                                "component2": str(component2),
+                            }
+                        )
+    return options
+
+
+def cross_corr_write_matrix_summary(args: argparse.Namespace, scans: Optional[List[int]], antennas: Optional[List[int]], output_base: Path) -> bool:
+    if output_base.suffix == ".npz":
+        return False
+    if scans is None or len(scans) != 1:
+        return False
+    if antennas is not None:
+        return False
+    stokes_tokens = split_selector_tokens(args.stokes)
+    complex_tokens = split_selector_tokens(args.complex)
+    stokes_all = not stokes_tokens or any(token.lower() == "all" for token in stokes_tokens)
+    complex_all = not complex_tokens or any(token.lower() == "all" for token in complex_tokens)
+    return stokes_all and complex_all
+
+
+def cross_corr_result_from_gains(
+    gains: Dict[str, Any],
+    gains_npz: Path,
+    mode: str,
+    option: Dict[str, Any],
+    args_dict: Dict[str, Any],
+    flag_header: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    series1 = gains_npz_series(gains, mode, option["scan"], option["ant1"], option["stokes1"], option["component1"])
+    series2 = gains_npz_series(gains, mode, option["scan"], option["ant2"], option["stokes2"], option["component2"])
+    axes = [series1[0], series2[0]]
+    edges = correlation_edges(axes, int(args_dict["corr_nbin"]), str(args_dict["corr_bintype"]))
+    tau, s2, err, count = compute_structure_function(
+        series1,
+        series2,
+        nbin=int(args_dict["corr_nbin"]),
+        bintype=str(args_dict["corr_bintype"]),
+        njack=int(args_dict["corr_njack"]),
+        edges=edges,
+    )
+    corr_lag, corr_lag_err = estimate_corr_lag(tau, s2, err, float(args_dict["corr_threshold"]))
+    channel_width_hz = cross_corr_channel_width_hz(gains)
+    if mode == "bandpass" and np.isfinite(channel_width_hz):
+        dnucorr_hz = corr_lag * channel_width_hz
+        dnucorr_hz_err = corr_lag_err * channel_width_hz
+        tcorr_sec = np.nan
+        tcorr_sec_err = np.nan
+    else:
+        dnucorr_hz = np.nan
+        dnucorr_hz_err = np.nan
+        tcorr_sec = corr_lag
+        tcorr_sec_err = corr_lag_err
+    header = {
+        "format": "GDP_CROSS_CORR_NPZ",
+        "format_version": "0.1",
+        "created_utc": datetime.now(timezone.utc).isoformat(),
+        "product": "cross_corr",
+        "source_gains_npz": str(gains_npz),
+        "source_gains_format": gains.get("header", {}).get("format"),
+        "input_table": gains.get("header", {}).get("input_table"),
+        "mode": mode,
+        "scan": int(option["scan"]),
+        "antenna1": int(option["ant1"]),
+        "antenna2": int(option["ant2"]),
+        "stokes1": int(option["stokes1"]),
+        "stokes2": int(option["stokes2"]),
+        "component1": str(option["component1"]),
+        "component2": str(option["component2"]),
+        "axis": "channel_difference" if mode == "bandpass" else "time_difference_sec",
+        "normalization": "mean((x1-x2)^2) divided by sigma1^2 + sigma2^2, using finite unflagged gains",
+        "use_flags": bool(args_dict["use_flags"]),
+        "flag_source": "flg" if bool(args_dict["use_flags"]) else "none",
+        "flag_file_version": (flag_header or {}).get("flag_version"),
+        "corr_threshold": float(args_dict["corr_threshold"]),
+        "corr_nbin": int(args_dict["corr_nbin"]),
+        "corr_bintype": str(args_dict["corr_bintype"]),
+        "corr_njack": int(args_dict["corr_njack"]),
+        "corr_estimator": "same smoothed threshold-crossing estimator used by self-corr",
+        "channel_width_hz": float(channel_width_hz) if np.isfinite(channel_width_hz) else np.nan,
+        "channel_width_mhz": float(channel_width_hz / 1.0e6) if np.isfinite(channel_width_hz) else np.nan,
+        "columns": ["tau", "s2", "err", "count"],
+        "corr_columns": [
+            "corr_lag",
+            "corr_lag_err",
+            "tcorr_sec",
+            "tcorr_sec_err",
+            "dnucorr_hz",
+            "dnucorr_hz_err",
+            "dnucorr_mhz",
+            "dnucorr_mhz_err",
+        ],
+        "n_sample1": int(np.count_nonzero(np.isfinite(series1[1]))),
+        "n_sample2": int(np.count_nonzero(np.isfinite(series2[1]))),
+        "npair": int(np.nansum(count)) if count.size else 0,
+    }
+    return {
+        "header": header,
+        "tau": np.asarray(tau, dtype=float),
+        "s2": np.asarray(s2, dtype=float),
+        "err": np.asarray(err, dtype=float),
+        "count": np.asarray(count, dtype=int),
+        "scan": np.asarray([int(option["scan"])], dtype=int),
+        "antenna1": np.asarray([int(option["ant1"])], dtype=int),
+        "antenna2": np.asarray([int(option["ant2"])], dtype=int),
+        "stokes1": np.asarray([int(option["stokes1"])], dtype=int),
+        "stokes2": np.asarray([int(option["stokes2"])], dtype=int),
+        "component1": np.asarray([str(option["component1"])], dtype=object),
+        "component2": np.asarray([str(option["component2"])], dtype=object),
+        "corr_lag": np.asarray([float(corr_lag) if np.isfinite(corr_lag) else np.nan], dtype=float),
+        "corr_lag_err": np.asarray([float(corr_lag_err) if np.isfinite(corr_lag_err) else np.nan], dtype=float),
+        "tcorr_sec": np.asarray([float(tcorr_sec) if np.isfinite(tcorr_sec) else np.nan], dtype=float),
+        "tcorr_sec_err": np.asarray([float(tcorr_sec_err) if np.isfinite(tcorr_sec_err) else np.nan], dtype=float),
+        "dnucorr_hz": np.asarray([float(dnucorr_hz) if np.isfinite(dnucorr_hz) else np.nan], dtype=float),
+        "dnucorr_hz_err": np.asarray([float(dnucorr_hz_err) if np.isfinite(dnucorr_hz_err) else np.nan], dtype=float),
+        "dnucorr_mhz": np.asarray([float(dnucorr_hz / 1.0e6) if np.isfinite(dnucorr_hz) else np.nan], dtype=float),
+        "dnucorr_mhz_err": np.asarray([float(dnucorr_hz_err / 1.0e6) if np.isfinite(dnucorr_hz_err) else np.nan], dtype=float),
+    }
+
+
+def cross_corr_worker(payload: Dict[str, Any]) -> Dict[str, Any]:
+    gains_npz = Path(payload["gains_npz"])
+    flag_path = Path(payload["flag_path"]) if payload.get("flag_path") else None
+    gains, flag_header = load_gains_for_cross_corr(gains_npz, bool(payload["args"]["use_flags"]), flag_path)
+    t0 = time.perf_counter()
+    result = cross_corr_result_from_gains(gains, gains_npz, str(payload["mode"]), payload["option"], payload["args"], flag_header)
+    out = Path(payload["output"])
+    if payload.get("write", True):
+        write_npz(out, result)
+    return {
+        "output": str(out),
+        "elapsed_sec": float(time.perf_counter() - t0),
+        "nbytes": int(out.stat().st_size) if out.exists() else 0,
+        "npair": int(result["header"].get("npair", 0)),
+        "nbin_valid": int(np.count_nonzero(np.isfinite(result["s2"]))),
+    }
+
+
+def scalar_from_npz(z: Dict[str, np.ndarray], key: str, default: float = np.nan) -> float:
+    if key not in z:
+        return default
+    arr = np.asarray(z[key]).ravel()
+    if not arr.size:
+        return default
+    try:
+        return float(arr[0])
+    except (TypeError, ValueError):
+        return default
+
+
+def object_scalar_from_npz(z: Dict[str, np.ndarray], key: str, default: str = "") -> str:
+    if key not in z:
+        return default
+    arr = np.asarray(z[key], dtype=object).ravel()
+    if not arr.size:
+        return default
+    return str(arr[0])
+
+
+def write_cross_corr_summary_npz(
+    summary_path: Path,
+    product_paths: Sequence[Path],
+    gains_npz: Path,
+    mode: str,
+    scan_label: str,
+    args: argparse.Namespace,
+    applied_flag_version: Optional[int],
+) -> int:
+    rows: Dict[str, List[Any]] = {
+        "scan": [],
+        "antenna1": [],
+        "antenna2": [],
+        "stokes1": [],
+        "stokes2": [],
+        "component1": [],
+        "component2": [],
+        "corr_lag": [],
+        "corr_lag_err": [],
+        "tcorr_sec": [],
+        "tcorr_sec_err": [],
+        "dnucorr_hz": [],
+        "dnucorr_hz_err": [],
+        "dnucorr_mhz": [],
+        "dnucorr_mhz_err": [],
+        "delta_threshold": [],
+        "channel_width_hz": [],
+        "channel_width_mhz": [],
+        "npair": [],
+        "n_sample1": [],
+        "n_sample2": [],
+        "product_file": [],
+    }
+    table_name = ""
+    for path in product_paths:
+        if not path.exists():
+            continue
+        try:
+            with np.load(path, allow_pickle=True) as loaded:
+                z = {key: loaded[key] for key in loaded.files}
+            header = json.loads(str(np.asarray(z["header_json"]).item())) if "header_json" in z else {}
+        except Exception:
+            continue
+        table_name = table_name or str(header.get("input_table", ""))
+        rows["scan"].append(int(scalar_from_npz(z, "scan", header.get("scan", -1))))
+        rows["antenna1"].append(int(scalar_from_npz(z, "antenna1", header.get("antenna1", -1))))
+        rows["antenna2"].append(int(scalar_from_npz(z, "antenna2", header.get("antenna2", -1))))
+        rows["stokes1"].append(int(scalar_from_npz(z, "stokes1", header.get("stokes1", -1))))
+        rows["stokes2"].append(int(scalar_from_npz(z, "stokes2", header.get("stokes2", -1))))
+        rows["component1"].append(object_scalar_from_npz(z, "component1", str(header.get("component1", ""))))
+        rows["component2"].append(object_scalar_from_npz(z, "component2", str(header.get("component2", ""))))
+        for key in ("corr_lag", "corr_lag_err", "tcorr_sec", "tcorr_sec_err", "dnucorr_hz", "dnucorr_hz_err", "dnucorr_mhz", "dnucorr_mhz_err"):
+            rows[key].append(scalar_from_npz(z, key))
+        channel_width_hz = float(header.get("channel_width_hz", np.nan))
+        if mode == "bandpass" and np.isfinite(channel_width_hz) and channel_width_hz > 0:
+            delta_threshold = 2.0 * channel_width_hz / 1000.0
+        elif "tau" in z:
+            tau = np.asarray(z["tau"], dtype=float).ravel()
+            finite_tau = tau[np.isfinite(tau) & (tau > 0)]
+            delta_threshold = 2.0 * float(np.nanmin(finite_tau)) if finite_tau.size else np.nan
+        else:
+            delta_threshold = np.nan
+        rows["delta_threshold"].append(float(delta_threshold) if np.isfinite(delta_threshold) else np.nan)
+        rows["channel_width_hz"].append(channel_width_hz)
+        rows["channel_width_mhz"].append(float(header.get("channel_width_mhz", np.nan)))
+        rows["npair"].append(int(header.get("npair", 0)))
+        rows["n_sample1"].append(int(header.get("n_sample1", 0)))
+        rows["n_sample2"].append(int(header.get("n_sample2", 0)))
+        rows["product_file"].append(str(path))
+    header = {
+        "format": "GDP_CROSS_CORR_SUMMARY_NPZ",
+        "format_version": "0.1",
+        "created_utc": datetime.now(timezone.utc).isoformat(),
+        "product": "cross_corr_summary",
+        "source_gains_npz": str(gains_npz),
+        "input_table": table_name,
+        "mode": mode,
+        "scan_label": scan_label,
+        "use_flags": bool(args.use_flags),
+        "flag_file_version": applied_flag_version if args.use_flags else None,
+        "corr_threshold": float(args.corr_threshold),
+        "corr_njack": int(args.corr_njack),
+        "n_cross_corr": len(rows["scan"]),
+        "columns": list(rows.keys()),
+    }
+    result = {
+        "header": header,
+        "scan": np.asarray(rows["scan"], dtype=int),
+        "antenna1": np.asarray(rows["antenna1"], dtype=int),
+        "antenna2": np.asarray(rows["antenna2"], dtype=int),
+        "stokes1": np.asarray(rows["stokes1"], dtype=int),
+        "stokes2": np.asarray(rows["stokes2"], dtype=int),
+        "component1": np.asarray(rows["component1"], dtype=object),
+        "component2": np.asarray(rows["component2"], dtype=object),
+        "corr_lag": np.asarray(rows["corr_lag"], dtype=float),
+        "corr_lag_err": np.asarray(rows["corr_lag_err"], dtype=float),
+        "tcorr_sec": np.asarray(rows["tcorr_sec"], dtype=float),
+        "tcorr_sec_err": np.asarray(rows["tcorr_sec_err"], dtype=float),
+        "dnucorr_hz": np.asarray(rows["dnucorr_hz"], dtype=float),
+        "dnucorr_hz_err": np.asarray(rows["dnucorr_hz_err"], dtype=float),
+        "dnucorr_mhz": np.asarray(rows["dnucorr_mhz"], dtype=float),
+        "dnucorr_mhz_err": np.asarray(rows["dnucorr_mhz_err"], dtype=float),
+        "delta_threshold": np.asarray(rows["delta_threshold"], dtype=float),
+        "channel_width_hz": np.asarray(rows["channel_width_hz"], dtype=float),
+        "channel_width_mhz": np.asarray(rows["channel_width_mhz"], dtype=float),
+        "npair": np.asarray(rows["npair"], dtype=int),
+        "n_sample1": np.asarray(rows["n_sample1"], dtype=int),
+        "n_sample2": np.asarray(rows["n_sample2"], dtype=int),
+        "product_file": np.asarray(rows["product_file"], dtype=object),
+    }
+    write_npz(summary_path, result)
+    return len(rows["scan"])
+
+
+def resolve_cross_corr_gains_npz(gains_out: Path, mode: str, scan_label: str) -> Path:
+    if gains_out.exists():
+        return gains_out
+    scan_arg = ""
+    if scan_label.startswith("scan"):
+        scan_value = scan_label[4:].replace("-", ",")
+        if scan_value:
+            scan_arg = f" --scan {scan_value}"
+    raise SystemExit(
+        "ERROR: saved gains NPZ is required before cross-corr can run.\n"
+        f"Missing gains NPZ: {display_path(gains_out)}\n"
+        f"Run first: gdp-stats --mode {mode}{scan_arg} --smode gains"
+    )
+
+
+def resolve_cross_corr_output_base(args: argparse.Namespace, input_table: Path, scan_label: str, mode: str) -> Path:
+    if args.output_cross_corr_npz:
+        return Path(args.output_cross_corr_npz).expanduser().resolve()
+    return default_output_dir("cross_corr", "npz")
+
+
+def cross_corr_args_dict(args: argparse.Namespace) -> Dict[str, Any]:
+    return {
+        "use_flags": bool(args.use_flags),
+        "corr_threshold": float(args.corr_threshold),
+        "corr_nbin": int(args.corr_nbin),
+        "corr_bintype": str(args.corr_bintype),
+        "corr_njack": int(args.corr_njack),
+    }
+
+
+def cross_corr_worker_count(value: object) -> Optional[int]:
+    if value in (None, False):
+        return None
+    if value is True or str(value).strip().lower() in {"", "auto", "true", "yes", "on"}:
+        return max(1, (os.cpu_count() or 2) - 2)
+    try:
+        ncpu = int(value)
+    except ValueError as exc:
+        raise SystemExit("--parallel must be given as --parallel or --parallel NCPU.") from exc
+    if ncpu < 1:
+        raise SystemExit("--parallel NCPU must be at least 1.")
+    return ncpu
+
+
+def run_cross_corr_from_npz(
+    args: argparse.Namespace,
+    gains_npz: Path,
     input_table: Path,
     mode: str,
     scans: Optional[List[int]],
     antennas: Optional[List[int]],
-    antenna_flags: Optional[List[int]],
-    use_flags: bool,
-    bchan: Optional[int],
-    echan: Optional[int],
-    flag_chans: Optional[Tuple[int, int]],
-    nbin: int,
-    bintype: str,
-    njack: int,
-    threshold: float,
-    flag_lookup: Optional[Dict[Tuple[int, int, int], bool]] = None,
-) -> List[Dict[str, Any]]:
-    series, _meta = read_series(input_table, mode, scans, antennas, antenna_flags, use_flags, bchan, echan, flag_chans, flag_lookup)
-    rows: List[Dict[str, Any]] = []
-    for scan, by_ant in series.items():
-        ant_list = sorted(by_ant)
-        for i, ant1 in enumerate(ant_list):
-            for ant2 in ant_list[i:]:
-                for pol1, comp_map1 in by_ant[ant1].items():
-                    for pol2, comp_map2 in by_ant[ant2].items():
-                        for comp1 in CORR_COMPONENTS:
-                            for comp2 in CORR_COMPONENTS:
-                                if comp1 not in comp_map1 or comp2 not in comp_map2:
-                                    continue
-                                tau, s2, err, count = compute_structure_function(
-                                    comp_map1[comp1],
-                                    comp_map2[comp2],
-                                    nbin=nbin,
-                                    bintype=bintype,
-                                    njack=njack,
-                                )
-                                rows.append(
-                                    {
-                                        "scan": scan,
-                                        "ant1": ant1,
-                                        "ant2": ant2,
-                                        "stokes": f"{pol1}-{pol2}",
-                                        "components": f"{comp1}-{comp2}",
-                                        "threshold": float(threshold),
-                                        "tcorr": tcorr_from_s2(tau, s2, threshold),
-                                        "nbin_valid": int(np.count_nonzero(np.isfinite(s2))),
-                                        "npair": int(np.nansum(count)) if count.size else 0,
-                                    }
-                                )
-    return rows
+    scan_label: str,
+    flag_path: Optional[Path],
+    applied_flag_version: Optional[int],
+    logger: TaskLogger,
+) -> None:
+    gains, _flag_header = load_gains_for_cross_corr(gains_npz, bool(args.use_flags), flag_path)
+    gains_mode = str(gains.get("header", {}).get("mode") or mode)
+    if gains_mode in {"gain", "bandpass"} and gains_mode != mode:
+        raise SystemExit(f"ERROR: gains NPZ mode is {gains_mode}, but requested --mode {mode}.")
+    options = enumerate_cross_corr_options(gains, mode, scans, antennas, args.stokes, args.complex)
+    if not options:
+        raise SystemExit("ERROR: no cross-corr options matched the selected scan/antenna/stokes/component filters.")
+    output_base = resolve_cross_corr_output_base(args, input_table, scan_label, mode)
+    if output_base.suffix == ".npz" and len(options) > 1:
+        raise SystemExit("--output-cross-corr-npz may be a file only when exactly one cross-corr option is selected; otherwise pass a directory.")
+    outputs = [cross_corr_option_path(output_base, mode, option, applied_flag_version if args.use_flags else None) for option in options]
+    logger.write(f"cross-corr gains NPZ: {gains_npz}")
+    logger.write(f"cross-corr options: {len(options)}")
+    preview = ", ".join(display_path(path) for path in outputs[:5])
+    if len(outputs) > 5:
+        preview += f", ... ({len(outputs)} total)"
+    logger.write(f"cross-corr output preview: {preview}")
+    if args.dry_run:
+        logger.write("cross-corr dry-run: no products written.")
+        return
+    worker_args = cross_corr_args_dict(args)
+    payloads = [
+        {
+            "gains_npz": str(gains_npz),
+            "flag_path": str(flag_path) if flag_path else None,
+            "mode": mode,
+            "option": option,
+            "args": worker_args,
+            "output": str(out),
+            "write": True,
+        }
+        for option, out in zip(options, outputs)
+    ]
+    ncpu = cross_corr_worker_count(args.parallel)
+    if args.estimate:
+        sample_count = min(max(1, int(args.estimate_count)), len(payloads))
+        sample_payloads = payloads[:sample_count]
+        sizes: List[int] = []
+        elapsed: List[float] = []
+        with tempfile.TemporaryDirectory(prefix="gdp-cross-corr-estimate-") as tmpdir:
+            for idx, payload in enumerate(sample_payloads):
+                sample = dict(payload)
+                sample["output"] = str(Path(tmpdir) / f"sample-{idx}.npz")
+                result = cross_corr_worker(sample)
+                sizes.append(int(result["nbytes"]))
+                elapsed.append(float(result["elapsed_sec"]))
+        mean_time = float(np.mean(elapsed)) if elapsed else 0.0
+        mean_size = float(np.mean(sizes)) if sizes else 0.0
+        worker_count = min(int(ncpu), len(payloads)) if ncpu is not None else 1
+        estimated_cpu_sec = mean_time * len(payloads)
+        estimated_wall_sec = mean_time * math.ceil(len(payloads) / worker_count)
+        logger.write("cross-corr estimate:")
+        logger.write(f"samples={sample_count}/{len(payloads)}")
+        logger.write(f"mean_job_sec={mean_time:.3f}")
+        logger.write(f"workers={worker_count}")
+        logger.write(f"estimated_cpu_sec={estimated_cpu_sec:.3f}")
+        logger.write(f"estimated_wall_sec={estimated_wall_sec:.3f}")
+        logger.write(f"mean_size={format_bytes(mean_size)}")
+        logger.write(f"estimated_total_size={format_bytes(mean_size * len(payloads))}")
+        return
+    written = 0
+    total_size = 0
+    written_paths: List[Path] = []
+    if ncpu is None or ncpu == 1 or len(payloads) == 1:
+        for payload in payloads:
+            result = cross_corr_worker(payload)
+            written += 1
+            total_size += int(result.get("nbytes", 0))
+            written_paths.append(Path(result["output"]))
+            logger.write(f"Wrote cross-corr NPZ: {result['output']}")
+    else:
+        logger.write(f"cross-corr parallel workers: {ncpu}")
+        with ProcessPoolExecutor(max_workers=ncpu) as executor:
+            futures = [executor.submit(cross_corr_worker, payload) for payload in payloads]
+            for future in as_completed(futures):
+                result = future.result()
+                written += 1
+                total_size += int(result.get("nbytes", 0))
+                written_paths.append(Path(result["output"]))
+                logger.write(f"Wrote cross-corr NPZ: {result['output']}")
+    if cross_corr_write_matrix_summary(args, scans, antennas, output_base):
+        summary = cross_corr_summary_path(output_base, mode, scan_label, applied_flag_version if args.use_flags else None)
+        n_summary = write_cross_corr_summary_npz(summary, written_paths, gains_npz, mode, scan_label, args, applied_flag_version)
+        summary_size = int(summary.stat().st_size) if summary.exists() else 0
+        total_size += summary_size
+        logger.write(f"Wrote cross-corr summary NPZ: {summary}")
+        logger.write(f"cross-corr summary rows: {n_summary}")
+    logger.write(f"cross-corr wrote {written} NPZ file(s).")
+    logger.write(f"cross-corr total_disk_size={format_bytes(total_size)}")
 
 
 def write_npz(path: Path, result: Dict[str, Any], array_name: str = "stats") -> None:
@@ -1524,43 +2127,6 @@ def write_stats_csv(path: Path, result: Dict[str, Any]) -> None:
                         writer.writerow([int(scan), int(ant), int(pol), str(comp), int(result["valid_count"][si, ai, pi, ci]), int(result["total_count"][si, ai, pi, ci]), int(result["flagged_count"][si, ai, pi, ci]), *[float(x) if np.isfinite(x) else "nan" for x in vals]])
 
 
-def write_cross_corr_csv(path: Path, rows: List[Dict[str, Any]]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fieldnames = ["scan", "ant1", "ant2", "stokes", "components", "threshold", "tcorr", "nbin_valid", "npair"]
-    with path.open("w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        for row in rows:
-            out = dict(row)
-            out["tcorr"] = "nan" if not np.isfinite(out["tcorr"]) else f"{float(out['tcorr']):.8g}"
-            writer.writerow(out)
-
-
-def cross_corr_npz_result(rows: List[Dict[str, Any]], mode: str, scan_text: str, args: argparse.Namespace) -> Dict[str, Any]:
-    return {
-        "header": {
-            "product": "cross_corr",
-            "format": "GDP cross-correlation NPZ",
-            "mode": mode,
-            "scan_selection": scan_text,
-            "columns": ["scan", "ant1", "ant2", "stokes", "components", "threshold", "tcorr", "nbin_valid", "npair"],
-            "corr_threshold": float(args.corr_threshold),
-            "corr_nbin": int(args.corr_nbin),
-            "corr_bintype": str(args.corr_bintype),
-            "corr_njack": int(args.corr_njack),
-        },
-        "scan": np.asarray([row["scan"] for row in rows], dtype=int),
-        "ant1": np.asarray([row["ant1"] for row in rows], dtype=int),
-        "ant2": np.asarray([row["ant2"] for row in rows], dtype=int),
-        "stokes": np.asarray([row["stokes"] for row in rows], dtype=str),
-        "components": np.asarray([row["components"] for row in rows], dtype=str),
-        "threshold": np.asarray([row["threshold"] for row in rows], dtype=float),
-        "tcorr": np.asarray([row["tcorr"] for row in rows], dtype=float),
-        "nbin_valid": np.asarray([row["nbin_valid"] for row in rows], dtype=int),
-        "npair": np.asarray([row["npair"] for row in rows], dtype=int),
-    }
-
-
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Compute GDP gain/bandpass products.")
     p.add_argument("--input-table", dest="input_table_opt", default=None, help="Input CASA gain/bandpass table path.")
@@ -1572,23 +2138,29 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--scan", default=None, help="Comma-separated scans to process. Default: all scans.")
     p.add_argument("--combine-scans", action="store_true", help="Combine selected scans into one allscans-style product. Default: false, write one product per scan.")
     p.add_argument("--antennas", nargs="+", default=None, help="Antenna list, inclusive range, or mixed selection. Examples: --antennas [0-9] for antennas 0 through 9; --antennas 2,3,4,31 or --antennas 2 3 4 31 for explicit antenna IDs; --antennas \"[1-5]\" 6 \"[9-12]\" 15 16 19 for mixed ranges and single antennas. Default: all antennas.")
-    p.add_argument("--use-flags", action="store_true", help="Apply the matching GDP .flg sidecar to flagged stats, KS, self-corr, or placeholder cross-corr products. Default: false.")
+    p.add_argument("--use-flags", action="store_true", help="Apply the matching GDP .flg sidecar to flagged stats, KS, self-corr, or cross-corr products. Default: false.")
     p.add_argument("--flagver", default=None, help="Flag sidecar version. With --smode gains, write NAME_fV<version>.flg; if omitted, write the next version. With --use-flags consumers, use this version; if omitted, use the highest available version and add _fV<version> to default output product names.")
     p.add_argument(
         "--smode",
         default=None,
         help=(
             "Stats mode(s), comma or space separated: gains, stats, "
-            "ks, self-corr, all, cross-corr. cross-corr is currently a placeholder."
+            "ks, self-corr, all, cross-corr."
         ),
     )
     p.add_argument("--output-npz", default=None, help="Stats NPZ path.")
     p.add_argument("--output-gains-npz", default=None, help="Gains NPZ path.")
     p.add_argument("--output-ks-npz", default=None, help="KS NPZ path.")
     p.add_argument("--output-self-corr-npz", default=None, help="Self-correlation NPZ path.")
-    p.add_argument("--output-cross-corr-npz", default=None, help="Cross-correlation NPZ path.")
+    p.add_argument("--output-cross-corr-npz", default=None, help="Cross-correlation NPZ output directory, or an NPZ file path when exactly one cross-corr option is selected.")
     p.add_argument("--output-cross-corr-csv", default=None, help="Reserved for future cross-correlation CSV output.")
-    p.add_argument("--corr-threshold", type=float, default=0.7, help="Normalized S2 threshold for self-correlation time/frequency extraction. Default: 0.7.")
+    p.add_argument("--dry-run", action="store_true", help="For cross-corr, list selected correlation jobs and output names without writing products.")
+    p.add_argument("--estimate", action="store_true", help="For cross-corr, run a small sample and estimate full runtime and disk usage without writing final products.")
+    p.add_argument("--estimate-count", type=int, default=3, help="Number of cross-corr options to sample for --estimate. Default: 3.")
+    p.add_argument("--parallel", nargs="?", const=True, default=None, metavar="NCPU", help="Run cross-corr options in parallel. With no NCPU, use available CPU count minus 2. Default: serial.")
+    p.add_argument("--stokes", nargs="+", default=None, help="Cross-corr stokes selector. Examples: --stokes 0, --stokes 1, --stokes 01, --stokes 0 01. Default: all stokes pairings.")
+    p.add_argument("--complex", nargs="+", default=None, help="Cross-corr component selector. Examples: --complex re, --complex im, --complex reim, --complex re im reim. Default: all real/imag pairings.")
+    p.add_argument("--corr-threshold", type=float, default=0.7, help="Normalized S2 threshold for self/cross correlation time or frequency extraction. Default: 0.7.")
     p.add_argument("--corr-nbin", type=int, default=32, help="Structure-function lag bin count.")
     p.add_argument("--corr-bintype", choices=["log", "lin"], default="log", help="Structure-function lag binning.")
     p.add_argument("--corr-njack", type=int, default=32, help="Jackknife folds for structure-function errors.")
@@ -1645,6 +2217,34 @@ def scan_batches(input_table: Path, scans: Optional[List[int]], combine_scans: b
     return [([int(scan)], f"scan{int(scan)}") for scan in selected]
 
 
+def saved_gain_scan_batches(mode: str, scans: Optional[List[int]], combine_scans: bool) -> List[Tuple[Optional[List[int]], str]]:
+    if combine_scans:
+        label = "allscans" if scans is None else "scan" + "-".join(str(s) for s in scans)
+        path = build_default_output(Path("saved"), label, mode, "gains", "npz")
+        if not path.exists():
+            raise SystemExit(
+                "ERROR: saved gains NPZ is required before cross-corr can run.\n"
+                f"Missing gains NPZ: {display_path(path)}\n"
+                f"Run first: gdp-stats --mode {mode}{'' if scans is None else ' --scan ' + ','.join(str(s) for s in scans)} --combine-scans --smode gains"
+            )
+        return [(scans, label)]
+    if scans is not None:
+        return [([int(scan)], f"scan{int(scan)}") for scan in scans]
+    pattern = f"gdp-gains-{mode}-scan*.npz"
+    found: List[Tuple[int, str]] = []
+    for path in default_output_dir("gains", "npz").glob(pattern):
+        match = re.fullmatch(rf"gdp-gains-{re.escape(mode)}-scan(\d+)\.npz", path.name)
+        if match:
+            found.append((int(match.group(1)), f"scan{int(match.group(1))}"))
+    if not found:
+        raise SystemExit(
+            "ERROR: no saved per-scan gains NPZ products were found for cross-corr.\n"
+            f"Looked in: {display_path(default_output_dir('gains', 'npz'))}\n"
+            f"Run first: gdp-stats --mode {mode} --scan <scan> --smode gains"
+        )
+    return [([scan], label) for scan, label in sorted(found)]
+
+
 def run_batch(
     args: argparse.Namespace,
     input_table: Path,
@@ -1664,6 +2264,7 @@ def run_batch(
     flag_lookup: Optional[Dict[Tuple[int, int, int], bool]] = None
     flag_header: Dict[str, Any] = {}
     applied_flag_version: Optional[int] = None
+    applied_flag_path: Optional[Path] = None
     needs_sidecar_flags = bool(args.use_flags and (args.stats or args.ks or args.self_corr or args.cross_corr))
     if needs_sidecar_flags:
         if args.flagver is None and not flag_file_versions(gains_out) and args.gains:
@@ -1676,6 +2277,7 @@ def run_batch(
                 raise SystemExit(1) from exc
             flag_lookup, flag_header = load_flag_lookup(flag_path)
             applied_flag_version = int(version)
+            applied_flag_path = flag_path
             logger.write(f"Using flag file fV{version}: {flag_path}")
 
     if args.gains:
@@ -1692,6 +2294,7 @@ def run_batch(
             if needs_sidecar_flags:
                 flag_lookup, flag_header = load_flag_lookup(flag_out)
                 applied_flag_version = int(flag_version)
+                applied_flag_path = flag_out
                 logger.write(f"Using flag file fV{flag_version}: {flag_out}")
         logger.done(f"gains {scan_label}", t0)
 
@@ -1746,7 +2349,19 @@ def run_batch(
 
     if args.cross_corr:
         t0 = logger.start(f"cross-corr {scan_label}")
-        logger.write("cross-corr is currently a placeholder in gdp-stats; no cross-corr product was written.")
+        cross_gains_npz = gains_out if args.gains else resolve_cross_corr_gains_npz(gains_out, mode, scan_label)
+        run_cross_corr_from_npz(
+            args,
+            cross_gains_npz,
+            input_table,
+            mode,
+            scans,
+            antennas,
+            scan_label,
+            applied_flag_path,
+            applied_flag_version,
+            logger,
+        )
         logger.done(f"cross-corr {scan_label}", t0)
 
 
@@ -1756,6 +2371,7 @@ def main() -> None:
     activate_config(args.setup_file)
     RELATIVE_PATHS = bool(args.relative_path)
     apply_smode(args)
+    args.flagver = parse_flag_version(args.flagver)
     mode = args.mode
     if mode == "auto":
         mode = "bandpass" if args.bandpass_table else "gain"
@@ -1765,10 +2381,11 @@ def main() -> None:
     if not input_table.exists():
         raise FileNotFoundError(f"Input table not found: {input_table}")
     scans = parse_int_list(args.scan)
-    validate_requested_scans(input_table, mode, scans)
+    cross_corr_only = bool(args.cross_corr and not any([args.gains, args.stats, args.ks, args.self_corr]))
+    if not cross_corr_only:
+        validate_requested_scans(input_table, mode, scans)
     antennas = parse_antenna_list(args.antennas, "--antennas")
     antenna_flags = None
-    args.flagver = parse_flag_version(args.flagver)
     args.flag_chans = None
     validate_channel_options_for_mode(mode, args)
     if not any([args.gains, args.stats, args.ks, args.self_corr, args.cross_corr]):
@@ -1777,9 +2394,17 @@ def main() -> None:
     if args.relative_path:
         logger.write(f"Runtime directory: {runtime_dir()}")
     logger.write(f"gdp-stats input={input_table} mode={mode}")
-    batches = scan_batches(input_table, scans, args.combine_scans)
-    if len(batches) > 1 and explicit_outputs(args):
-        names = ", ".join("--" + name.replace("_", "-") for name in explicit_outputs(args))
+    batches = saved_gain_scan_batches(mode, scans, args.combine_scans) if cross_corr_only else scan_batches(input_table, scans, args.combine_scans)
+    outputs = explicit_outputs(args)
+    if (
+        len(batches) > 1
+        and args.cross_corr
+        and args.output_cross_corr_npz
+        and Path(args.output_cross_corr_npz).expanduser().suffix != ".npz"
+    ):
+        outputs = [name for name in outputs if name != "output_cross_corr_npz"]
+    if len(batches) > 1 and outputs:
+        names = ", ".join("--" + name.replace("_", "-") for name in outputs)
         raise SystemExit(
             "Explicit output paths cannot be used when writing multiple per-scan products. "
             f"Use --combine-scans or remove: {names}"

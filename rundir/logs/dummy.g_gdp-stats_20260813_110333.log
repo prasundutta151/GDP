@@ -1,0 +1,31 @@
+2026-08-13T11:03:33 gdp-stats input=/private/tmp/gdp-cross-saved/dummy.g mode=gain
+2026-08-13T11:03:33 gdp-stats batch=scan1
+2026-08-13T11:03:33 START cross-corr scan1
+2026-08-13T11:03:33 cross-corr gains NPZ: /private/tmp/gdp-cross-saved/data-product/gains/npz/gdp-gains-gain-scan1.npz
+2026-08-13T11:03:33 cross-corr options: 1
+2026-08-13T11:03:33 cross-corr output preview: /private/tmp/gdp-cross-saved/data-product/cross-corr/npz/gdp-cross-corr-gain-scan1-ant0_1-stokes01-compreim.npz
+2026-08-13T11:03:33 cross-corr dry-run: no products written.
+2026-08-13T11:03:33 DONE  cross-corr scan1 elapsed_sec=0.002
+2026-08-13T11:03:33 Log file: /Users/prasun/Documents/GDP/rundir/logs/dummy.g_gdp-stats_20260813_110333.log
+2026-08-13T11:03:33 gdp-stats input=/private/tmp/gdp-cross-saved/dummy.g mode=gain
+2026-08-13T11:03:33 gdp-stats batch=scan1
+2026-08-13T11:03:33 START cross-corr scan1
+2026-08-13T11:03:33 cross-corr gains NPZ: /private/tmp/gdp-cross-saved/data-product/gains/npz/gdp-gains-gain-scan1.npz
+2026-08-13T11:03:33 cross-corr options: 1
+2026-08-13T11:03:33 cross-corr output preview: /private/tmp/gdp-cross-saved/data-product/cross-corr/npz/gdp-cross-corr-gain-scan1-ant0_1-stokes01-compreim.npz
+2026-08-13T11:03:33 cross-corr estimate: samples=1/1 mean_sec=0.012 estimated_total_sec=0.012 mean_size=5.18 KiB estimated_total_size=5.18 KiB
+2026-08-13T11:03:33 DONE  cross-corr scan1 elapsed_sec=0.015
+2026-08-13T11:03:33 Log file: /Users/prasun/Documents/GDP/rundir/logs/dummy.g_gdp-stats_20260813_110333.log
+2026-08-13T11:03:33 gdp-stats input=/private/tmp/gdp-cross-saved/dummy.g mode=gain
+2026-08-13T11:03:33 gdp-stats batch=scan1
+2026-08-13T11:03:33 START cross-corr scan1
+2026-08-13T11:03:33 cross-corr gains NPZ: /private/tmp/gdp-cross-saved/data-product/gains/npz/gdp-gains-gain-scan1.npz
+2026-08-13T11:03:33 cross-corr options: 3
+2026-08-13T11:03:33 cross-corr output preview: /private/tmp/gdp-cross-saved/cross-out/gdp-cross-corr-gain-scan1-ant0_1-stokes00-comprere.npz, /private/tmp/gdp-cross-saved/cross-out/gdp-cross-corr-gain-scan1-ant0_2-stokes00-comprere.npz, /private/tmp/gdp-cross-saved/cross-out/gdp-cross-corr-gain-scan1-ant1_2-stokes00-comprere.npz
+2026-08-13T11:03:33 cross-corr parallel workers: 2
+2026-08-13T11:03:34 Wrote cross-corr NPZ: /private/tmp/gdp-cross-saved/cross-out/gdp-cross-corr-gain-scan1-ant0_1-stokes00-comprere.npz
+2026-08-13T11:03:34 Wrote cross-corr NPZ: /private/tmp/gdp-cross-saved/cross-out/gdp-cross-corr-gain-scan1-ant0_2-stokes00-comprere.npz
+2026-08-13T11:03:34 Wrote cross-corr NPZ: /private/tmp/gdp-cross-saved/cross-out/gdp-cross-corr-gain-scan1-ant1_2-stokes00-comprere.npz
+2026-08-13T11:03:34 cross-corr wrote 3 NPZ file(s).
+2026-08-13T11:03:34 DONE  cross-corr scan1 elapsed_sec=0.200
+2026-08-13T11:03:34 Log file: /Users/prasun/Documents/GDP/rundir/logs/dummy.g_gdp-stats_20260813_110333.log

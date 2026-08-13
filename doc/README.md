@@ -115,9 +115,13 @@ Compute GDP statistics:
 casa --nogui --nologger --nologfile --log2term -c script/gdp-stats --smode gains,stats,ks
 script/gdp-stats --smode all
 script/gdp-stats --smode self-corr
+script/gdp-stats --mode gain --scan 17 --smode gains,cross-corr --stokes 01 --complex reim
+script/gdp-stats --mode gain --scan 17 --smode cross-corr --dry-run
 script/gdp-stats --mode gain --scan 17 --smode gains
 script/gdp-stats --mode gain --scan 17 --smode gain --adjust-mean
 script/gdp-plot --mode gain --scan 17 -pmode colormap --range 20
+script/gdp-plot --mode gain --scan 17 -pmode cross-corr-antenna --ant-pair 0 1 --stokes-pair 01 --cmplx-pair reim
+script/gdp-plot --mode bandpass --scan 18 -pmode cross-corr-grid --use-flags
 script/gdp-plot --mode bandpass -pmode colormap -pchans "[16-64]" --range 20
 script/gdp-stats --mode gain --scan 17 --smode gains --flagver 1
 script/gdp-stats --mode gain --scan 17 --smode stats,ks --use-flags --flagver 1
@@ -148,6 +152,8 @@ script/gdp-flag --mode gain --scan 17 --fmode ante-thrsld --percent 40
 script/gdp-flag --mode gain --scan 17 --fmode ks-thrsld
 script/gdp-flag --mode gain --scan 17 --fmode ks-thrsld 1.5
 script/gdp-flag --mode gain --scan 17 --fmode ks-thrsld --factor 1.5
+script/gdp-flag --mode gain --scan 17 --fmode gpr
+script/gdp-flag --mode bandpass --scan 18 --fmode gpr --thrsld 5 --kernel matern32 --scale 16,128
 script/gdp-flag --mode bandpass --scan 18 --fmode all-std-thrsld --alpha 2
 script/gdp-flag --mode gain --scan 17 --fmode remove-version
 script/gdp-flag --mode gain --scan 17 --fmode remove-version 3
@@ -194,6 +200,15 @@ Real-1 and Imag samples. For each component, GDP generates 128 Gaussian-pair
 realizations with the same sample size and flags the antenna/Stokes group if
 the measured KS is greater than `factor` times the mean Gaussian KS. The
 default factor is `1`.
+`gpr` flags non-smooth samples per antenna, Stokes, and component with a
+multi-scale GPR-style kernel smoother. Gain mode uses time as the axis and
+bandpass mode uses channel as the axis. `--thrsld` controls the standardized
+residual threshold, `--kernel` accepts `rbf`, `matern32`, or `exp`, and
+`--scale` accepts one or more seconds/channel length scales. Leave-one-out
+residuals catch isolated high/low spikes, while the short-scale versus
+longest-scale comparison catches sustained high/low regions that later return
+to regular values. If scales are omitted, GDP derives short and long scales
+from the selected data.
 Flagged data products and plots append `_fV<version>` before the file
 extension, for example `gdp-stats-gain-scan17_fV1.npz` and
 `gdp-plot-colormap-gain-scan17_fV1.png`.

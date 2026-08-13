@@ -56,4 +56,14 @@ intent: gdp-flag
  out-fver: 5
 end
 
+intent: gdp-flag
+ use: true
+ name: gpr multi-scale
+ fmode: gpr
+ thrsld: 5
+ kernel: rbf
+ scale: 16 128
+ scan: 18
+ out-fver: 6
+end
 

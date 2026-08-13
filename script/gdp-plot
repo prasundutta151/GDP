@@ -20,6 +20,8 @@ try:
 
     matplotlib.use("Agg")
     from matplotlib.patches import Ellipse
+    from matplotlib.colors import LogNorm, Normalize
+    from matplotlib.ticker import FixedLocator, FormatStrFormatter, NullFormatter
     import matplotlib.pyplot as plt
 except Exception as exc:
     raise RuntimeError("gdp-plot requires matplotlib. See REQUIREMENTS.md.") from exc
@@ -42,6 +44,8 @@ PRODUCTS = {
     "self_corr_antenna": ("self_corr", "self_corr_npz_dir", "self-corr"),
     "self_corr_all_ante": ("self_corr", "self_corr_npz_dir", "self-corr"),
     "cross_corr_colormap": ("cross_corr", "cross_corr_npz_dir", "cross-corr"),
+    "cross_corr_antenna": ("cross_corr", "cross_corr_npz_dir", "cross-corr"),
+    "cross_corr_grid": ("cross_corr", "cross_corr_npz_dir", "cross-corr"),
 }
 ALL_PMODE_TASKS = ["gain_colormap", "gain_hist", "stats", "ks"]
 PLOT_TASK_NAMES = {
@@ -71,6 +75,12 @@ PMODE_ALIASES = {
     "self_corr_all_antenna": "self_corr_all_ante",
     "cross-corr-colormap": "cross_corr_colormap",
     "cross_corr_colormap": "cross_corr_colormap",
+    "cross-corr-ante": "cross_corr_antenna",
+    "cross_corr_ante": "cross_corr_antenna",
+    "cross-corr-antenna": "cross_corr_antenna",
+    "cross_corr_antenna": "cross_corr_antenna",
+    "cross-corr-grid": "cross_corr_grid",
+    "cross_corr_grid": "cross_corr_grid",
 }
 
 
@@ -137,7 +147,7 @@ def display_path(path: object) -> str:
 
 
 def emit(message: object) -> None:
-    print(format_path_text(message))
+    print(format_path_text(message), flush=True)
 
 
 def config_path(key: str) -> Optional[Path]:
@@ -231,6 +241,59 @@ def parse_channel_pair(text: object, option_name: str = "-pchans") -> Optional[T
     return start, end + 1
 
 
+def split_pair_tokens(value: object) -> List[str]:
+    if value is None:
+        return []
+    text = normalize_list_text(value)
+    text = text.replace("&", " ")
+    return [part.strip() for part in re.split(r"[\s,]+", text) if part.strip()]
+
+
+def parse_int_pair_option(value: object, option_name: str) -> Tuple[int, int]:
+    tokens = split_pair_tokens(value)
+    if len(tokens) == 1:
+        text = tokens[0]
+        if re.fullmatch(r"\d{2}", text):
+            return int(text[0]), int(text[1])
+        if "-" in text and not text.startswith("-"):
+            parts = [part.strip() for part in text.split("-", 1) if part.strip()]
+            if len(parts) == 2:
+                return int(parts[0]), int(parts[1])
+    if len(tokens) == 2:
+        return int(tokens[0]), int(tokens[1])
+    raise SystemExit(f"{option_name} must be two numbers, for example {option_name} 0,1, {option_name} 0&1, or {option_name} 01")
+
+
+def normalize_component_pair_token(text: str) -> str:
+    key = text.strip().lower().replace("_", "").replace("-", "")
+    aliases = {
+        "re": "real",
+        "real": "real",
+        "r": "real",
+        "im": "imag",
+        "imag": "imag",
+        "i": "imag",
+    }
+    if key in aliases:
+        return aliases[key]
+    raise SystemExit("--cmplx-pair accepts re, im, reim, imre, real, or imag.")
+
+
+def parse_component_pair_option(value: object, option_name: str = "--cmplx-pair") -> Tuple[str, str]:
+    tokens = split_pair_tokens(value)
+    if len(tokens) == 1:
+        key = tokens[0].strip().lower().replace("_", "").replace("-", "")
+        if key in {"reim", "realimag", "rimi"}:
+            return "real", "imag"
+        if key in {"imre", "imagreal", "imir"}:
+            return "imag", "real"
+        comp = normalize_component_pair_token(tokens[0])
+        return comp, comp
+    if len(tokens) == 2:
+        return normalize_component_pair_token(tokens[0]), normalize_component_pair_token(tokens[1])
+    raise SystemExit(f"{option_name} must be re, im, reim, imre, or two component names such as im&im.")
+
+
 def parse_pmode(text: Optional[str]) -> List[str]:
     if text is None or str(text).strip() == "":
         return []
@@ -293,7 +356,7 @@ def default_product_dir(product: str) -> Path:
     configured = config_path(config_key)
     if configured is not None:
         return configured
-    return project_root() / "rundir" / "data-product" / folder / "npz"
+    return runtime_dir() / "data-product" / folder / "npz"
 
 
 def flag_version_suffix(version: Optional[int]) -> str:
@@ -313,6 +376,214 @@ def default_product_path(
     product_name, _, _ = PRODUCTS[product]
     path = default_product_dir(product) / f"gdp-{product_name.replace('_', '-')}-{mode}-{scan_label}.npz"
     return path_with_flag_version(path, flagver)
+
+
+def cross_corr_product_path(
+    mode: str,
+    scan_label: str,
+    ant_pair: Tuple[int, int],
+    stokes_pair: Tuple[int, int],
+    component_pair: Tuple[str, str],
+    flagver: Optional[int] = None,
+) -> Path:
+    if not scan_label.startswith("scan"):
+        raise SystemExit("ERROR: cross-corr-antenna requires a single per-scan product. Use --scan <scan> without --combine-scans.")
+    scan_value = scan_label[4:]
+    suffix = flag_version_suffix(flagver)
+    name = (
+        f"gdp-cross-corr-{mode}-scan{scan_value}{suffix}-"
+        f"ant{int(ant_pair[0])}_{int(ant_pair[1])}-"
+        f"stokes{int(stokes_pair[0])}{int(stokes_pair[1])}-"
+        f"comp{str(component_pair[0])[:2]}{str(component_pair[1])[:2]}.npz"
+    )
+    return default_product_dir("cross_corr_antenna") / name
+
+
+def cross_corr_plot_tag(
+    ant_pair: Tuple[int, int],
+    stokes_pair: Tuple[int, int],
+    component_pair: Tuple[str, str],
+) -> str:
+    return (
+        f"ant{int(ant_pair[0])}_{int(ant_pair[1])}-"
+        f"stokes{int(stokes_pair[0])}{int(stokes_pair[1])}-"
+        f"comp{str(component_pair[0])[:2]}{str(component_pair[1])[:2]}"
+    )
+
+
+def component_pair_cli_value(component_pair: Tuple[str, str]) -> str:
+    left = "re" if component_pair[0] == "real" else "im"
+    right = "re" if component_pair[1] == "real" else "im"
+    return left if left == right else left + right
+
+
+def component_pair_display_value(component_pair: Tuple[str, str]) -> str:
+    left = "re" if component_pair[0] == "real" else "im"
+    right = "re" if component_pair[1] == "real" else "im"
+    return f"{left}&{right}"
+
+
+def cross_corr_available_options(mode: str, scan_label: str, flagver: Optional[int]) -> Dict[str, List[str]]:
+    if not scan_label.startswith("scan"):
+        return {"antenna_pairs": [], "stokes_pairs": [], "component_pairs": []}
+    scan_value = scan_label[4:]
+    suffix = flag_version_suffix(flagver)
+    pattern = f"gdp-cross-corr-{mode}-scan{scan_value}{suffix}-ant*_*-stokes*-comp*.npz"
+    antenna_pairs: set[str] = set()
+    stokes_pairs: set[str] = set()
+    component_pairs: set[str] = set()
+    regex = re.compile(
+        rf"gdp-cross-corr-{re.escape(mode)}-scan{re.escape(scan_value)}{re.escape(suffix)}-"
+        r"ant(\d+)_(\d+)-stokes(\d+)-comp([A-Za-z]+)\.npz"
+    )
+    for path in default_product_dir("cross_corr_antenna").glob(pattern):
+        match = regex.fullmatch(path.name)
+        if not match:
+            continue
+        ant1, ant2, stokes, comp = match.groups()
+        antenna_pairs.add(f"{ant1}&{ant2}")
+        if len(stokes) == 2:
+            stokes_pairs.add(f"{stokes[0]}&{stokes[1]}")
+        else:
+            stokes_pairs.add(stokes)
+        if len(comp) == 4:
+            component_pairs.add(f"{comp[:2]}&{comp[2:]}")
+        else:
+            component_pairs.add(comp)
+    return {
+        "antenna_pairs": sorted(antenna_pairs, key=lambda text: [int(part) for part in text.split("&") if part.isdigit()]),
+        "stokes_pairs": sorted(stokes_pairs),
+        "component_pairs": sorted(component_pairs),
+    }
+
+
+def format_available_options(values: Sequence[str], label: str) -> str:
+    if not values:
+        return f"{label}: none found"
+    shown = ", ".join(values[:24])
+    if len(values) > 24:
+        shown += f", ... ({len(values)} total)"
+    return f"{label}: {shown}"
+
+
+def cross_corr_grid_delta_threshold(z: Dict[str, np.ndarray], header: Dict[str, Any], mode: str) -> float:
+    if mode == "bandpass":
+        try:
+            channel_width_hz = float(header.get("channel_width_hz", np.nan))
+        except (TypeError, ValueError):
+            channel_width_hz = np.nan
+        if np.isfinite(channel_width_hz) and channel_width_hz > 0:
+            return 2.0 * channel_width_hz / 1000.0
+        return np.nan
+    integration_time_sec = self_corr_integration_time_sec(z)
+    if np.isfinite(integration_time_sec) and integration_time_sec > 0:
+        return 2.0 * integration_time_sec
+    if "tau" in z:
+        tau = np.asarray(z["tau"], dtype=float).ravel()
+        finite = tau[np.isfinite(tau) & (tau > 0)]
+        if finite.size:
+            return 2.0 * float(np.nanmin(finite))
+    return np.nan
+
+
+def compact_number(value: float, precision: int = 3) -> str:
+    if not np.isfinite(value):
+        return "nan"
+    return f"{float(value):.{precision}g}"
+
+
+def cross_corr_grid_records(mode: str, scan_label: str, flagver: Optional[int]) -> List[Dict[str, Any]]:
+    if not scan_label.startswith("scan"):
+        raise SystemExit("ERROR: cross-corr-grid requires one per-scan product. Use --scan <scan> without --combine-scans.")
+    scan_value = scan_label[4:]
+    suffix = flag_version_suffix(flagver)
+    summary_path = default_product_dir("cross_corr_grid") / f"gdp-cross-corr-{mode}-scan{scan_value}{suffix}-summary.npz"
+    if summary_path.exists():
+        z = load_npz(summary_path)
+        header = npz_header(z)
+        nrow = int(np.asarray(z["antenna1"]).size) if "antenna1" in z else 0
+        records: List[Dict[str, Any]] = []
+        for idx in range(nrow):
+            comp1 = str(np.asarray(z["component1"], dtype=object)[idx])
+            comp2 = str(np.asarray(z["component2"], dtype=object)[idx])
+            if mode == "bandpass":
+                value = np.nan
+                if "dnucorr_mhz" in z:
+                    value = float(np.asarray(z["dnucorr_mhz"], dtype=float)[idx] * 1000.0)
+                elif "dnucorr_hz" in z:
+                    value = float(np.asarray(z["dnucorr_hz"], dtype=float)[idx] / 1000.0)
+                if "delta_threshold" in z:
+                    delta_threshold = float(np.asarray(z["delta_threshold"], dtype=float)[idx])
+                else:
+                    channel_width_hz = float(np.asarray(z.get("channel_width_hz", np.full(nrow, np.nan)), dtype=float)[idx])
+                    delta_threshold = 2.0 * channel_width_hz / 1000.0 if np.isfinite(channel_width_hz) and channel_width_hz > 0 else np.nan
+                unit = "kHz"
+            else:
+                value = float(np.asarray(z["tcorr_sec"], dtype=float)[idx]) if "tcorr_sec" in z else float(np.asarray(z.get("corr_lag", np.full(nrow, np.nan)), dtype=float)[idx])
+                if "delta_threshold" in z:
+                    delta_threshold = float(np.asarray(z["delta_threshold"], dtype=float)[idx])
+                else:
+                    corr_lag = np.asarray(z.get("corr_lag", np.full(nrow, np.nan)), dtype=float)
+                    finite_lag = corr_lag[np.isfinite(corr_lag) & (corr_lag > 0)]
+                    delta_threshold = 2.0 * float(np.nanmin(finite_lag)) if finite_lag.size else np.nan
+                unit = "sec"
+            records.append(
+                {
+                    "path": Path(str(np.asarray(z.get("product_file", np.full(nrow, "")), dtype=object)[idx])),
+                    "ant1": int(np.asarray(z["antenna1"], dtype=int)[idx]),
+                    "ant2": int(np.asarray(z["antenna2"], dtype=int)[idx]),
+                    "stokes": (int(np.asarray(z["stokes1"], dtype=int)[idx]), int(np.asarray(z["stokes2"], dtype=int)[idx])),
+                    "component": (comp1, comp2),
+                    "value": value,
+                    "delta_threshold": delta_threshold,
+                    "unit": unit,
+                    "table_name": Path(str(header.get("input_table", "gain table"))).name or "gain table",
+                    "flagver": header.get("flag_file_version"),
+                }
+            )
+        return records
+    pattern = f"gdp-cross-corr-{mode}-scan{scan_value}{suffix}-ant*_*-stokes*-comp*.npz"
+    records: List[Dict[str, Any]] = []
+    for path in sorted(default_product_dir("cross_corr_grid").glob(pattern)):
+        try:
+            z = load_npz(path)
+            header = npz_header(z)
+            ant1 = int(header.get("antenna1"))
+            ant2 = int(header.get("antenna2"))
+            stokes1 = int(header.get("stokes1"))
+            stokes2 = int(header.get("stokes2"))
+            comp1 = str(header.get("component1"))
+            comp2 = str(header.get("component2"))
+            if mode == "bandpass":
+                value = np.nan
+                if "dnucorr_mhz" in z:
+                    arr = np.asarray(z["dnucorr_mhz"], dtype=float).ravel()
+                    value = float(arr[0] * 1000.0) if arr.size else np.nan
+                elif "dnucorr_hz" in z:
+                    arr = np.asarray(z["dnucorr_hz"], dtype=float).ravel()
+                    value = float(arr[0] / 1000.0) if arr.size else np.nan
+                unit = "kHz"
+            else:
+                arr = np.asarray(z["tcorr_sec"], dtype=float).ravel() if "tcorr_sec" in z else np.asarray(z.get("corr_lag", []), dtype=float).ravel()
+                value = float(arr[0]) if arr.size else np.nan
+                unit = "sec"
+            records.append(
+                {
+                    "path": path,
+                    "ant1": ant1,
+                    "ant2": ant2,
+                    "stokes": (stokes1, stokes2),
+                    "component": (comp1, comp2),
+                    "value": value,
+                    "delta_threshold": cross_corr_grid_delta_threshold(z, header, mode),
+                    "unit": unit,
+                    "table_name": Path(str(header.get("input_table", "gain table"))).name or "gain table",
+                    "flagver": header.get("flag_file_version"),
+                }
+            )
+        except Exception:
+            continue
+    return records
 
 
 def discover_scan_products(
@@ -362,7 +633,7 @@ def default_plot_dir(fmt: str) -> Path:
     configured = config_path(key)
     if configured is not None:
         return configured
-    return project_root() / "rundir" / "plots" / fmt
+    return runtime_dir() / "plots" / fmt
 
 
 def output_path(plot_dir: Path, task: str, mode: str, scan_label: str, fmt: str) -> Path:
@@ -447,6 +718,7 @@ def ensure_npz(product: str, mode: str, args: argparse.Namespace, scans: Optiona
         "self_corr_antenna": "self-corr",
         "self_corr_all_ante": "self-corr",
         "cross_corr_colormap": "cross-corr",
+        "cross_corr_antenna": "cross-corr",
     }[product]
     output_flag = {
         "gain_colormap": "--output-gains-npz",
@@ -459,6 +731,7 @@ def ensure_npz(product: str, mode: str, args: argparse.Namespace, scans: Optiona
         "self_corr_antenna": "--output-self-corr-npz",
         "self_corr_all_ante": "--output-self-corr-npz",
         "cross_corr_colormap": "--output-cross-corr-npz",
+        "cross_corr_antenna": "--output-cross-corr-npz",
     }[product]
 
     cmd = [str(script_dir() / "gdp-stats"), "--mode", mode, "--combine-scans", "--smode", smode, output_flag, str(path)]
@@ -498,6 +771,69 @@ def ensure_npzs(product: str, mode: str, args: argparse.Namespace, scans: Option
             raise FileNotFoundError(f"--npz-path does not exist: {display_path(path)}")
         emit(f"Using supplied NPZ for {product.replace('_', '-')}: {path}")
         return [(label_from_npz_path(path, product, mode), path)]
+
+    if product == "cross_corr_antenna":
+        if args.combine_scans:
+            raise SystemExit("ERROR: cross-corr-antenna requires one scan; remove --combine-scans and pass --scan <scan>.")
+        if scans is None or len(scans) != 1:
+            raise SystemExit("ERROR: cross-corr-antenna requires exactly one --scan value.")
+        if args.ant_pair is None or args.stokes_pair is None or args.cmplx_pair is None:
+            raise SystemExit("ERROR: cross-corr-antenna requires --ant-pair, --stokes-pair, and --cmplx-pair.")
+        label = f"scan{int(scans[0])}"
+        ant_pair = parse_int_pair_option(args.ant_pair, "--ant-pair")
+        stokes_pair = parse_int_pair_option(args.stokes_pair, "--stokes-pair")
+        component_pair = parse_component_pair_option(args.cmplx_pair, "--cmplx-pair")
+        flagver = product_file_flag_version(product, mode, label, args)
+        path = cross_corr_product_path(mode, label, ant_pair, stokes_pair, component_pair, flagver=flagver)
+        if path.exists() and not args.recompute:
+            emit(f"Using existing cross-corr NPZ: {path}")
+            return [(label, path)]
+        cmd = [
+            str(script_dir() / "gdp-stats"),
+            "--mode",
+            mode,
+            "--scan",
+            str(int(scans[0])),
+            "--smode",
+            "cross-corr",
+            "--antennas",
+            str(int(ant_pair[0])),
+            str(int(ant_pair[1])),
+            "--stokes",
+            f"{int(stokes_pair[0])}{int(stokes_pair[1])}",
+            "--complex",
+            component_pair_cli_value(component_pair),
+        ]
+        if args.setup_file:
+            cmd.extend(["--setup-file", args.setup_file])
+        if args.relative_path:
+            cmd.append("--relative-path")
+        if args.input_table:
+            cmd.extend(["--input-table", args.input_table])
+        elif mode == "bandpass" and args.bandpass_table:
+            cmd.extend(["--bandpass-table", args.bandpass_table])
+        elif mode == "gain" and args.gain_table:
+            cmd.extend(["--gain-table", args.gain_table])
+        if args.use_flags:
+            cmd.append("--use-flags")
+        if args.flagver is not None:
+            cmd.extend(["--flagver", str(args.flagver)])
+        available = cross_corr_available_options(mode, label, flagver)
+        raise FileNotFoundError(
+            "Missing cross-corr NPZ for requested antenna/Stokes/component pair.\n"
+            f"Requested antenna pair: {int(ant_pair[0])}&{int(ant_pair[1])}\n"
+            f"Requested stokes pair: {int(stokes_pair[0])}&{int(stokes_pair[1])}\n"
+            f"Requested component pair: {component_pair_display_value(component_pair)}\n"
+            + format_available_options(available["antenna_pairs"], "Available antenna pairs")
+            + "\n"
+            + format_available_options(available["stokes_pairs"], "Available stokes pairs")
+            + "\n"
+            + format_available_options(available["component_pairs"], "Available component pairs")
+            + "\n"
+            f"Missing: {display_path(path)}\n"
+            "Run first:\n"
+            "$ " + " ".join(cmd)
+        )
 
     if args.combine_scans:
         label = scan_text(scans)
@@ -539,6 +875,7 @@ def ensure_npzs(product: str, mode: str, args: argparse.Namespace, scans: Option
         "self_corr_antenna": "self-corr",
         "self_corr_all_ante": "self-corr",
         "cross_corr_colormap": "cross-corr",
+        "cross_corr_antenna": "cross-corr",
     }[product]
     cmd = [str(script_dir() / "gdp-stats"), "--mode", mode, "--smode", smode]
     if args.setup_file:
@@ -2852,6 +3189,313 @@ def plot_cross_corr_colormap(npz_path: Path, out: Path, antennas: Optional[List[
     save_figure(fig, out)
 
 
+def cross_corr_value_box_text(z: Dict[str, np.ndarray], mode: str) -> str:
+    header = npz_header(z)
+    corr_lag = float(np.asarray(z["corr_lag"], dtype=float)[0]) if "corr_lag" in z else np.nan
+    corr_lag_err = float(np.asarray(z["corr_lag_err"], dtype=float)[0]) if "corr_lag_err" in z else np.nan
+    channel_width_khz = float(header.get("channel_width_khz", np.nan))
+    if not np.isfinite(channel_width_khz):
+        channel_width_hz = float(header.get("channel_width_hz", np.nan))
+        channel_width_khz = channel_width_hz / 1000.0 if np.isfinite(channel_width_hz) else np.nan
+    return aggregate_corr_box_text(mode, corr_lag, corr_lag_err, channel_width_khz, self_corr_integration_time_sec(z))
+
+
+def plot_cross_corr_antenna(npz_path: Path, out: Path, threshold: float) -> None:
+    z = load_npz(npz_path)
+    required = {"tau", "s2", "scan", "antenna1", "antenna2", "stokes1", "stokes2", "component1", "component2"}
+    missing = required - set(z)
+    if missing:
+        raise ValueError(f"{npz_path} missing arrays: {sorted(missing)}")
+    header = npz_header(z)
+    mode = str(header.get("mode") or "").strip().lower()
+    table_name = Path(str(header.get("input_table", "gain table"))).name or "gain table"
+    channel_width_khz = float(header.get("channel_width_khz", np.nan))
+    if not np.isfinite(channel_width_khz):
+        channel_width_hz = float(header.get("channel_width_hz", np.nan))
+        channel_width_khz = channel_width_hz / 1000.0 if np.isfinite(channel_width_hz) else np.nan
+    scan = int(np.asarray(z["scan"], dtype=int)[0])
+    ant1 = int(np.asarray(z["antenna1"], dtype=int)[0])
+    ant2 = int(np.asarray(z["antenna2"], dtype=int)[0])
+    stokes1 = int(np.asarray(z["stokes1"], dtype=int)[0])
+    stokes2 = int(np.asarray(z["stokes2"], dtype=int)[0])
+    comp1 = str(np.asarray(z["component1"], dtype=object)[0])
+    comp2 = str(np.asarray(z["component2"], dtype=object)[0])
+    tau = np.asarray(z["tau"], dtype=float)
+    s2 = np.asarray(z["s2"], dtype=float)
+    finite = np.isfinite(tau) & np.isfinite(s2)
+    if np.count_nonzero(finite) < 1:
+        n_sample1 = header.get("n_sample1", "unknown")
+        n_sample2 = header.get("n_sample2", "unknown")
+        npair = header.get("npair", "unknown")
+        flag_text = f" fV{header.get('flag_file_version')}" if header.get("flag_file_version") is not None else ""
+        raise SystemExit(
+            "ERROR: no finite cross-corr S2 samples are available for this product.\n"
+            f"Product: {display_path(npz_path)}\n"
+            f"Selection: antenna {ant1}&{ant2}, stokes {stokes1}&{stokes2}, component {component_pair_display_value((comp1, comp2))}\n"
+            f"Flags: {'used' + flag_text if header.get('use_flags') else 'not used'}\n"
+            f"finite_samples_antenna1={n_sample1}\n"
+            f"finite_samples_antenna2={n_sample2}\n"
+            f"sample_pairs={npair}\n"
+            "This normally means the selected pair is fully flagged, or has no finite unflagged samples. "
+            "Try another antenna/stokes/component pair, another --flagver, or run without --use-flags if appropriate."
+        )
+    order = np.argsort(tau[finite])
+    tx = tau[finite][order]
+    yy = s2[finite][order]
+
+    fig, ax = plt.subplots(1, 1, figsize=(8.0, 6.0))
+    ax.plot(tx, yy, "o", ms=3, lw=1, color="blue")
+    ax.plot(tx, yy, "-", lw=2, color="blue")
+    ax.axhline(1.0, color="green", lw=2)
+    ax.axhline(float(threshold), color="red", lw=2, linestyle="--")
+    ax.set_ylim(0.1, 1.1)
+    if tx.size and np.all(tx > 0):
+        ax.set_xscale("log")
+        ticks = factor_lag_ticks(tx, factor=4.0)
+        if ticks.size:
+            ax.set_xticks(ticks)
+            ax.set_xticklabels([compact_tick_label(v) for v in ticks], fontsize=8)
+    if mode == "bandpass":
+        ax.set_xlabel("Channel Difference")
+        if np.isfinite(channel_width_khz) and channel_width_khz > 0 and tx.size and np.all(tx > 0):
+            top_ax = ax.twiny()
+            top_ax.set_xscale("log")
+            top_ax.set_xlim(ax.get_xlim())
+            ticks = np.asarray(ax.get_xticks(), dtype=float)
+            ticks = ticks[np.isfinite(ticks) & (ticks > 0)]
+            if ticks.size:
+                scale, unit = frequency_delta_unit(channel_width_khz, ticks)
+                top_ax.set_xticks(ticks)
+                top_ax.set_xticklabels([compact_tick_label(v * channel_width_khz / scale) for v in ticks], fontsize=8)
+            else:
+                unit = "kHz"
+            top_ax.set_xlabel(rf"$\Delta \nu$ [{unit}]", fontsize=9)
+            top_ax.tick_params(axis="x", labelsize=8)
+    else:
+        ax.set_xlabel(r"$\Delta t$ [sec]")
+    ax.set_ylabel(r"$S_2 / (\sigma_1^2 + \sigma_2^2)$")
+    ax.set_title(
+        f"Ant {ant1}-{ant2} | Stokes {stokes1}-{stokes2} | "
+        f"{'Real-1' if comp1 == 'real' else 'Imag'} - {'Real-1' if comp2 == 'real' else 'Imag'}",
+        fontsize=10,
+    )
+    ax.grid(True, which="both", ls=":", alpha=0.4)
+    box_text = cross_corr_value_box_text(z, mode)
+    if box_text:
+        ax.text(
+            0.04,
+            0.94,
+            box_text,
+            transform=ax.transAxes,
+            ha="left",
+            va="top",
+            fontsize=8,
+            bbox={"boxstyle": "round,pad=0.28", "facecolor": "white", "edgecolor": "0.35", "alpha": 0.86},
+        )
+    dnu_text = ""
+    if mode == "bandpass" and np.isfinite(channel_width_khz) and channel_width_khz > 0:
+        dnu_text = f" | $\\Delta \\nu$ = {channel_width_khz / 1000.0:.2f} MHz" if channel_width_khz >= 1000 else f" | $\\Delta \\nu$ = {channel_width_khz:.2f} kHz"
+    fig.suptitle(f"Gain Table: {table_name} | Scan: {scan}{dnu_text}", fontsize=10, y=0.995)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    fig.tight_layout(rect=(0, 0, 1, 0.965))
+    fig.savefig(out, dpi=DEFAULT_PLOT_DPI)
+    plt.close(fig)
+    emit(f"Wrote plot: {out}")
+
+
+def plot_cross_corr_grid(
+    mode: str,
+    scan_label: str,
+    out_base: Path,
+    antennas: Optional[List[int]],
+    flagver: Optional[int],
+    fmt: str,
+    clip: Optional[float],
+) -> List[Path]:
+    records = cross_corr_grid_records(mode, scan_label, flagver)
+    if not records:
+        raise SystemExit(
+            "ERROR: no cross-corr NPZ files found for cross-corr-grid.\n"
+            f"Looked in: {display_path(default_product_dir('cross_corr_grid'))}\n"
+            f"Scan: {scan_label}\n"
+            f"Flag version: {flagver if flagver is not None else 'none'}"
+        )
+    ant_values = sorted({int(r["ant1"]) for r in records} | {int(r["ant2"]) for r in records})
+    if antennas is not None:
+        wanted = {int(a) for a in antennas}
+        ant_values = [ant for ant in ant_values if ant in wanted]
+    if len(ant_values) < 2:
+        raise SystemExit("ERROR: cross-corr-grid requires at least two antennas with cross-corr products.")
+    ant_index = {ant: idx for idx, ant in enumerate(ant_values)}
+    n = len(ant_values)
+    stokes_pairs = [(0, 0), (0, 1), (1, 0), (1, 1)]
+    grid_specs = [
+        ("cmp-self", (("real", "real"), ("imag", "imag")), "Upper: re&re | Lower: im&im"),
+        ("cmp-cross", (("real", "imag"), ("imag", "real")), "Upper: re&im | Lower: im&re"),
+    ]
+    unit = next((str(r["unit"]) for r in records if str(r.get("unit"))), "kHz" if mode == "bandpass" else "sec")
+    table_name = next((str(r["table_name"]) for r in records if str(r.get("table_name"))), "gain table")
+    value_lookup = {
+        (int(r["ant1"]), int(r["ant2"]), tuple(r["stokes"]), tuple(r["component"])): float(r["value"])
+        for r in records
+        if int(r["ant1"]) in ant_index and int(r["ant2"]) in ant_index
+    }
+    threshold_lookup = {
+        (int(r["ant1"]), int(r["ant2"]), tuple(r["stokes"]), tuple(r["component"])): float(r.get("delta_threshold", np.nan))
+        for r in records
+        if int(r["ant1"]) in ant_index and int(r["ant2"]) in ant_index
+    }
+    finite_values = [value for value in value_lookup.values() if np.isfinite(value)]
+    if not finite_values:
+        raise SystemExit("ERROR: cross-corr-grid found files, but none have finite corr-time/nu-corr values.")
+    finite_arr = np.asarray(finite_values, dtype=float)
+    positive = finite_arr[np.isfinite(finite_arr) & (finite_arr > 0)]
+    thresholds = np.asarray([value for value in threshold_lookup.values() if np.isfinite(value) and value > 0], dtype=float)
+    lower_clip = float(np.nanmedian(thresholds)) if thresholds.size else np.nan
+    default_clip = 16.0 * float(np.nanmedian(thresholds)) if thresholds.size else np.nan
+    clip_value = float(clip) if clip is not None else default_clip
+    if np.isfinite(clip_value) and clip_value <= 0:
+        raise SystemExit("ERROR: --clip must be a positive value.")
+    if positive.size >= 2:
+        vmin = lower_clip if np.isfinite(lower_clip) else float(np.nanpercentile(positive, 5.0))
+        vmax = clip_value if np.isfinite(clip_value) else float(np.nanpercentile(positive, 98.0))
+        if not np.isfinite(vmin) or vmin <= 0:
+            vmin = float(np.nanmin(positive))
+        if not np.isfinite(vmax) or vmax <= vmin:
+            vmax = max(float(np.nanmax(positive)), vmin * 1.01)
+        norm = LogNorm(vmin=max(vmin, float(np.nanmin(positive))), vmax=vmax) if vmax > 0 else Normalize()
+    else:
+        vmin = float(np.nanmin(finite_arr))
+        vmax = clip_value if np.isfinite(clip_value) else float(np.nanmax(finite_arr))
+        if not np.isfinite(vmax) or vmax <= vmin:
+            vmax = vmin + 1.0
+        norm = Normalize(vmin=vmin, vmax=vmax)
+    cmap = plt.get_cmap("viridis").copy()
+    cmap.set_bad(color="white")
+    delta_label = r"$2\Delta\nu$" if mode == "bandpass" else r"$2\Delta t$"
+    corr_label = r"$\nu_{corr}$" if mode == "bandpass" else r"$\tau_{corr}$"
+
+    def triangle_summary(stokes_pair: Tuple[int, int], component_pair: Tuple[str, str]) -> Tuple[int, float, float]:
+        vals: List[float] = []
+        n_above = 0
+        for ant_a in ant_values:
+            for ant_b in ant_values:
+                if ant_a >= ant_b:
+                    continue
+                value = value_lookup.get((ant_a, ant_b, stokes_pair, component_pair), np.nan)
+                threshold = threshold_lookup.get((ant_a, ant_b, stokes_pair, component_pair), np.nan)
+                if not np.isfinite(value):
+                    continue
+                vals.append(float(value))
+                if np.isfinite(threshold) and value > threshold:
+                    n_above += 1
+        mean_value = float(np.nanmean(vals)) if vals else np.nan
+        max_value = float(np.nanmax(vals)) if vals else np.nan
+        return n_above, mean_value, max_value
+
+    def summary_text(stokes_pair: Tuple[int, int], upper_comp: Tuple[str, str], lower_comp: Tuple[str, str]) -> str:
+        upper_n, upper_mean, upper_max = triangle_summary(stokes_pair, upper_comp)
+        lower_n, lower_mean, lower_max = triangle_summary(stokes_pair, lower_comp)
+        upper = f"U {upper_comp[0][:2]}&{upper_comp[1][:2]}: N>{delta_label}={upper_n}, mean={compact_number(upper_mean)} max={compact_number(upper_max)} {unit}"
+        lower = f"L {lower_comp[0][:2]}&{lower_comp[1][:2]}: N>{delta_label}={lower_n}, mean={compact_number(lower_mean)} max={compact_number(lower_max)} {unit}"
+        return f"{upper}\n{lower}"
+
+    written: List[Path] = []
+    for suffix, components, subtitle in grid_specs:
+        upper_comp, lower_comp = components
+        fig = plt.figure(figsize=(10.667, 8.0))
+        grid = fig.add_gridspec(2, 4, width_ratios=[1.0, 0.18, 1.0, 0.04], wspace=0.025, hspace=0.30)
+        axes = np.asarray([[fig.add_subplot(grid[row, col * 2]) for col in range(2)] for row in range(2)])
+        info_axes = [fig.add_subplot(grid[row, 1]) for row in range(2)]
+        for info_ax in info_axes:
+            info_ax.axis("off")
+        cax = fig.add_subplot(grid[:, 3])
+        last_im = None
+        summary_by_panel: Dict[int, str] = {}
+        for pi, stokes_pair in enumerate(stokes_pairs):
+            ax = axes.ravel()[pi]
+            summary_by_panel[pi] = summary_text(stokes_pair, upper_comp, lower_comp)
+            mat = np.full((n, n), np.nan, dtype=float)
+            for a1 in ant_values:
+                for a2 in ant_values:
+                    if a1 == a2:
+                        continue
+                    low, high = (a1, a2) if a1 < a2 else (a2, a1)
+                    comp = upper_comp if a1 > a2 else lower_comp
+                    value = value_lookup.get((low, high, stokes_pair, comp), np.nan)
+                    if np.isfinite(value):
+                        mat[ant_index[a1], ant_index[a2]] = float(value)
+            masked = np.ma.array(mat, mask=~np.isfinite(mat))
+            last_im = ax.imshow(masked, origin="lower", interpolation="nearest", cmap=cmap, norm=norm)
+            ax.set_title(f"Stokes {stokes_pair[0]}{stokes_pair[1]}", fontsize=9, pad=4)
+            ax.set_xticks(np.arange(n))
+            ax.set_yticks(np.arange(n))
+            label_step = 4
+            xlabels = [str(a) if i % label_step == 0 or i == n - 1 else "" for i, a in enumerate(ant_values)]
+            ylabels = [str(a) if i % label_step == 0 or i == n - 1 else "" for i, a in enumerate(ant_values)]
+            ax.set_xticklabels(xlabels, rotation=90, fontsize=9.6)
+            ax.set_yticklabels(ylabels, fontsize=9.6)
+            ax.set_xticks(np.arange(-0.5, n, 1), minor=True)
+            ax.set_yticks(np.arange(-0.5, n, 1), minor=True)
+            ax.grid(which="minor", color="0.7", linewidth=0.35)
+            ax.tick_params(which="minor", bottom=False, left=False)
+            ax.set_xlim(-0.5, n - 0.5)
+            ax.set_ylim(-0.5, n - 0.5)
+            ax.set_aspect("equal")
+            if pi // 2 == 1:
+                ax.set_xlabel("Antenna", fontsize=15)
+            if pi % 2 == 0:
+                ax.set_ylabel("Antenna", fontsize=15)
+            ax.tick_params(axis="both", length=2, top=True, right=True, labeltop=True, labelright=True)
+        for row, info_ax in enumerate(info_axes):
+            left_pi = row * 2
+            right_pi = left_pi + 1
+            info_ax.text(
+                0.04,
+                0.5,
+                summary_by_panel.get(left_pi, ""),
+                transform=info_ax.transAxes,
+                rotation=90,
+                ha="center",
+                va="center",
+                fontsize=9,
+            )
+            info_ax.text(
+                0.96,
+                0.5,
+                summary_by_panel.get(right_pi, ""),
+                transform=info_ax.transAxes,
+                rotation=90,
+                ha="center",
+                va="center",
+                fontsize=9,
+            )
+        if last_im is not None:
+            cbar = fig.colorbar(last_im, cax=cax, extend="both")
+            cbar.ax.set_title(corr_label + f"\n[{unit}]", fontsize=10, pad=4)
+            cbar.ax.yaxis.set_ticks_position("left")
+            cbar.ax.yaxis.set_label_position("left")
+            if isinstance(norm, LogNorm):
+                tick_values = np.geomspace(float(norm.vmin), float(norm.vmax), 5)
+            else:
+                tick_values = np.linspace(float(norm.vmin), float(norm.vmax), 5)
+            cbar.set_ticks(tick_values)
+            cbar.ax.yaxis.set_major_locator(FixedLocator(tick_values))
+            cbar.ax.yaxis.set_major_formatter(FormatStrFormatter("%.1f"))
+            cbar.ax.yaxis.set_minor_formatter(NullFormatter())
+            cbar.ax.tick_params(labelsize=8)
+        flag_text = f" | fV{int(flagver)}" if flagver is not None else ""
+        fig.suptitle(f"Cross Corr Grid: {table_name} | Scan: {scan_label.replace('scan', '')}{flag_text}\n{subtitle}", fontsize=12, y=0.985)
+        out = out_base.with_name(f"{out_base.stem}-{suffix}{out_base.suffix}")
+        out.parent.mkdir(parents=True, exist_ok=True)
+        fig.subplots_adjust(left=0.055, right=0.975, bottom=0.07, top=0.875)
+        fig.savefig(out, dpi=DEFAULT_PLOT_DPI)
+        plt.close(fig)
+        emit(f"Wrote plot: {out}")
+        written.append(out)
+    return written
+
+
 def selected_tasks(args: argparse.Namespace) -> List[str]:
     pmode_tasks = parse_pmode(args.pmode)
     if pmode_tasks:
@@ -2870,6 +3514,8 @@ def selected_tasks(args: argparse.Namespace) -> List[str]:
         (args.self_corr_antenna, "self_corr_antenna"),
         (args.self_corr_all_ante, "self_corr_all_ante"),
         (args.cross_corr_colormap, "cross_corr_colormap"),
+        (args.cross_corr_antenna, "cross_corr_antenna"),
+        (args.cross_corr_grid, "cross_corr_grid"),
     ]:
         if flag and task not in tasks:
             tasks.append(task)
@@ -2892,7 +3538,8 @@ def parse_args() -> argparse.Namespace:
         help=(
             "Plot mode(s), comma or space separated: all, colormap, hist, "
             "reim, antenna, stats, ks, self-corr-colormap, "
-            "self-corr-antenna, self-corr-all-ante, cross-corr-colormap. all expands to "
+            "self-corr-antenna, self-corr-all-ante, cross-corr-colormap, "
+            "cross-corr-antenna, cross-corr-grid. all expands to "
             "colormap, hist, stats, and ks. Legacy names gain-colormap and "
             "gain-hist are accepted as aliases."
         ),
@@ -2916,12 +3563,18 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--hist-range", default=None, help="Optional gain histogram value range as min,max in percent.")
     p.add_argument("--s2-thr", type=float, default=0.7, help="S2 threshold for self-correlation reference markers. Default: 0.7.")
     p.add_argument("--gpr-kernel", choices=["rbf", "matern32", "exp"], default="rbf", help="Kernel for self-corr-all-ante GPR fit. Default: rbf.")
+    p.add_argument("--ant-pair", nargs="+", default=None, help="Antenna pair for -pmode cross-corr-antenna. Examples: --ant-pair 0,1 or --ant-pair 0 1.")
+    p.add_argument("--stokes-pair", nargs="+", default=None, help="Stokes pair for -pmode cross-corr-antenna. Examples: --stokes-pair 01 or --stokes-pair 0 1.")
+    p.add_argument("--cmplx-pair", nargs="+", default=None, help="Component pair for -pmode cross-corr-antenna. Examples: --cmplx-pair re, --cmplx-pair im, --cmplx-pair reim.")
+    p.add_argument("--clip", nargs="?", type=float, const=None, default=None, help="Cross-corr grid colorbar upper clip. With no value, use the automatic default: 32 times the data delta-nu for bandpass, or 32 times delta-t for gain.")
     p.add_argument("--stats", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--ks", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--self-corr-colormap", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--self-corr-antenna", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--self-corr-all-ante", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--cross-corr-colormap", action="store_true", help=argparse.SUPPRESS)
+    p.add_argument("--cross-corr-antenna", action="store_true", help=argparse.SUPPRESS)
+    p.add_argument("--cross-corr-grid", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--all", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--plot-dir", default=None, help="Output plot directory. Default: configured plots/<format> directory.")
     p.add_argument("--format", choices=["png", "pdf", "eps"], default="png", help="Plot format. Default: png.")
@@ -2956,7 +3609,23 @@ def main() -> None:
     for mode in modes_from_arg(args.mode):
         validate_channel_options_for_mode(mode, args, pchans)
         for task in tasks:
-            products = ensure_npzs(task, mode, args, scans)
+            if task == "cross_corr_grid":
+                if args.combine_scans:
+                    raise SystemExit("ERROR: cross-corr-grid requires one scan; remove --combine-scans and pass --scan <scan>.")
+                if scans is None or len(scans) != 1:
+                    raise SystemExit("ERROR: cross-corr-grid requires exactly one --scan value.")
+                label = f"scan{int(scans[0])}"
+                plot_flagver = product_file_flag_version(task, mode, label, args)
+                plot_label = f"{label}{flag_version_suffix(plot_flagver)}"
+                out = output_path(plot_dir, task, mode, plot_label, args.format)
+                emit(f"START plot {task} mode={mode} scan={label}")
+                plot_cross_corr_grid(mode, label, out, ants, plot_flagver, args.format, args.clip)
+                emit(f"DONE  plot {task}")
+                continue
+            try:
+                products = ensure_npzs(task, mode, args, scans)
+            except FileNotFoundError as exc:
+                raise SystemExit(str(exc)) from exc
             if args.dry_run:
                 continue
             for label, npz in products:
@@ -2967,6 +3636,11 @@ def main() -> None:
                     plot_label_base,
                     pchans if task in {"gain_colormap", "gain_hist", "reim", "antenna", "stats", "self_corr_antenna", "self_corr_all_ante"} else None,
                 )
+                if task == "cross_corr_antenna":
+                    ant_pair = parse_int_pair_option(args.ant_pair, "--ant-pair")
+                    stokes_pair = parse_int_pair_option(args.stokes_pair, "--stokes-pair")
+                    component_pair = parse_component_pair_option(args.cmplx_pair, "--cmplx-pair")
+                    plot_label = f"{plot_label}-{cross_corr_plot_tag(ant_pair, stokes_pair, component_pair)}"
                 out = stats_output_path(plot_dir, mode, plot_label, args.format, args.adjust_mean) if task == "stats" else output_path(plot_dir, task, mode, plot_label, args.format)
                 emit(f"START plot {task} mode={mode} scan={label}")
                 if task == "gain_colormap":
@@ -2989,6 +3663,8 @@ def main() -> None:
                     plot_self_corr_all_antenna(npz, out, ants, args.s2_thr, args.gpr_kernel)
                 elif task == "cross_corr_colormap":
                     plot_cross_corr_colormap(npz, out, ants)
+                elif task == "cross_corr_antenna":
+                    plot_cross_corr_antenna(npz, out, args.s2_thr)
                 emit(f"DONE  plot {task} elapsed_sec={time.perf_counter() - t0:.3f}")
 
 

@@ -9,7 +9,7 @@
 <body>
   <header>
     <h1>GDP Cross-Correlation NPZ Format</h1>
-    <p>Planned cross structure-function correlation-time products reserved by <code>gdp-stats --smode cross-corr</code>.</p>
+    <p>Per-option cross structure-function products written by <code>gdp-stats --smode cross-corr</code> from GDP gains NPZ inputs.</p>
   </header>
   <main>
     <section class="doc-tree" aria-labelledby="documentation-tree">
@@ -43,42 +43,46 @@
 
     <section>
       <h2>Standard Name</h2>
-      <p><code>gdp-cross-corr-&lt;mode&gt;-&lt;scan&gt;.npz</code></p>
-      <p>Example: <code>gdp-cross-corr-gain-scan1.npz</code>. With <code>--combine-scans</code>: <code>gdp-cross-corr-gain-allscans.npz</code>.</p>
+      <p><code>gdp-cross-corr-&lt;mode&gt;-&lt;scan&gt;[_fV&lt;version&gt;]-ant&lt;a1&gt;_&lt;a2&gt;-stokes&lt;s1&gt;&lt;s2&gt;-comp&lt;c1&gt;&lt;c2&gt;.npz</code></p>
+      <p>Example: <code>gdp-cross-corr-gain-scan17-ant0_1-stokes01-compreim.npz</code>. With <code>--use-flags --flagver 2</code>, the default name includes <code>_fV2</code> after the scan field.</p>
     </section>
     <section>
       <h2>Output Location</h2>
-      <p>By default this product is written under <code>rundir/data-product/cross-corr/npz/</code>, or under the configured runtime directory from <code>gdp-setup</code>.</p>
+      <p>By default these products are written under <code>rundir/data-product/cross-corr/npz/</code>, or under the configured runtime directory from <code>gdp-setup</code>. Each antenna-pair/Stokes-pair/component-pair option is written as a separate NPZ.</p>
     </section>
     <section>
       <h2>Arrays</h2>
       <table>
         <tr><th>Array</th><th>Description</th></tr>
-        <tr><td><code>header_json</code></td><td>JSON metadata with product name, mode, scan selection, column order, and correlation settings.</td></tr>
-        <tr><td><code>scan</code></td><td>Scan number for the antenna-pair measurement.</td></tr>
-        <tr><td><code>ant1</code></td><td>First antenna ID in the baseline-like antenna pair.</td></tr>
-        <tr><td><code>ant2</code></td><td>Second antenna ID in the antenna pair.</td></tr>
-        <tr><td><code>stokes</code></td><td>Stokes/polarization index used for the comparison.</td></tr>
-        <tr><td><code>components</code></td><td>Gain components used in the comparison, such as <code>real-real</code>, <code>real-imag</code>, <code>imag-real</code>, or <code>imag-imag</code>.</td></tr>
-        <tr><td><code>threshold</code></td><td>Structure-function threshold used to extract the correlation time. Default: <code>0.7</code>.</td></tr>
-        <tr><td><code>tcorr</code></td><td>Estimated cross-correlation time from the first valid lag bin crossing the threshold. Written as <code>nan</code> when no valid crossing is found.</td></tr>
-        <tr><td><code>nbin_valid</code></td><td>Number of lag bins with finite structure-function values.</td></tr>
-        <tr><td><code>npair</code></td><td>Total sample-pair count contributing to the antenna-pair estimate.</td></tr>
+        <tr><td><code>header_json</code></td><td>JSON metadata with <code>format=GDP_CROSS_CORR_NPZ</code>, source gains NPZ, mode, scan, antenna IDs, Stokes IDs, component names, flag version, normalization rule, and correlation settings.</td></tr>
+        <tr><td><code>tau</code></td><td>Lag-bin centers. In gain mode this is time difference in seconds. In bandpass mode this is channel difference.</td></tr>
+        <tr><td><code>s2</code></td><td>Normalized cross structure function, computed as <code>mean((x1-x2)^2)/(sigma1^2 + sigma2^2)</code> from finite unflagged samples.</td></tr>
+        <tr><td><code>err</code></td><td>Jackknife uncertainty on <code>s2</code>, controlled by <code>--corr-njack</code>.</td></tr>
+        <tr><td><code>count</code></td><td>Number of sample pairs contributing to each lag bin.</td></tr>
+        <tr><td><code>scan</code>, <code>antenna1</code>, <code>antenna2</code>, <code>stokes1</code>, <code>stokes2</code>, <code>component1</code>, <code>component2</code></td><td>Single-element arrays repeating the option metadata from the header for array-only readers.</td></tr>
+        <tr><td><code>corr_lag</code>, <code>corr_lag_err</code></td><td>Threshold-crossing lag and error from the smoothed S2 curve using <code>--corr-threshold</code>. Default threshold: <code>0.7</code>.</td></tr>
+        <tr><td><code>tcorr_sec</code>, <code>tcorr_sec_err</code></td><td>Gain-mode correlation time and error in seconds. In bandpass mode these are <code>nan</code>.</td></tr>
+        <tr><td><code>dnucorr_hz</code>, <code>dnucorr_hz_err</code>, <code>dnucorr_mhz</code>, <code>dnucorr_mhz_err</code></td><td>Bandpass-mode correlation frequency width and error, derived from <code>corr_lag</code> times the median channel width saved in the gains NPZ. In gain mode these are <code>nan</code>.</td></tr>
       </table>
     </section>
     <section>
-      <h2>Optional CSV</h2>
-      <p>Use <code>--csv</code> or <code>--output-cross-corr-csv PATH</code> to also write <code>gdp-cross-corr-&lt;mode&gt;-&lt;scan&gt;.csv</code>. The CSV columns match the NPZ arrays except for <code>header_json</code>.</p>
+      <h2>Workflow</h2>
+      <p>Run <code>gdp-stats --mode &lt;mode&gt; --scan &lt;scan&gt; --smode gains</code> first to create the saved gains NPZ, then run <code>gdp-stats --mode &lt;mode&gt; --scan &lt;scan&gt; --smode cross-corr</code>. A combined <code>--smode gains,cross-corr</code> run uses the gains NPZ written by the gains step. With <code>--use-flags</code>, GDP applies the matching <code>.flg</code> sidecar; if <code>--flagver</code> is omitted, the highest available flag version is used.</p>
     </section>
     <section>
       <h2>Related Options</h2>
       <table>
         <tr><th>Option</th><th>Use</th></tr>
-        <tr><td><code>--output-cross-corr-npz PATH</code></td><td>Write the default NPZ product to a specific path.</td></tr>
-        <tr><td><code>--output-cross-corr-csv PATH</code></td><td>Also write the optional CSV product to a specific path.</td></tr>
+        <tr><td><code>--output-cross-corr-npz PATH</code></td><td>Write cross-corr NPZ files under a specific directory. It may be a single <code>.npz</code> path only when exactly one cross-corr option is selected.</td></tr>
+        <tr><td><code>--dry-run</code></td><td>Preview selected jobs and output names without writing products.</td></tr>
+        <tr><td><code>--estimate</code></td><td>Run a few selected jobs and estimate full runtime and disk usage.</td></tr>
+        <tr><td><code>--parallel [NCPU]</code></td><td>Run one cross-corr option per worker process. With no argument, GDP uses available CPUs minus 2. If omitted, cross-corr runs serially.</td></tr>
+        <tr><td><code>--stokes SELECTOR</code></td><td>Select Stokes pairings: <code>0</code> means 0-0, <code>1</code> means 1-1, <code>01</code> or <code>0-1</code> means 0-1. Default: all pairings.</td></tr>
+        <tr><td><code>--complex SELECTOR</code></td><td>Select real/imag pairings: <code>re</code>, <code>im</code>, <code>reim</code>, or <code>imre</code>. Default: all pairings.</td></tr>
         <tr><td><code>--corr-threshold FLOAT</code></td><td>Set the threshold used for <code>tcorr</code>.</td></tr>
         <tr><td><code>--corr-nbin INT</code></td><td>Set the lag-bin count.</td></tr>
         <tr><td><code>--corr-bintype {log,lin}</code></td><td>Choose logarithmic or linear lag bins.</td></tr>
+        <tr><td><code>--corr-njack INT</code></td><td>Set jackknife folds for S2 errors and crossing-error estimation.</td></tr>
       </table>
     </section>
 
@@ -88,23 +92,18 @@
 import json
 import numpy as np
 
-path = Path("rundir/data-product/cross-corr/npz/gdp-cross-corr-gain-scan2.npz")
+path = Path("rundir/data-product/cross-corr/npz/gdp-cross-corr-gain-scan17-ant0_1-stokes01-compreim.npz")
 with np.load(path, allow_pickle=True) as z:
     header = json.loads(str(z["header_json"]))
-    scan = z["scan"].astype(int)
-    ant1 = z["ant1"].astype(int)
-    ant2 = z["ant2"].astype(int)
-    stokes = z["stokes"].astype(str)
-    components = z["components"].astype(str)
-    threshold = z["threshold"].astype(float)
-    tcorr = z["tcorr"].astype(float)
-    nbin_valid = z["nbin_valid"].astype(int)
-    npair = z["npair"].astype(int)
+    tau = z["tau"].astype(float)
+    s2 = z["s2"].astype(float)
+    err = z["err"].astype(float)
+    tcorr_sec = float(z["tcorr_sec"][0])
 
-finite = np.isfinite(tcorr)
-print("finite tcorr rows:", np.count_nonzero(finite))
-print("first finite tcorr:", tcorr[finite][0] if np.any(finite) else "none")</code></pre>
-      <p>Reading this product gives one row per antenna pair, Stokes pairing, and component pairing. Use <code>tcorr</code> as the extracted correlation time, <code>threshold</code> as the S2 crossing level used, and <code>nbin_valid</code>/<code>npair</code> to judge whether the estimate is well supported.</p>
+print(header["antenna1"], header["antenna2"], header["stokes1"], header["stokes2"])
+print("finite lag bins:", np.count_nonzero(np.isfinite(s2)))
+print("tcorr_sec:", tcorr_sec)</code></pre>
+      <p>Reading this product gives one lag curve for one antenna pair, Stokes pairing, and component pairing. Use <code>tcorr_sec</code> for gain-mode correlation time, <code>dnucorr_mhz</code> for bandpass-mode correlation frequency width, and <code>count</code> to judge whether lag bins are well supported.</p>
     </section>
 
     <section class="sample-plots" aria-labelledby="sample-plots">

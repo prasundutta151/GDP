@@ -52,7 +52,8 @@
       <pre><code>script/gdp-setup --gain-table /path/to/table.g --bandpass-table /path/to/table.b --rundir /path/to/rundir  [save separate gain and bandpass defaults plus runtime directory]
 script/gdp-stats --smode stats,ks  [compute statistics and KS products from the saved input]
 script/gdp-stats --smode all  [run gains, stats, and KS]
-script/gdp-stats --smode cross-corr  [record the cross-corr placeholder task]
+script/gdp-stats --mode gain --scan 17 --smode gains,cross-corr --stokes 01 --complex reim  [write gains, then one cross-corr NPZ per selected pair]
+script/gdp-stats --mode gain --scan 17 --smode cross-corr --dry-run  [preview cross-corr jobs from the saved gains NPZ]
 script/gdp-stats --setup-file project-a-setup.json --smode stats  [use a named setup file from the active runtime directory]
 script/gdp-stats --smode stats --csv  [compute statistics from the saved input and also write CSV]
 script/gdp-stats --mode gain --scan 17 --smode gains  [create the gains NPZ for plotting]
@@ -82,7 +83,7 @@ script/gdp-stats --antennas "[1-5]" 6 "[9-12]" 15 16 19 --smode stats  [use mixe
         <tr><td><code>--scan LIST</code></td><td>Comma-separated scans. Default: all scans.</td></tr>
         <tr><td><code>--combine-scans</code></td><td>Combine selected scans into one <code>allscans</code>-style product. Default: false, so GDP writes one product per scan.</td></tr>
         <tr><td><code>--antennas LIST</code></td><td>Antenna selection. Use <code>--antennas [0-9]</code> for an inclusive range. Use <code>--antennas 2,3,4,31</code> or <code>--antennas 2 3 4 31</code> for explicit antenna numbers. Mixed selections are allowed, for example <code>--antennas "[1-5]" 6 "[9-12]" 15 16 19</code>. Default: all antennas.</td></tr>
-        <tr><td><code>--use-flags</code></td><td>For <code>--smode gains</code>, save the CASA table <code>FLAG</code> state into a versioned <code>.flg</code> sidecar. For <code>stats</code>, <code>ks</code>, and <code>self-corr</code>, apply flags from the matching <code>.flg</code> sidecar. Manual flag creation is handled by <a href="gdp-flag.html"><code>gdp-flag</code></a>.</td></tr>
+        <tr><td><code>--use-flags</code></td><td>For <code>--smode gains</code>, save the CASA table <code>FLAG</code> state into a versioned <code>.flg</code> sidecar. For <code>stats</code>, <code>ks</code>, <code>self-corr</code>, and <code>cross-corr</code>, apply flags from the matching <code>.flg</code> sidecar. Manual flag creation is handled by <a href="gdp-flag.html"><code>gdp-flag</code></a>.</td></tr>
         <tr><td><code>--flagver VERSION</code></td><td>Flag sidecar version. With <code>--smode gains</code>, write <code>NAME_fV&lt;VERSION&gt;.flg</code>; if omitted, GDP writes the next version. With <code>--use-flags</code> consumers, use that version; if omitted, GDP uses the highest available version and reports it in the log. Default flagged data-product names append <code>_fV&lt;version&gt;</code>. If the requested version does not exist, GDP prints an <code>ERROR</code> message and stops.</td></tr>
         <tr class="smode-option"><td><code>--smode MODE[,MODE...]</code></td><td>Select stats products. Supported modes are <code>gain</code>, <code>gains</code>, <code>stats</code>, <code>ks</code>, <code>self-corr</code>, <code>all</code>, and <code>cross-corr</code>. Modes may be comma or space separated.</td></tr>
         <tr class="smode-option"><td><code>gains</code></td><td>Save selected gain/bandpass samples as a GDP gains NPZ product and write a matching versioned <code>.flg</code> sidecar containing the CASA table flag state.</td></tr>
@@ -90,13 +91,19 @@ script/gdp-stats --antennas "[1-5]" 6 "[9-12]" 15 16 19 --smode stats  [use mixe
         <tr class="smode-option"><td><code>ks</code></td><td>Compute AntStat-style per-antenna fitted-normal KS D-statistics.</td></tr>
         <tr class="smode-option"><td><code>self-corr</code></td><td>Compute self structure-function correlation curves, jackknife errors, and fitted threshold-crossing time/frequency estimates. Antenna/stokes/component series with fewer than two finite unflagged samples are skipped and saved as NaN lag bins.</td></tr>
         <tr class="smode-option"><td><code>all</code></td><td>Run the standard stats modes: <code>gains</code>, <code>stats</code>, and <code>ks</code>. Use <code>--smode self-corr</code> explicitly for self-correlation products.</td></tr>
-        <tr class="smode-option"><td><code>cross-corr</code></td><td>Reserved placeholder for cross-correlation products. GDP logs the task but does not write a cross-corr product yet.</td></tr>
+        <tr class="smode-option"><td><code>cross-corr</code></td><td>Read the saved GDP gains NPZ for the selected <code>--mode</code> and <code>--scan</code>, then compute normalized cross structure functions for selected antenna-pair, Stokes-pair, and real/imag component-pair combinations. One NPZ is written per cross-correlation option. If the saved gains NPZ is missing, GDP stops and asks the user to run <code>--smode gains</code> first.</td></tr>
         <tr><td><code>--output-npz PATH</code></td><td>Output NPZ path. Default: configured <code>stats/npz</code> runtime directory.</td></tr>
         <tr><td><code>--output-gains-npz PATH</code></td><td>Output gains NPZ path. Default: configured <code>gains/npz</code> runtime directory.</td></tr>
         <tr><td><code>--output-ks-npz PATH</code></td><td>Output KS NPZ path. Default: configured <code>ks/npz</code> runtime directory.</td></tr>
         <tr><td><code>--output-self-corr-npz PATH</code></td><td>Output self-correlation NPZ path. Default: configured <code>self-corr/npz</code> runtime directory.</td></tr>
-        <tr><td><code>--output-cross-corr-npz PATH</code></td><td>Output cross-correlation NPZ path. Default: configured <code>cross-corr/npz</code> runtime directory.</td></tr>
+        <tr><td><code>--output-cross-corr-npz PATH</code></td><td>Cross-correlation NPZ output directory. It may be a single <code>.npz</code> file only when exactly one antenna/stokes/component option is selected. Default: configured <code>cross-corr/npz</code> runtime directory.</td></tr>
         <tr><td><code>--output-cross-corr-csv PATH</code></td><td>Reserved for future cross-correlation CSV output.</td></tr>
+        <tr><td><code>--dry-run</code></td><td>For <code>cross-corr</code>, list the selected jobs and output names without writing products.</td></tr>
+        <tr><td><code>--estimate</code></td><td>For <code>cross-corr</code>, run a small sample of selected jobs and estimate the full runtime and disk usage without writing final products.</td></tr>
+        <tr><td><code>--estimate-count INT</code></td><td>Number of cross-corr jobs to sample for <code>--estimate</code>. Default: <code>3</code>.</td></tr>
+        <tr><td><code>--parallel [NCPU]</code></td><td>Run cross-corr jobs in parallel. With no <code>NCPU</code>, GDP uses the available CPU count minus 2. If not supplied, cross-corr runs serially. In plan files use <code>parallel: true</code> or <code>parallel: false</code>.</td></tr>
+        <tr><td><code>--stokes SELECTOR</code></td><td>Cross-corr Stokes-pair selector. Use <code>0</code> for 0-0, <code>1</code> for 1-1, <code>01</code> or <code>0-1</code> for 0-1, or omit for all pairings.</td></tr>
+        <tr><td><code>--complex SELECTOR</code></td><td>Cross-corr component-pair selector. Use <code>re</code>, <code>im</code>, <code>reim</code>, <code>imre</code>, or omit for all real/imag pairings.</td></tr>
         <tr><td><code>--corr-threshold FLOAT</code></td><td>S2 threshold used for cross-correlation time extraction. Default: <code>0.7</code>.</td></tr>
         <tr><td><code>--corr-nbin INT</code></td><td>Structure-function lag bin count. Default: <code>32</code>.</td></tr>
         <tr><td><code>--corr-bintype {log,lin}</code></td><td>Structure-function lag binning. Default: <code>log</code>.</td></tr>
@@ -121,7 +128,7 @@ script/gdp-stats --antennas "[1-5]" 6 "[9-12]" 15 16 19 --smode stats  [use mixe
         <tr><td><code>--smode stats</code></td><td><code>gdp-stats-&lt;mode&gt;-&lt;scan&gt;[_fV&lt;version&gt;].npz</code></td><td><a href="gdp-product-stats.html">stats NPZ</a></td></tr>
         <tr><td><code>--smode ks</code></td><td><code>gdp-ks-&lt;mode&gt;-&lt;scan&gt;[_fV&lt;version&gt;].npz</code></td><td><a href="gdp-product-ks.html">KS NPZ</a></td></tr>
         <tr><td><code>--smode self-corr</code></td><td><code>gdp-self-corr-&lt;mode&gt;-&lt;scan&gt;[_fV&lt;version&gt;].npz</code></td><td><a href="gdp-product-self-corr.html">self-corr NPZ</a></td></tr>
-        <tr><td><code>--smode cross-corr</code></td><td>placeholder only</td><td><a href="gdp-product-cross-corr.html">planned cross-corr NPZ</a></td></tr>
+        <tr><td><code>--smode cross-corr</code></td><td><code>gdp-cross-corr-&lt;mode&gt;-&lt;scan&gt;[_fV&lt;version&gt;]-ant&lt;a1&gt;_&lt;a2&gt;-stokes&lt;s1&gt;&lt;s2&gt;-comp&lt;c1&gt;&lt;c2&gt;.npz</code></td><td><a href="gdp-product-cross-corr.html">cross-corr NPZ</a></td></tr>
                 <tr><td><code>gdp-plot -pmode hist</code></td><td><code>gdp-plot-hist-&lt;mode&gt;-&lt;scan&gt;[-pchan_&lt;start&gt;_&lt;end&gt;].png</code></td><td>plot from <a href="gdp-product-gains.html">gains NPZ</a></td></tr>
       </table>
       <p>The <code>&lt;scan&gt;</code> field is <code>scan1</code>, <code>scan2</code>, etc. by default. With <code>--combine-scans</code>, the field is <code>allscans</code> when no scan list is supplied, or <code>scan1-2</code>/<code>scan5</code> style when <code>--scan</code> is supplied. Default <code>gdp-stats</code> product names do not include channel selections or antenna selections. When <code>--use-flags</code> is applied to derived products, GDP appends <code>_fV&lt;version&gt;</code> before the extension, for example <code>gdp-stats-gain-scan17_fV1.npz</code>.</p>
@@ -137,7 +144,6 @@ script/gdp-stats --antennas "[1-5]" 6 "[9-12]" 15 16 19 --smode stats  [use mixe
         <tr><td>Self correlation</td><td>NPZ</td><td><a href="gdp-product-self-corr.html">self-corr NPZ format</a></td></tr>
         <tr><td>Cross correlation</td><td>NPZ</td><td><a href="gdp-product-cross-corr.html">cross-corr NPZ format</a></td></tr>
       </table>
-      <p>Cross-correlation output is currently reserved as a placeholder and will be filled in a later implementation.</p>
     </section>
 
     <section class="sample-plots" aria-labelledby="sample-plots">

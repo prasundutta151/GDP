@@ -50,3 +50,13 @@ intent: gdp-flag
  scan: 19
  fmode: ks-thrsld 1.5
 end
+
+intent: gdp-flag
+ name: gpr multi-scale bandpass threshold
+ mode: bandpass
+ scan: 18
+ fmode: gpr
+ thrsld: 5
+ kernel: matern32
+ scale: 16 128
+end

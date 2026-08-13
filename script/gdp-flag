@@ -44,6 +44,9 @@ FMODE_ALIASES = {
     "ante-threshold": "ante_thrsld",
     "ks-thrsld": "ks_thrsld",
     "ks-threshold": "ks_thrsld",
+    "gpr": "gpr",
+    "gpr-thrsld": "gpr",
+    "gpr-threshold": "gpr",
     "auto-ante": "auto_ante",
     "auto-ant": "auto_ante",
     "auto-chan": "auto_chan",
@@ -195,6 +198,7 @@ def parse_fmode(text: Optional[str]) -> str:
                 "ante-mean-thrsld",
                 "ante-thrsld",
                 "ks-thrsld",
+                "gpr",
                 "auto-ante",
                 "auto-chan",
                 "remove-version",
@@ -321,6 +325,39 @@ def parse_percent_value(value: Optional[str], option_name: str, default: float =
 
 def parse_threshold_factor(value: Optional[str], option_name: str, default: float = 1.0) -> float:
     return parse_positive_float(value, option_name, default)
+
+
+def parse_gpr_kernel(value: Optional[str]) -> str:
+    kernel = "rbf" if value is None or str(value).strip() == "" else str(value).strip().lower()
+    aliases = {
+        "rbf": "rbf",
+        "gaussian": "rbf",
+        "squared-exp": "rbf",
+        "squared_exp": "rbf",
+        "se": "rbf",
+        "matern32": "matern32",
+        "matern-32": "matern32",
+        "matern3/2": "matern32",
+        "exp": "exp",
+        "exponential": "exp",
+        "matern12": "exp",
+        "matern-12": "exp",
+    }
+    if kernel not in aliases:
+        raise SystemExit("--kernel for --fmode gpr must be one of: rbf, matern32, exp.")
+    return aliases[kernel]
+
+
+def parse_gpr_scales(values: Optional[Sequence[str]]) -> Optional[List[float]]:
+    if not values:
+        return None
+    tokens: List[str] = []
+    for value in values:
+        tokens.extend(item.strip() for item in str(value).split(",") if item.strip())
+    scales: List[float] = []
+    for token in tokens:
+        scales.append(parse_positive_float(token, "--scale"))
+    return scales or None
 
 
 def parse_scan_list(text: Optional[str]) -> Optional[List[int]]:
@@ -884,6 +921,189 @@ def ks_threshold_mask(
     return mask, intent_parts
 
 
+def robust_sigma(values: np.ndarray) -> float:
+    arr = np.asarray(values, dtype=float)
+    arr = arr[np.isfinite(arr)]
+    if arr.size == 0:
+        return np.nan
+    med = float(np.nanmedian(arr))
+    mad = float(np.nanmedian(np.abs(arr - med)))
+    return 1.4826 * mad
+
+
+def default_gpr_scales(axis: np.ndarray) -> List[float]:
+    values = np.sort(np.unique(np.asarray(axis, dtype=float)[np.isfinite(axis)]))
+    if values.size < 3:
+        return [1.0]
+    diffs = np.diff(values)
+    diffs = diffs[np.isfinite(diffs) & (diffs > 0)]
+    base = float(np.nanmedian(diffs)) if diffs.size else 1.0
+    span = float(values[-1] - values[0])
+    if not np.isfinite(span) or span <= 0.0:
+        return [base]
+    short = max(base, span / 30.0)
+    long = max(short * 3.0, span / 8.0)
+    scales = [short, long]
+    return sorted({float(scale) for scale in scales if np.isfinite(scale) and scale > 0})
+
+
+def gpr_kernel_weights(distance: np.ndarray, scale: float, kernel: str) -> np.ndarray:
+    u = np.abs(np.asarray(distance, dtype=float)) / max(float(scale), 1.0e-12)
+    if kernel == "exp":
+        return np.exp(-u)
+    if kernel == "matern32":
+        root3 = math.sqrt(3.0)
+        return (1.0 + root3 * u) * np.exp(-root3 * u)
+    return np.exp(-0.5 * u * u)
+
+
+def gpr_smooth_1d(axis: np.ndarray, values: np.ndarray, scale: float, kernel: str, leave_one_out: bool = False) -> np.ndarray:
+    x = np.asarray(axis, dtype=float)
+    y = np.asarray(values, dtype=float)
+    out = np.full(y.shape, np.nan, dtype=float)
+    finite = np.isfinite(x) & np.isfinite(y)
+    if np.count_nonzero(finite) < 3:
+        return out
+    xf = x[finite]
+    yf = y[finite]
+    for idx, x0 in enumerate(x):
+        if not np.isfinite(x0):
+            continue
+        weights = gpr_kernel_weights(xf - x0, scale, kernel)
+        if leave_one_out:
+            weights = weights.copy()
+            weights[np.isclose(xf, x0, rtol=0.0, atol=1.0e-12)] = 0.0
+        good = np.isfinite(weights) & (weights > 1.0e-8)
+        if np.count_nonzero(good) < 3:
+            continue
+        wg = weights[good]
+        yg = yf[good]
+        total = float(np.sum(wg))
+        if total > 0.0:
+            out[idx] = float(np.sum(wg * yg) / total)
+    return out
+
+
+def multiscale_gpr_group_flags(
+    axis: np.ndarray,
+    values: np.ndarray,
+    threshold: float,
+    scales: Sequence[float],
+    kernel: str,
+) -> Tuple[np.ndarray, List[Tuple[float, int, float]]]:
+    x = np.asarray(axis, dtype=float)
+    y = np.asarray(values, dtype=float)
+    finite = np.isfinite(x) & np.isfinite(y)
+    flags = np.zeros(y.shape, dtype=bool)
+    details: List[Tuple[float, int, float]] = []
+    if np.count_nonzero(finite) < 5:
+        return flags, details
+    valid_scales = sorted({float(scale) for scale in scales if np.isfinite(scale) and float(scale) > 0.0})
+    smooth_by_scale: Dict[float, np.ndarray] = {}
+    for scale in valid_scales:
+        smooth = gpr_smooth_1d(x, y, scale, kernel, leave_one_out=True)
+        smooth_by_scale[scale] = smooth
+        residual = y - smooth
+        sigma = robust_sigma(residual[finite])
+        if not np.isfinite(sigma) or sigma <= 0.0:
+            local = np.zeros(y.shape, dtype=bool)
+        else:
+            local = finite & np.isfinite(residual) & (np.abs(residual) > threshold * sigma)
+        flags |= local
+        details.append((scale, int(np.count_nonzero(local)), float(sigma)))
+    if len(valid_scales) >= 2:
+        short_scale = valid_scales[0]
+        long_scale = valid_scales[-1]
+        short_smooth = gpr_smooth_1d(x, y, short_scale, kernel, leave_one_out=False)
+        long_smooth = smooth_by_scale.get(long_scale)
+        if long_smooth is None:
+            long_smooth = gpr_smooth_1d(x, y, long_scale, kernel, leave_one_out=True)
+        baseline_residual = short_smooth - long_smooth
+        sigma = robust_sigma(baseline_residual[finite])
+        if np.isfinite(sigma) and sigma > 0.0:
+            baseline_threshold = max(2.0, 0.5 * threshold)
+            local = finite & np.isfinite(baseline_residual) & (np.abs(baseline_residual) > baseline_threshold * sigma)
+            flags |= local
+            details.append((-long_scale, int(np.count_nonzero(local)), float(sigma)))
+    return flags, details
+
+
+def gpr_threshold_mask(
+    gains: Dict[str, Any],
+    threshold: float,
+    scales_arg: Optional[Sequence[float]],
+    kernel: str,
+    exclude_flags: Optional[np.ndarray],
+    logger: TaskLogger,
+) -> Tuple[np.ndarray, List[str]]:
+    real_values = (np.asarray(gains["real"], dtype=float) - 1.0) * 100.0
+    imag_values = np.asarray(gains["imag"], dtype=float) * 100.0
+    antenna_values = np.asarray(gains["antenna"], dtype=int)
+    stokes_values = np.asarray(gains["stokes"], dtype=int)
+    mode = str(gains.get("header", {}).get("mode") or "").strip().lower()
+    axis_values = np.asarray(gains["channel"], dtype=float) if mode == "bandpass" else np.asarray(gains["time"], dtype=float)
+    axis_label = "channel" if mode == "bandpass" else "time"
+    exclude = np.asarray(exclude_flags, dtype=bool) if exclude_flags is not None else np.zeros(real_values.shape, dtype=bool)
+    mask = np.zeros(real_values.shape, dtype=bool)
+    intent_parts: List[str] = [f"threshold={threshold:g}", f"kernel={kernel}", f"axis={axis_label}"]
+
+    for antenna in sorted(int(ant) for ant in np.unique(antenna_values)):
+        antenna_selector = antenna_values == antenna
+        for stokes in sorted(int(pol) for pol in np.unique(stokes_values[antenna_selector])):
+            group_selector = antenna_selector & (stokes_values == stokes)
+            component_results: List[str] = []
+            for comp_name, values in (("real", real_values), ("imag", imag_values)):
+                finite_group = group_selector & ~exclude & np.isfinite(axis_values) & np.isfinite(values)
+                npoint = int(np.count_nonzero(finite_group))
+                if npoint < 5:
+                    logger.write(f"gpr antenna={antenna} stokes={stokes} component={comp_name}: skipped; finite_unflagged_samples={npoint}")
+                    component_results.append(f"{comp_name}: skipped n={npoint}")
+                    continue
+                local_axis = axis_values[finite_group]
+                scales = list(scales_arg) if scales_arg else default_gpr_scales(local_axis)
+                group_flags, details = multiscale_gpr_group_flags(
+                    local_axis,
+                    values[finite_group],
+                    threshold,
+                    scales,
+                    kernel,
+                )
+                selected_indices = np.where(finite_group)[0]
+                mask[selected_indices[group_flags]] = True
+                new_count = int(np.count_nonzero(group_flags))
+                pct = 100.0 * new_count / npoint if npoint else 0.0
+                scale_text = ",".join(f"{scale:.6g}" for scale in scales)
+                detail_text = ",".join(
+                    (
+                        f"baseline_long{abs(scale):.6g}:{count}:{sigma:.6g}"
+                        if scale < 0
+                        else f"{scale:.6g}:{count}:{sigma:.6g}"
+                    )
+                    for scale, count, sigma in details
+                )
+                logger.write(
+                    f"gpr antenna={antenna} stokes={stokes} component={comp_name} "
+                    f"kernel={kernel} threshold={threshold:g} axis={axis_label} "
+                    f"n={npoint} scales={scale_text} new_flags={new_count}/{npoint} ({pct:.2f}%)"
+                )
+                component_results.append(
+                    f"{comp_name}: n={npoint} scales={scale_text} "
+                    f"scale_flags_sigma={detail_text} new_flags={new_count}"
+                )
+            intent_parts.append(
+                f"antenna {antenna} stokes {stokes}: "
+                + ("; ".join(component_results) if component_results else "no components")
+            )
+    total = int(np.count_nonzero(~exclude & np.isfinite(real_values) & np.isfinite(imag_values)))
+    total_new = int(np.count_nonzero(mask))
+    pct_total = 100.0 * total_new / total if total else 0.0
+    logger.write(
+        f"gpr total_new_flags={total_new}/{total} ({pct_total:.2f}%) "
+        f"kernel={kernel} threshold={threshold:g}"
+    )
+    return mask, intent_parts
+
+
 def flag_count_text(flag: np.ndarray) -> str:
     return f"{int(np.count_nonzero(flag))}/{int(flag.size)}"
 
@@ -1017,6 +1237,9 @@ def write_flag_file(
         "threshold_alpha": getattr(args, "threshold_alpha", None),
         "threshold_percent": getattr(args, "threshold_percent", None),
         "threshold_factor": getattr(args, "threshold_factor", None),
+        "gpr_threshold": getattr(args, "gpr_threshold", None) if getattr(args, "fmode_resolved", None) == "gpr" else None,
+        "gpr_kernel": getattr(args, "gpr_kernel", None) if getattr(args, "fmode_resolved", None) == "gpr" else None,
+        "gpr_scales": getattr(args, "gpr_scales", None) if getattr(args, "fmode_resolved", None) == "gpr" else None,
         "manual_antennas": format_manual_selection(args.manual_antennas),
         "manual_channels": format_manual_selection(args.manual_channels),
         "axes": {"flag": ["sample"]},
@@ -1102,6 +1325,12 @@ class TaskLogger:
             if " gaussian_mean_ks=" in stripped:
                 return ""
             if " promote=" in stripped and "antenna=" in stripped and "stokes=" in stripped:
+                return ""
+
+        if stripped.startswith("gpr "):
+            if "finite_unflagged_samples=" in stripped:
+                return ""
+            if " new_flags=" in stripped and "antenna=" in stripped:
                 return ""
 
         return None
@@ -1327,6 +1556,20 @@ def run_batch(
         threshold_flags, threshold_intent = ks_threshold_mask(gains, args.threshold_factor, exclude_flags, logger)
         new_flags |= threshold_flags
         intents.append("KS THRESHOLD FLAGS: " + "; ".join(threshold_intent))
+    elif fmode == "gpr":
+        exclude_flags = table_flags.copy()
+        if previous_flags is not None and not args.new_flags:
+            exclude_flags |= previous_flags
+        threshold_flags, threshold_intent = gpr_threshold_mask(
+            gains,
+            args.gpr_threshold,
+            args.gpr_scales,
+            args.gpr_kernel,
+            exclude_flags,
+            logger,
+        )
+        new_flags |= threshold_flags
+        intents.append("GPR THRESHOLD FLAGS: " + "; ".join(threshold_intent))
 
     if previous_flags is not None and not args.new_flags:
         out_flags = previous_flags | new_flags
@@ -1490,10 +1733,13 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--out-fver", dest="out_fver", default=None, help="Output flag version. Default: next version beside the matching gains NPZ.")
     p.add_argument("--apply-flag", nargs="?", const="highest", default=None, metavar="VERSION", help="Apply an existing GDP .flg version back into a copied CASA table. Omit VERSION to use the highest available matching version.")
     p.add_argument("--output-table", default=None, help="Output CASA table path for --apply-flag. Default: rundir/gaintable/<original>_fV<VERSION>.")
-    p.add_argument("--fmode", default="casa-flags", help="Flag mode: casa-flags, man-antenna, man-chan, all-std-thrsld, ante-std-thrsld, ante-mean-thrsld, remove-version, summary, ante-thrsld, ks-thrsld, auto-ante, auto-chan.")
+    p.add_argument("--fmode", default="casa-flags", help="Flag mode: casa-flags, man-antenna, man-chan, all-std-thrsld, ante-std-thrsld, ante-mean-thrsld, remove-version, summary, ante-thrsld, ks-thrsld, gpr, auto-ante, auto-chan.")
     p.add_argument("--alpha", dest="threshold_alpha_opt", default=None, help="Threshold value for --fmode all-std-thrsld, ante-std-thrsld, or ante-mean-thrsld. If omitted, the default is 1. A trailing value after the fmode is also accepted.")
     p.add_argument("--percent", dest="threshold_percent_opt", default=None, help="Flagged-data percentage threshold for --fmode ante-thrsld. If omitted, percent=70. A trailing value after the fmode is also accepted.")
     p.add_argument("--factor", dest="threshold_factor_opt", default=None, help="Multiplier for --fmode ks-thrsld. If omitted, factor=1. A trailing value after the fmode is also accepted.")
+    p.add_argument("--thrsld", "--threshold", dest="gpr_threshold_opt", default=None, help="Standardized residual threshold for --fmode gpr. Default: 5.")
+    p.add_argument("--kernel", dest="gpr_kernel_opt", default=None, help="Kernel for --fmode gpr: rbf, matern32, or exp. Default: rbf.")
+    p.add_argument("--scale", nargs="+", default=None, help="One or more GPR length scales in time seconds for gain mode or channel units for bandpass mode. Values may be comma or space separated. Default: data-derived short and long scales.")
     p.add_argument("--man-antenna", "--man-antennas", nargs="+", dest="man_antenna", default=None, help="Manual antenna list/range for --fmode man-antenna. Add :STOKES to flag selected stokes only, for example 1:0, [1-4]:1, or 23 for all stokes.")
     p.add_argument("--man-chan", "--man-channel", nargs="+", dest="man_chan", default=None, help="Manual bandpass channel list/range for --fmode man-chan. Add :STOKES to flag selected stokes only, for example 900:0, [900-1200]:1, or 1300 for all stokes.")
     p.add_argument("--output-gains-npz", default=None, help="Matching gains NPZ path used as the flag filename base.")
@@ -1535,18 +1781,27 @@ def main() -> None:
     threshold_fmodes = {"all_std_thrsld", "ante_std_thrsld", "ante_mean_thrsld"}
     percent_fmodes = {"ante_thrsld"}
     factor_fmodes = {"ks_thrsld"}
+    gpr_fmodes = {"gpr"}
     if args.fmode_resolved in threshold_fmodes and len(args.fmode_values) > 1:
         raise SystemExit(f"--fmode {args.fmode} accepts at most one trailing alpha value.")
     if args.fmode_resolved in percent_fmodes and len(args.fmode_values) > 1:
         raise SystemExit(f"--fmode {args.fmode} accepts at most one trailing percent value.")
     if args.fmode_resolved in factor_fmodes and len(args.fmode_values) > 1:
         raise SystemExit(f"--fmode {args.fmode} accepts at most one trailing multiplier value.")
+    if args.fmode_resolved in gpr_fmodes and len(args.fmode_values) > 1:
+        raise SystemExit(f"--fmode {args.fmode} accepts at most one trailing threshold value.")
     if args.fmode_resolved not in threshold_fmodes and args.threshold_alpha_opt is not None:
         raise SystemExit("--alpha is valid only with --fmode all-std-thrsld, ante-std-thrsld, or ante-mean-thrsld.")
     if args.fmode_resolved not in percent_fmodes and args.threshold_percent_opt is not None:
         raise SystemExit("--percent is valid only with --fmode ante-thrsld.")
     if args.fmode_resolved not in factor_fmodes and args.threshold_factor_opt is not None:
         raise SystemExit("--factor is valid only with --fmode ks-thrsld.")
+    if args.fmode_resolved not in gpr_fmodes and args.gpr_threshold_opt is not None:
+        raise SystemExit("--thrsld/--threshold is valid only with --fmode gpr.")
+    if args.fmode_resolved not in gpr_fmodes and args.gpr_kernel_opt is not None:
+        raise SystemExit("--kernel is valid only with --fmode gpr.")
+    if args.fmode_resolved not in gpr_fmodes and args.scale is not None:
+        raise SystemExit("--scale is valid only with --fmode gpr.")
     alpha_value = args.threshold_alpha_opt or (str(args.fmode_values[0]) if args.fmode_resolved in threshold_fmodes and args.fmode_values else None)
     alpha_default = 1.0
     args.threshold_alpha = parse_positive_float(alpha_value, f"{args.fmode} alpha", alpha_default)
@@ -1554,6 +1809,10 @@ def main() -> None:
     args.threshold_percent = parse_percent_value(percent_value, f"{args.fmode} percent", 70.0)
     factor_value = args.threshold_factor_opt or (str(args.fmode_values[0]) if args.fmode_resolved in factor_fmodes and args.fmode_values else None)
     args.threshold_factor = parse_threshold_factor(factor_value, f"{args.fmode} factor", 1.0)
+    gpr_threshold_value = args.gpr_threshold_opt or (str(args.fmode_values[0]) if args.fmode_resolved in gpr_fmodes and args.fmode_values else None)
+    args.gpr_threshold = parse_positive_float(gpr_threshold_value, f"{args.fmode} threshold", 5.0)
+    args.gpr_kernel = parse_gpr_kernel(args.gpr_kernel_opt)
+    args.gpr_scales = parse_gpr_scales(args.scale)
     if mode == "gain" and (args.bchan is not None or args.echan is not None):
         raise SystemExit("Channel options --bchan/--echan are valid only in bandpass mode.")
     if args.fmode_resolved == "man_antenna" and not args.manual_antennas:
