@@ -45,6 +45,7 @@
       <h2>Standard Name</h2>
       <p><code>gdp-cross-corr-&lt;mode&gt;-&lt;scan&gt;[_fV&lt;version&gt;]-ant&lt;a1&gt;_&lt;a2&gt;-stokes&lt;s1&gt;&lt;s2&gt;-comp&lt;c1&gt;&lt;c2&gt;.npz</code></p>
       <p>Example: <code>gdp-cross-corr-gain-scan17-ant0_1-stokes01-compreim.npz</code>. With <code>--use-flags --flagver 2</code>, the default name includes <code>_fV2</code> after the scan field.</p>
+      <p>A full all-antenna, all-Stokes, all-component run also writes <code>gdp-cross-corr-&lt;mode&gt;-&lt;scan&gt;[_fV&lt;version&gt;]-summary.npz</code>. This scalar summary is consumed first by <code>gdp-plot -pmode cross-corr-grid</code>.</p>
     </section>
     <section>
       <h2>Output Location</h2>
@@ -66,8 +67,12 @@
       </table>
     </section>
     <section>
+      <h2>Full-Matrix Summary NPZ</h2>
+      <p>The summary NPZ contains one row per completed cross-correlation option. Its arrays include <code>scan</code>, <code>antenna1</code>, <code>antenna2</code>, <code>stokes1</code>, <code>stokes2</code>, <code>component1</code>, <code>component2</code>, <code>corr_lag</code>, <code>corr_lag_err</code>, <code>tcorr_sec</code>, <code>tcorr_sec_err</code>, <code>dnucorr_hz</code>, <code>dnucorr_hz_err</code>, <code>dnucorr_mhz</code>, <code>dnucorr_mhz_err</code>, <code>delta_threshold</code>, <code>channel_width_hz</code>, <code>channel_width_mhz</code>, <code>npair</code>, <code>n_sample1</code>, <code>n_sample2</code>, and <code>product_file</code>. It is written only for an unfiltered full-matrix run so a grid never silently represents an incomplete antenna or component selection.</p>
+    </section>
+    <section>
       <h2>Workflow</h2>
-      <p>Run <code>gdp-stats --mode &lt;mode&gt; --scan &lt;scan&gt; --smode gains</code> first to create the saved gains NPZ, then run <code>gdp-stats --mode &lt;mode&gt; --scan &lt;scan&gt; --smode cross-corr</code>. A combined <code>--smode gains,cross-corr</code> run uses the gains NPZ written by the gains step. With <code>--use-flags</code>, GDP applies the matching <code>.flg</code> sidecar; if <code>--flagver</code> is omitted, the highest available flag version is used.</p>
+      <p>Run <code>gdp-stats --mode &lt;mode&gt; --scan &lt;scan&gt; --smode gains</code> first to create the saved gains NPZ, then run <code>gdp-stats --mode &lt;mode&gt; --scan &lt;scan&gt; --smode cross-corr</code>. A combined <code>--smode gains,cross-corr</code> run uses the gains NPZ written by the gains step. With <code>--use-flags</code>, GDP applies the matching <code>.flg</code> sidecar; if <code>--flagver</code> is omitted, the highest available flag version is used. For the two matrix plots, run cross-corr without antenna, Stokes, or component filters, then use <code>gdp-plot --mode &lt;mode&gt; --scan &lt;scan&gt; -pmode cross-corr-grid --use-flags --clip</code>.</p>
     </section>
     <section>
       <h2>Related Options</h2>

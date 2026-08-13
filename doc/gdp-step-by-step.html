@@ -45,7 +45,7 @@
         <tr><td>2</td><td>Check table metadata before processing.</td><td><code>script/gdp-util --header</code></td></tr>
         <tr><td>3</td><td>Create the raw gain or bandpass NPZ product.</td><td><code>script/gdp-stats --smode gains</code></td></tr>
         <tr><td>4</td><td>Create or manage flag versions.</td><td><code>script/gdp-flag --fmode ...</code></td></tr>
-        <tr><td>5</td><td>Create downstream stats, KS, and self-correlation products.</td><td><code>script/gdp-stats --smode stats,ks,self-corr --use-flags</code></td></tr>
+        <tr><td>5</td><td>Create downstream stats, KS, self-correlation, and optional cross-correlation products.</td><td><code>script/gdp-stats --smode stats,ks,self-corr,cross-corr --use-flags</code></td></tr>
         <tr><td>6</td><td>Make diagnostic plots.</td><td><code>script/gdp-plot -pmode ...</code></td></tr>
         <tr><td>7</td><td>Run a pipeline plan when repeated operations are needed.</td><td><code>script/gdp-plan-run</code></td></tr>
         <tr><td>8</td><td>Version and release the software.</td><td><code>script/gdp-util --version --git-push</code></td></tr>
@@ -170,6 +170,9 @@ Wrote KS NPZ: .../data-product/ks/npz/gdp-ks-gain-scan17_fV2.npz
 Wrote self-corr NPZ: .../data-product/self-corr/npz/gdp-self-corr-gain-scan17_fV2.npz
 DONE  self-corr scan17 elapsed_sec=...</code></pre>
       <p>Skipped antenna/stokes/component rows are kept as NaN lag bins so the corresponding colormap cells remain white. Product format details are in <a href="gdp-product-stats.html">stats NPZ</a>, <a href="gdp-product-ks.html">KS NPZ</a>, and <a href="gdp-product-self-corr.html">self-corr NPZ</a>.</p>
+      <p>To create the complete antenna-pair cross-correlation matrix, first ensure the saved gains NPZ exists, then run an unfiltered cross-corr task. This writes one NPZ per pair/Stokes/component and a compact full-matrix summary NPZ. Use <code>--parallel</code> to use available CPUs minus two, or <code>--parallel N</code> for a fixed worker count.</p>
+      <pre><code>casa --nogui --nologger --nologfile --log2term -c script/gdp-stats --mode bandpass --scan 18 --smode gains
+casa --nogui --nologger --nologfile --log2term -c script/gdp-stats --mode bandpass --scan 18 --smode cross-corr --use-flags --parallel</code></pre>
     </section>
 
     <section>
@@ -184,6 +187,10 @@ script/gdp-plot --mode bandpass --scan 18 -pmode colormap -pchans "[800-1200]" -
 script/gdp-plot --mode gain --scan 17 -pmode reim --antenna "[0-29]"
 casa --nogui --nologger --nologfile --log2term -c script/gdp-stats --mode bandpass --scan 18 --antennas "[0-29]" --smode stats --use-flags
 script/gdp-plot --mode bandpass --scan 18 -pmode stats --use-flags</code></pre>
+      <p>Cross-correlation plots use the saved per-option products. Select one exact pair for a curve, or make the two all-antenna matrix views from the full-matrix summary. With <code>--clip</code> supplied without a value, the grid upper scale is 32 times the data spacing; use a numeric value to compare runs on a fixed scale.</p>
+      <pre><code>script/gdp-plot --mode bandpass --scan 18 -pmode cross-corr-antenna --ant-pair 5 6 --stokes-pair 01 --cmplx-pair "im&amp;im" --use-flags
+script/gdp-plot --mode bandpass --scan 18 -pmode cross-corr-grid --use-flags --clip
+script/gdp-plot --mode gain --scan 17 -pmode cross-corr-grid --use-flags --clip 12</code></pre>
       <p>Expected runtime output pattern:</p>
       <pre><code>Using existing gains NPZ for stats: .../gdp-gains-gain-scan17.npz
 Using flag file fV2: .../gdp-gains-gain-scan17_fV2.flg
@@ -197,6 +204,8 @@ DONE  plot stats elapsed_sec=...</code></pre>
         <tr><td>Self-corr colormap</td><td><a href="sample_plots/gdp-plot-self-corr-colormap-bandpass-scan18_fV5.png">gdp-plot-self-corr-colormap-bandpass-scan18_fV5.png</a></td><td>White columns or cells correspond to NaN/insufficient samples, and black solid lines mark saved <code>nu_corr</code> crossings.</td></tr>
         <tr><td>Self-corr all antenna</td><td><a href="sample_plots/gdp-plot-self-corr-all-ante-bandpass-scan18_fV5-pchan_800_3001.png">gdp-plot-self-corr-all-ante-bandpass-scan18_fV5-pchan_800_3001.png</a></td><td>Grey curves show usable antennas, black points show the median, and the blue GPR fit gives the displayed <code>nu_corr</code>.</td></tr>
         <tr><td>Bandpass colormap</td><td><a href="sample_plots/gdp-plot-colormap-bandpass-scan18_fV5-pchan_800_3001.png">gdp-plot-colormap-bandpass-scan18_fV5-pchan_800_3001.png</a></td><td>Bandpass versions use whole-MHz nu labels and bottom-up channel indices.</td></tr>
+        <tr><td>Cross-corr antenna</td><td>Generated per selected pair</td><td>One normalized cross structure-function curve, using the saved pair/Stokes/component NPZ.</td></tr>
+        <tr><td>Cross-corr grid</td><td>Generated as <code>cmp-self</code> and <code>cmp-cross</code></td><td>Four Stokes matrix panels; upper/lower triangles show the selected component pairings, and white cells indicate missing or invalid crossings.</td></tr>
       </table>
     </section>
 

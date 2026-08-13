@@ -117,11 +117,12 @@ script/gdp-stats --smode all
 script/gdp-stats --smode self-corr
 script/gdp-stats --mode gain --scan 17 --smode gains,cross-corr --stokes 01 --complex reim
 script/gdp-stats --mode gain --scan 17 --smode cross-corr --dry-run
+script/gdp-stats --mode bandpass --scan 18 --smode cross-corr --use-flags --parallel
 script/gdp-stats --mode gain --scan 17 --smode gains
 script/gdp-stats --mode gain --scan 17 --smode gain --adjust-mean
 script/gdp-plot --mode gain --scan 17 -pmode colormap --range 20
 script/gdp-plot --mode gain --scan 17 -pmode cross-corr-antenna --ant-pair 0 1 --stokes-pair 01 --cmplx-pair reim
-script/gdp-plot --mode bandpass --scan 18 -pmode cross-corr-grid --use-flags
+script/gdp-plot --mode bandpass --scan 18 -pmode cross-corr-grid --use-flags --clip
 script/gdp-plot --mode bandpass -pmode colormap -pchans "[16-64]" --range 20
 script/gdp-stats --mode gain --scan 17 --smode gains --flagver 1
 script/gdp-stats --mode gain --scan 17 --smode stats,ks --use-flags --flagver 1

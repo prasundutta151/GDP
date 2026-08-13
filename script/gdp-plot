@@ -3396,8 +3396,8 @@ def plot_cross_corr_grid(
     def summary_text(stokes_pair: Tuple[int, int], upper_comp: Tuple[str, str], lower_comp: Tuple[str, str]) -> str:
         upper_n, upper_mean, upper_max = triangle_summary(stokes_pair, upper_comp)
         lower_n, lower_mean, lower_max = triangle_summary(stokes_pair, lower_comp)
-        upper = f"U {upper_comp[0][:2]}&{upper_comp[1][:2]}: N>{delta_label}={upper_n}, mean={compact_number(upper_mean)} max={compact_number(upper_max)} {unit}"
-        lower = f"L {lower_comp[0][:2]}&{lower_comp[1][:2]}: N>{delta_label}={lower_n}, mean={compact_number(lower_mean)} max={compact_number(lower_max)} {unit}"
+        upper = f"U {upper_comp[0][:2]}&{upper_comp[1][:2]}: N>{delta_label}={upper_n}, mean={upper_mean:.1f}, max={upper_max:.1f} {unit}"
+        lower = f"L {lower_comp[0][:2]}&{lower_comp[1][:2]}: N>{delta_label}={lower_n}, mean={lower_mean:.1f}, max={lower_max:.1f} {unit}"
         return f"{upper}\n{lower}"
 
     written: List[Path] = []
@@ -3408,7 +3408,13 @@ def plot_cross_corr_grid(
         axes = np.asarray([[fig.add_subplot(grid[row, col * 2]) for col in range(2)] for row in range(2)])
         info_axes = [fig.add_subplot(grid[row, 1]) for row in range(2)]
         for info_ax in info_axes:
-            info_ax.axis("off")
+            info_ax.set_xlim(0.0, 1.0)
+            info_ax.set_ylim(0.0, 1.0)
+            info_ax.set_xticks([])
+            info_ax.set_yticks([])
+            for spine in info_ax.spines.values():
+                spine.set_visible(False)
+            info_ax.axvline(0.5, color="black", linewidth=0.8, alpha=0.8, zorder=0)
         cax = fig.add_subplot(grid[:, 3])
         last_im = None
         summary_by_panel: Dict[int, str] = {}
@@ -3451,7 +3457,7 @@ def plot_cross_corr_grid(
             left_pi = row * 2
             right_pi = left_pi + 1
             info_ax.text(
-                0.04,
+                -0.015,
                 0.5,
                 summary_by_panel.get(left_pi, ""),
                 transform=info_ax.transAxes,
@@ -3459,9 +3465,10 @@ def plot_cross_corr_grid(
                 ha="center",
                 va="center",
                 fontsize=9,
+                clip_on=False,
             )
             info_ax.text(
-                0.96,
+                1.015,
                 0.5,
                 summary_by_panel.get(right_pi, ""),
                 transform=info_ax.transAxes,
@@ -3469,6 +3476,7 @@ def plot_cross_corr_grid(
                 ha="center",
                 va="center",
                 fontsize=9,
+                clip_on=False,
             )
         if last_im is not None:
             cbar = fig.colorbar(last_im, cax=cax, extend="both")
