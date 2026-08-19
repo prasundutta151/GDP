@@ -5,10 +5,10 @@
 # Run:
 #   script/gdp-plan-run pipelines/gain_clean_plots.plan
 
+cairn: 1
 ----------------
 mode: gain
 scan: 13
-post: 1
 ----------------
 
 # Antennas 4 and 5 have 0% CASA table flags in the saved gain scan 13 product.

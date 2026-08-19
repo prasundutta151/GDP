@@ -11,7 +11,7 @@ import shlex
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 
 CONFIG_NAME = ".gdp-config.json"
@@ -42,8 +42,9 @@ MULTI_VALUE_OPTIONS = {
 }
 RELATIVE_PATH_COMMANDS = {"gdp-stats", "gdp-plot", "gdp-flag", "gdp-setup", "gdp-util"}
 ITER_KEYS = {"iter", "iiter", "Iiter"}
-INTENT_METADATA_KEYS = {"name", "description", "use", "post", *ITER_KEYS}
+INTENT_METADATA_KEYS = {"name", "description", "use", "cairn", *ITER_KEYS}
 CLI_OPTION_CACHE: Dict[Path, set[str]] = {}
+CAIRN_RANGE_RE = re.compile(r"^\[(\d*)\s*-\s*(\d*)\]$")
 
 
 def project_root() -> Path:
@@ -166,6 +167,7 @@ def parse_plan(path: Path) -> Tuple[Dict[str, Any], List[Dict[str, Any]], Dict[s
     intents: List[Dict[str, Any]] = []
     section: Optional[str] = None
     current: Optional[Dict[str, Any]] = None
+    active_cairn: Optional[Any] = None
 
     for lineno, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
         line = strip_comment(raw)
@@ -199,12 +201,27 @@ def parse_plan(path: Path) -> Tuple[Dict[str, Any], List[Dict[str, Any]], Dict[s
             section = "variables"
             continue
 
+        if line.startswith("cairn:"):
+            if current is not None:
+                intents.append(current)
+                current = None
+                section = None
+            if section is not None:
+                raise ValueError(f"Line {lineno}: cairn: N must be a top-level marker outside defaults and intent blocks")
+            key, value = parse_key_value(line, lineno)
+            if key != "cairn":
+                raise ValueError(f"Line {lineno}: expected cairn: N")
+            active_cairn = value
+            continue
+
         if line.startswith("intent:"):
             if current is not None:
                 intents.append(current)
             _, command = parse_key_value(line, lineno)
             args = dict(defaults)
             args.update(pending_intent_args)
+            if active_cairn is not None:
+                args["cairn"] = active_cairn
             pending_intent_args = {}
             current = {"command": str(command), "args": args, "default_keys": set(defaults), "lineno": lineno}
             section = "intent"
@@ -216,6 +233,8 @@ def parse_plan(path: Path) -> Tuple[Dict[str, Any], List[Dict[str, Any]], Dict[s
                 intents.append(current)
             args = dict(defaults)
             args.update(pending_intent_args)
+            if active_cairn is not None:
+                args["cairn"] = active_cairn
             pending_intent_args = {}
             current = {"command": line[:-1].strip(), "args": args, "default_keys": set(defaults), "lineno": lineno}
             section = "intent"
@@ -407,41 +426,95 @@ def intent_iterations(intent: Dict[str, Any], variables: Dict[str, Any]) -> int:
     return count
 
 
-def intent_post(intent: Dict[str, Any], variables: Dict[str, Any]) -> Optional[int]:
-    """Return the optional restart marker assigned to an intent."""
+def intent_cairn(intent: Dict[str, Any], variables: Dict[str, Any]) -> Optional[int]:
+    """Return the optional cairn marker assigned to an intent."""
     args = intent.get("args", {})
-    if "post" not in args:
+    if "cairn" not in args:
         return None
-    value = resolve_value(args["post"], variables)
+    value = resolve_value(args["cairn"], variables)
     try:
         marker = int(str(value).strip())
     except Exception as exc:
-        raise ValueError(f"Intent post must be an integer near line {intent.get('lineno')}: {value}") from exc
-    if marker < 0:
-        raise ValueError(f"Intent post must be a non-negative integer near line {intent.get('lineno')}: {value}")
+        raise ValueError(f"Cairn marker must be a positive integer near line {intent.get('lineno')}: {value}") from exc
+    if marker < 1:
+        raise ValueError(f"Cairn marker must be a positive integer near line {intent.get('lineno')}: {value}")
     return marker
 
 
-def post_start_index(intents: List[Dict[str, Any]], post: int, variables: Dict[str, Any]) -> int:
-    """Find the first intent assigned to the requested post marker."""
-    available: List[int] = []
-    for index, intent in enumerate(intents):
-        marker = intent_post(intent, variables)
-        if marker is None:
+def parse_cairn_selectors(values: List[str]) -> List[Tuple[Optional[int], Optional[int]]]:
+    """Parse individual and inclusive/open cairn selections from CLI text."""
+    tokens = re.findall(r"\[[^\]]*\]|[^,\s]+", " ".join(values))
+    selectors: List[Tuple[Optional[int], Optional[int]]] = []
+    for token in tokens:
+        match = CAIRN_RANGE_RE.fullmatch(token)
+        if match:
+            start_text, end_text = match.groups()
+            if not start_text and not end_text:
+                raise ValueError("Invalid cairn range []: provide at least one endpoint")
+            start = int(start_text) if start_text else None
+            end = int(end_text) if end_text else None
+            if start is not None and start < 1 or end is not None and end < 1:
+                raise ValueError(f"Cairn ranges must use positive integers: {token}")
+            if start is not None and end is not None and end < start:
+                raise ValueError(f"Cairn range end must not precede its start: {token}")
+            selectors.append((start, end))
             continue
-        if marker not in available:
-            available.append(marker)
-        if marker == post:
-            return index
-    known = ", ".join(str(marker) for marker in available) or "none"
-    raise ValueError(f"Post {post} was not found in the plan. Available posts: {known}")
+        if token.isdigit() and int(token) >= 1:
+            marker = int(token)
+            selectors.append((marker, marker))
+            continue
+        raise ValueError(f"Invalid cairn selector: {token}. Use N, [N-M], [-M], or [N-].")
+    if not selectors:
+        raise ValueError("At least one cairn selector is required")
+    return selectors
+
+
+def selected_cairn_indices(
+    intents: List[Dict[str, Any]], selectors: List[Tuple[Optional[int], Optional[int]]], variables: Dict[str, Any]
+) -> Tuple[Set[int], List[int]]:
+    """Return selected intent indexes and requested cairn values absent from the plan."""
+    markers = [intent_cairn(intent, variables) for intent in intents]
+    available = sorted({marker for marker in markers if marker is not None})
+    available_set = set(available)
+    selected_markers: Set[int] = set()
+    missing: Set[int] = set()
+
+    for start, end in selectors:
+        if start is None:
+            assert end is not None
+            requested = range(1, end + 1)
+        elif end is None:
+            requested = range(start, max(available[-1] if available else start, start) + 1)
+        else:
+            requested = range(start, end + 1)
+        for marker in requested:
+            if marker in available_set:
+                selected_markers.add(marker)
+            else:
+                missing.add(marker)
+
+    selected_indexes = {index for index, marker in enumerate(markers) if marker in selected_markers}
+    # "[-N]" explicitly includes any intents before the first cairn marker.
+    if any(start is None for start, _ in selectors) and available:
+        first_marker_index = next(index for index, marker in enumerate(markers) if marker is not None)
+        selected_indexes.update(range(first_marker_index))
+    # "[N-]" explicitly continues through the end of the plan.
+    if any(end is None for _, end in selectors):
+        starts = [start for start, end in selectors if end is None and start is not None]
+        first_selected = min(
+            (index for index, marker in enumerate(markers) if marker is not None and marker >= min(starts)),
+            default=None,
+        )
+        if first_selected is not None:
+            selected_indexes.update(range(first_selected, len(intents)))
+    return selected_indexes, sorted(missing)
 
 
 def run_plan(
     plan_path: Path,
     dry_run: bool = False,
     only: Optional[str] = None,
-    post: Optional[int] = None,
+    cairn: Optional[List[str]] = None,
     setup_file: Optional[str] = None,
     relative_paths: bool = False,
 ) -> None:
@@ -460,12 +533,24 @@ def run_plan(
     for key, value in plan_vars.items():
         variables[key] = resolve_value(value, variables)
 
-    start_index = post_start_index(intents, post, variables) if post is not None else 0
-    if post is not None:
-        emit(f"Starting at post {post} (intent {start_index + 1}).", relative_paths, rundir)
+    selected_indexes: Optional[Set[int]] = None
+    if cairn is not None:
+        selectors = parse_cairn_selectors(cairn)
+        selected_indexes, missing = selected_cairn_indices(intents, selectors, variables)
+        if missing:
+            emit(
+                "ERROR: requested cairn value(s) not found: "
+                + ", ".join(str(marker) for marker in missing)
+                + ". Running all other selected cairn intervals.",
+                relative_paths,
+                rundir,
+            )
+        if not selected_indexes:
+            emit("ERROR: no requested cairn intervals are available; no intents will run.", relative_paths, rundir)
+            return
 
     for index, intent in enumerate(intents, start=1):
-        if index - 1 < start_index:
+        if selected_indexes is not None and index - 1 not in selected_indexes:
             continue
         command = intent["command"]
         label = str(intent["args"].get("name", command))
@@ -500,7 +585,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--setup-file", default=None, help="Setup JSON file to use. Relative names are resolved under the active runtime directory.")
     p.add_argument("--dry-run", action="store_true", help="Print commands without running them.")
     p.add_argument("--only", default=None, help="Run only the matching intent index, command, or name.")
-    p.add_argument("--post", type=int, default=None, help="Start at the first intent marked with post: N in the plan.")
+    p.add_argument(
+        "--cairn",
+        nargs="+",
+        default=None,
+        help="Select cairn intervals: N, [N-M], [-M], or [N-]. Comma-separated values are accepted.",
+    )
     p.add_argument("--relative-path", action="store_true", help="Print runtime-relative file references and pass --relative-path to GDP child commands.")
     return p.parse_args()
 
@@ -511,7 +601,7 @@ def main() -> None:
     if not plan.exists():
         raise FileNotFoundError(f"Plan file not found: {plan}")
     try:
-        run_plan(plan, dry_run=args.dry_run, only=args.only, post=args.post, setup_file=args.setup_file, relative_paths=args.relative_path)
+        run_plan(plan, dry_run=args.dry_run, only=args.only, cairn=args.cairn, setup_file=args.setup_file, relative_paths=args.relative_path)
     except subprocess.CalledProcessError as exc:
         raise SystemExit(exc.returncode) from exc
     except (ValueError, KeyError) as exc:

@@ -8,10 +8,10 @@
 # The product intents create per-scan NPZ files first. General plot modes use
 # antennas 0-29; per-antenna and cross-correlation antenna plots are scoped below.
 
+cairn: 1
 ----------------
 mode: gain
 scan: 13
-post: 1
 ----------------
 
 # Antennas 4 and 5 have 0% CASA table flags in the saved gain scan 13 product.
@@ -62,10 +62,10 @@ intent: gdp-plot
   limit: "[1:20]"
 end
 
+cairn: 2
 ----------------
 mode: bandpass
 scan: 18
-post: 2
 ----------------
 
 # First save the full bandpass product. The next intent creates a new highest
