@@ -1,0 +1,76 @@
+# Generate all plot products for one clean gain scan and one usable bandpass scan.
+#
+# Preview:
+#   script/gdp-plan-run pipelines/gain_bandpass_clean_plots.plan --dry-run
+# Run:
+#   script/gdp-plan-run pipelines/gain_bandpass_clean_plots.plan
+#
+# The product intents create complete per-scan NPZ files first. Plot intents then
+# select only the verified usable antennas and their cross-correlation pair.
+
+----------------
+mode: gain
+scan: 13
+post: 1
+pchans: "[800-3000]"
+----------------
+
+# Antennas 4 and 5 have 0% CASA table flags in the saved gain scan 13 product.
+intent: gdp-stats
+  name: gain scan 13 NPZ products
+  smode: gains,stats,ks,self-corr
+end
+
+# Calculate every Stokes/component pairing for the selected clean antenna pair.
+intent: gdp-stats
+  name: gain scan 13 cross-correlation products
+  smode: cross-corr
+  antennas: 4 5
+end
+
+# all expands to colormap, histogram, statistics, and KS. The remaining modes
+# add Real/Imag, per-antenna, self-correlation, and cross-correlation plots.
+intent: gdp-plot
+  name: gain scan 13 all plots for clean antennas
+  pmode: all,reim,antenna,self-corr-colormap,self-corr-antenna,cross-corr-antenna,cross-corr-grid
+  antenna: 4 5
+  ant-pair: 4 5
+  stokes-pair: 01
+  cmplx-pair: im&im
+  yscale: log
+  scale: log
+  limit: "[1:20]"
+end
+
+----------------
+mode: bandpass
+scan: 18
+use-flags: true
+flagver: 1
+post: 2
+----------------
+
+# fV1 leaves antennas 12 and 18 with the lowest final flag fractions in scan 18
+# (about 59% flagged); neither antenna is completely flagged.
+intent: gdp-stats
+  name: bandpass scan 18 NPZ products using fV1
+  smode: gains,stats,ks,self-corr
+end
+
+intent: gdp-stats
+  name: bandpass scan 18 cross-correlation products using fV1
+  smode: cross-corr
+  antennas: 12 18
+end
+
+intent: gdp-plot
+  name: bandpass scan 18 all plots for usable antennas
+  pmode: all,reim,antenna,self-corr-colormap,self-corr-antenna,cross-corr-antenna,cross-corr-grid
+  antenna: 12 18
+  ant-pair: 12 18
+  stokes-pair: 01
+  cmplx-pair: im&im
+  yscale: log
+  scale: log
+  limit: "[1:20]"
+end

@@ -2375,12 +2375,19 @@ def run_batch(
             try:
                 version, flag_path = resolve_flag_file(gains_out, args.flagver)
             except SystemExit as exc:
-                logger.write(str(exc))
-                raise SystemExit(1) from exc
-            flag_lookup, flag_header = load_flag_lookup(flag_path)
-            applied_flag_version = int(version)
-            applied_flag_path = flag_path
-            logger.write(f"Using flag file fV{version}: {flag_path}")
+                warning = str(exc).removeprefix("ERROR: ").strip()
+                logger.write(f"WARNING: {warning}; continuing without GDP flags.")
+                # Keep this batch unflagged without changing later batches in
+                # a --mode both run that may have a valid sidecar.
+                args = argparse.Namespace(**vars(args))
+                args.use_flags = False
+                args.flagver = None
+                needs_sidecar_flags = False
+            else:
+                flag_lookup, flag_header = load_flag_lookup(flag_path)
+                applied_flag_version = int(version)
+                applied_flag_path = flag_path
+                logger.write(f"Using flag file fV{version}: {flag_path}")
 
     if args.gains:
         t0 = logger.start(f"gains {scan_label}")

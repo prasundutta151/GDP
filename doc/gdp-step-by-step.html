@@ -22,6 +22,7 @@
         <li><a href="gdp-stats.html">gdp-stats</a>: compute antenna-wise gain and bandpass products.</li>
         <li><a href="gdp-flag.html">gdp-flag</a>: create versioned GDP flag sidecar files.</li>
         <li><a href="gdp-plot.html">gdp-plot</a>: plot GDP NPZ products and create missing products with gdp-stats.</li>
+        <li><a href="gdp-show.html">gdp-show</a>: browse existing GDP plots without recalculating products.</li>
         <li><a href="gdp-plan-run.html">gdp-plan-run</a>: run GDP command intents from a plan file.</li>
       </ul>
     </section>
@@ -208,7 +209,9 @@ DONE  plot stats elapsed_sec=...</code></pre>
       <h2>7. Run A Plan</h2>
       <p>Use plan files for repeatable processing. Plan intents can call GDP scripts such as <code>gdp-stats</code>, <code>gdp-plot</code>, and <code>gdp-flag</code>. Start with a dry run, then run the plan after checking commands.</p>
       <pre><code>script/gdp-plan-run pipelines/sample_stats.plan --dry-run
-script/gdp-plan-run pipelines/sample_stats.plan</code></pre>
+script/gdp-plan-run pipelines/sample_stats.plan
+script/gdp-plan-run pipelines/gain_bandpass_clean_plots.plan --post 2</code></pre>
+      <p>Use <code>post: N</code> in a hyphen-delimited defaults block to mark a restart point for the intents that follow. The <code>--post N</code> option skips earlier intents and begins at the first matching marker, which is useful for restarting a long plan after its earlier stages have completed.</p>
       <p>Expected runtime output pattern:</p>
       <pre><code>[1] gdp-stats
 $ /Users/prasun/Documents/GDP/script/gdp-stats --mode gain --smode gains --scan 17
@@ -218,7 +221,16 @@ DONE plan elapsed_sec=...</code></pre>
     </section>
 
     <section>
-      <h2>8. Version And Release</h2>
+      <h2>8. Browse Existing Plots</h2>
+      <p>Use <code>gdp-show</code> after plotting to open existing runtime PNG files in a browser gallery. It does not calculate products or rerun <code>gdp-plot</code>; unavailable requested plot types are reported while the available plots are still shown.</p>
+      <pre><code>script/gdp-show
+script/gdp-show --mode gain --stats
+script/gdp-show --mode bandpass --flagver 5 --self-corr
+script/gdp-show --cross-corr</code></pre>
+    </section>
+
+    <section>
+      <h2>9. Version And Release</h2>
       <p>Use <code>gdp-util</code> to bump the version and then push. When <code>--version</code> and <code>--git-push</code> are used together, the version update happens first.</p>
       <pre><code>script/gdp-util --version --git-push -m "Release update"
 script/gdp-util --version main --git-push -m "Major release"

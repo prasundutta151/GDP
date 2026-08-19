@@ -42,7 +42,7 @@ MULTI_VALUE_OPTIONS = {
 }
 RELATIVE_PATH_COMMANDS = {"gdp-stats", "gdp-plot", "gdp-flag", "gdp-setup", "gdp-util"}
 ITER_KEYS = {"iter", "iiter", "Iiter"}
-INTENT_METADATA_KEYS = {"name", "description", "use", *ITER_KEYS}
+INTENT_METADATA_KEYS = {"name", "description", "use", "post", *ITER_KEYS}
 CLI_OPTION_CACHE: Dict[Path, set[str]] = {}
 
 
@@ -407,10 +407,41 @@ def intent_iterations(intent: Dict[str, Any], variables: Dict[str, Any]) -> int:
     return count
 
 
+def intent_post(intent: Dict[str, Any], variables: Dict[str, Any]) -> Optional[int]:
+    """Return the optional restart marker assigned to an intent."""
+    args = intent.get("args", {})
+    if "post" not in args:
+        return None
+    value = resolve_value(args["post"], variables)
+    try:
+        marker = int(str(value).strip())
+    except Exception as exc:
+        raise ValueError(f"Intent post must be an integer near line {intent.get('lineno')}: {value}") from exc
+    if marker < 0:
+        raise ValueError(f"Intent post must be a non-negative integer near line {intent.get('lineno')}: {value}")
+    return marker
+
+
+def post_start_index(intents: List[Dict[str, Any]], post: int, variables: Dict[str, Any]) -> int:
+    """Find the first intent assigned to the requested post marker."""
+    available: List[int] = []
+    for index, intent in enumerate(intents):
+        marker = intent_post(intent, variables)
+        if marker is None:
+            continue
+        if marker not in available:
+            available.append(marker)
+        if marker == post:
+            return index
+    known = ", ".join(str(marker) for marker in available) or "none"
+    raise ValueError(f"Post {post} was not found in the plan. Available posts: {known}")
+
+
 def run_plan(
     plan_path: Path,
     dry_run: bool = False,
     only: Optional[str] = None,
+    post: Optional[int] = None,
     setup_file: Optional[str] = None,
     relative_paths: bool = False,
 ) -> None:
@@ -429,7 +460,13 @@ def run_plan(
     for key, value in plan_vars.items():
         variables[key] = resolve_value(value, variables)
 
+    start_index = post_start_index(intents, post, variables) if post is not None else 0
+    if post is not None:
+        emit(f"Starting at post {post} (intent {start_index + 1}).", relative_paths, rundir)
+
     for index, intent in enumerate(intents, start=1):
+        if index - 1 < start_index:
+            continue
         command = intent["command"]
         label = str(intent["args"].get("name", command))
         if only is not None and only not in {command, label, str(index)}:
@@ -463,6 +500,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--setup-file", default=None, help="Setup JSON file to use. Relative names are resolved under the active runtime directory.")
     p.add_argument("--dry-run", action="store_true", help="Print commands without running them.")
     p.add_argument("--only", default=None, help="Run only the matching intent index, command, or name.")
+    p.add_argument("--post", type=int, default=None, help="Start at the first intent marked with post: N in the plan.")
     p.add_argument("--relative-path", action="store_true", help="Print runtime-relative file references and pass --relative-path to GDP child commands.")
     return p.parse_args()
 
@@ -473,7 +511,7 @@ def main() -> None:
     if not plan.exists():
         raise FileNotFoundError(f"Plan file not found: {plan}")
     try:
-        run_plan(plan, dry_run=args.dry_run, only=args.only, setup_file=args.setup_file, relative_paths=args.relative_path)
+        run_plan(plan, dry_run=args.dry_run, only=args.only, post=args.post, setup_file=args.setup_file, relative_paths=args.relative_path)
     except subprocess.CalledProcessError as exc:
         raise SystemExit(exc.returncode) from exc
     except (ValueError, KeyError) as exc:

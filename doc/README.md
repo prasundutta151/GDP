@@ -16,6 +16,7 @@ flag-product generation.
 - `gdp-stats.html`: statistics command and GDP data-product formats.
 - `gdp-flag.html`: flag sidecar creation and versioning command.
 - `gdp-plot.html`: plotting command for GDP NPZ products.
+- `gdp-show.html`: browser gallery for existing GDP plots.
 - `gdp-plan-run.html`: plan-file runner for repeatable GDP workflows.
 - `gdp-product-gains.html`: gains NPZ product format.
 - `gdp-product-flags.html`: versioned `.flg` flag sidecar format.
@@ -42,6 +43,8 @@ flag-product generation.
   requested product is missing. By default it writes one plot per scan; use
   `--combine-scans` for one combined `allscans` plot, or `--npz-path` to plot
   directly from a selected NPZ file.
+- `script/gdp-show`: opens existing PNG plots from the runtime directory in a
+  browser gallery without calculating products or plots.
 - `script/gdp-plan-run`: reads a GDP plan file and runs GDP command intents
   with internal variable substitution.
 

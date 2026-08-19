@@ -3807,6 +3807,23 @@ def main() -> None:
     except ValueError as exc:
         assert CLI_PARSER is not None
         CLI_PARSER.error(str(exc))
+    if args.use_flags and args.flagver is not None:
+        labels = [f"scan{int(scan)}" for scan in scans] if scans else (["allscans"] if args.combine_scans else [])
+        missing_flag_paths: list[Path] = []
+        for mode in modes_from_arg(args.mode):
+            for label in labels:
+                flag_path = flag_file_for_npz(gains_product_path_for_label(mode, label, args), args.flagver)
+                if not flag_path.exists():
+                    missing_flag_paths.append(flag_path)
+        if missing_flag_paths:
+            emit(
+                f"WARNING: requested flag version fV{int(args.flagver)} does not exist: "
+                f"{display_path(missing_flag_paths[0])}; continuing without GDP flags."
+            )
+            args.use_flags = False
+            args.flagver = None
+            ACTIVE_FLAGVER = None
+            APPLY_FLAG_FILES = False
     scan_label = scan_text(scans)
     plot_dir = Path(args.plot_dir).expanduser().resolve() if args.plot_dir else default_plot_dir(args.format)
     antenna_text = antenna_from_pmode_values(args, tasks)

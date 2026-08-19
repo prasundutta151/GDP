@@ -21,6 +21,7 @@
         <li><a href="gdp-stats.html">gdp-stats</a>: compute antenna-wise gain and bandpass products.</li>
         <li><a href="gdp-flag.html">gdp-flag</a>: create versioned GDP flag sidecar files.</li>
         <li><a href="gdp-plot.html">gdp-plot</a>: plot GDP NPZ products and create missing products with gdp-stats.</li>
+        <li><a href="gdp-show.html">gdp-show</a>: browse existing GDP plots without recalculating products.</li>
         <li><a href="gdp-plan-run.html">gdp-plan-run</a>: run GDP command intents from a plan file.</li>
         <li><a href="gdp-step-by-step.html">Step-by-step guide</a>: run GDP from setup through products, flags, plots, plans, and release steps.</li>
       </ul>
@@ -122,6 +123,8 @@ script/gdp-plot --mode gain -pmode hist  [plot AntStat-style gain histograms fro
 script/gdp-plot --mode gain --scan 17 -pmode antenna --antenna "[0-29]"  [plot antennas 0 through 29 with Stokes side by side]
 script/gdp-plot --mode gain -pmode stats  [plot stats from the gains NPZ, creating the gains NPZ first if needed]
 script/gdp-plot --mode gain -pmode all  [plot colormap, hist, stats, and KS only]
+script/gdp-show --mode gain  [open all existing gain plots in a browser gallery]
+script/gdp-show --mode bandpass --flagver 5 --self-corr  [open available fV5 bandpass self-correlation plots]
 script/gdp-plan-run pipelines/sample_stats.plan --dry-run  [preview a pipeline plan without running it]</code></pre>
     </section>
 

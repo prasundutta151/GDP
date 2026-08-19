@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>gdp-show Documentation</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>gdp-show</h1>
+    <p>Open existing GDP PNG plots in a filterable browser gallery.</p>
+  </header>
+  <main>
+    <section class="doc-tree" aria-labelledby="documentation-tree">
+      <h2 id="documentation-tree">Documentation Tree</h2>
+      <ul>
+        <li><a href="README.html">Main documentation</a></li>
+        <li><a href="gdp-setup.html">gdp-setup</a>: initialize runtime locations.</li>
+        <li><a href="gdp-util.html">gdp-util</a>: inspect CASA table metadata.</li>
+        <li><a href="gdp-stats.html">gdp-stats</a>: calculate GDP products.</li>
+        <li><a href="gdp-flag.html">gdp-flag</a>: create versioned flag sidecars.</li>
+        <li><a href="gdp-plot.html">gdp-plot</a>: generate diagnostic plots.</li>
+        <li><a href="gdp-show.html">gdp-show</a>: browse existing plots.</li>
+        <li><a href="gdp-plan-run.html">gdp-plan-run</a>: run plan intents.</li>
+        <li><a href="gdp-step-by-step.html">Step-by-step guide</a></li>
+      </ul>
+    </section>
+    <section>
+      <h2>Purpose</h2>
+      <p><code>gdp-show</code> never recalculates a product or regenerates a plot. It finds matching PNG files in <code>plots/png</code>, writes <code>plots/png/gdp-show.html</code>, and opens that gallery in the system browser. Missing requested plot types are reported as <code>NOT AVAILABLE</code> while available plots continue to be shown.</p>
+    </section>
+    <section>
+      <h2>Usage</h2>
+      <pre><code>script/gdp-show                              [show all existing gain and bandpass plots]
+script/gdp-show --mode gain                  [show all existing gain plots]
+script/gdp-show --mode bandpass --flagver 5  [show bandpass plots made with fV5]
+script/gdp-show --mode gain --stats          [show colormap, stats, and KS plots]
+script/gdp-show --self-corr                  [show self-corr antenna and colormap plots]
+script/gdp-show --cross-corr                 [show cross-corr antenna and grid plots]</code></pre>
+    </section>
+    <section>
+      <h2>Options</h2>
+      <table>
+        <tr><th>Option</th><th>Description</th></tr>
+        <tr><td><code>--mode gain|bandpass</code></td><td>Restrict to one data mode. Omit it to include both modes.</td></tr>
+        <tr><td><code>--flagver N [N ...]</code></td><td>Restrict to one or more GDP flag versions. Omit it to include unflagged and all flagged plot files.</td></tr>
+        <tr><td><code>--stats</code></td><td>Show only colormap, statistics, and KS plots.</td></tr>
+        <tr><td><code>--self-corr</code></td><td>Show only self-correlation antenna and colormap plots.</td></tr>
+        <tr><td><code>--cross-corr</code></td><td>Show only cross-correlation antenna and grid plots.</td></tr>
+        <tr><td><code>--setup-file NAME</code></td><td>Use a named setup JSON file under the configured runtime directory.</td></tr>
+      </table>
+      <p>Multiple selective options combine their matching plot families. If no selective option is supplied, all available plot families are included.</p>
+    </section>
+  </main>
+  <script src="plot-viewer.js?v=2"></script>
+</body>
+</html>

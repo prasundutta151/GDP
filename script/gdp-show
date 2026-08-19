@@ -1,0 +1,158 @@
+#!/usr/bin/env python3
+"""Show existing GDP PNG plots in a browser gallery."""
+
+from __future__ import annotations
+
+import argparse
+import html
+import json
+import re
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+from typing import Any, Dict, Iterable, List, Optional
+
+
+CONFIG_NAME = ".gdp-config.json"
+PLOT_GROUPS = {
+    "general": ("colormap", "hist", "reim", "antenna"),
+    "stats": ("colormap", "stats", "ks"),
+    "self-corr": ("self-corr-antenna", "self-corr-colormap"),
+    "cross-corr": ("cross-corr-antenna", "cross-corr-grid"),
+}
+
+
+def project_root() -> Path:
+    return Path(__file__).resolve().parents[1]
+
+
+def load_json(path: Path) -> Dict[str, Any]:
+    if not path.exists():
+        return {}
+    with path.open("r", encoding="utf-8") as handle:
+        return json.load(handle)
+
+
+def resolve_setup_file_path(setup_file: Optional[str], base_config: Dict[str, Any]) -> Optional[Path]:
+    if setup_file:
+        path = Path(setup_file).expanduser()
+        if path.is_absolute():
+            return path.resolve()
+        rundir = Path(str(base_config.get("rundir") or (project_root() / "rundir"))).expanduser().resolve()
+        return (rundir / path).resolve()
+    configured = base_config.get("setup_file")
+    return Path(str(configured)).expanduser().resolve() if configured else None
+
+
+def runtime_dir(setup_file: Optional[str]) -> Path:
+    base_config = load_json(project_root() / CONFIG_NAME)
+    setup_path = resolve_setup_file_path(setup_file, base_config)
+    if setup_file and (setup_path is None or not setup_path.exists()):
+        raise FileNotFoundError(f"Setup file not found: {setup_path}")
+    config = load_json(setup_path) if setup_path else base_config
+    return Path(str(config.get("rundir") or (project_root() / "rundir"))).expanduser().resolve()
+
+
+def file_matches_plot_type(path: Path, mode: str, plot_type: str) -> bool:
+    return path.name.startswith(f"gdp-plot-{plot_type}-{mode}-")
+
+
+def file_flag_version(path: Path) -> Optional[int]:
+    match = re.search(r"_fV(\d+)(?:[-.]|$)", path.stem)
+    return int(match.group(1)) if match else None
+
+
+def selected_plot_types(args: argparse.Namespace) -> List[str]:
+    requested_groups = [group for group, enabled in (("stats", args.stats), ("self-corr", args.self_corr), ("cross-corr", args.cross_corr)) if enabled]
+    groups = requested_groups or list(PLOT_GROUPS)
+    return list(dict.fromkeys(plot_type for group in groups for plot_type in PLOT_GROUPS[group]))
+
+
+def select_plots(paths: Iterable[Path], modes: List[str], plot_types: List[str], flag_versions: Optional[List[int]]) -> List[Path]:
+    selected: List[Path] = []
+    wanted_versions = set(flag_versions or [])
+    for path in paths:
+        if not any(file_matches_plot_type(path, mode, plot_type) for mode in modes for plot_type in plot_types):
+            continue
+        if wanted_versions and file_flag_version(path) not in wanted_versions:
+            continue
+        selected.append(path)
+    return sorted(selected)
+
+
+def write_gallery(path: Path, plots: List[Path], rundir: Path) -> None:
+    cards = []
+    for plot in plots:
+        relative = plot.relative_to(path.parent)
+        label = html.escape(plot.name)
+        source = html.escape(relative.as_posix())
+        cards.append(f'<figure><a href="{source}"><img src="{source}" alt="{label}"></a><figcaption>{label}</figcaption></figure>')
+    body = "\n".join(cards) or "<p>No matching plot files are available.</p>"
+    text = f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GDP Plot Gallery</title><style>
+body {{ font-family: Georgia, serif; margin: 24px; color: #18211b; background: #f5f1e8; }}
+h1 {{ margin-bottom: 4px; }} p {{ color: #4b5a50; }}
+.grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 18px; }}
+figure {{ margin: 0; padding: 12px; background: #fffdf7; border: 1px solid #d5cfc0; }}
+img {{ display: block; width: 100%; height: auto; }} figcaption {{ margin-top: 8px; overflow-wrap: anywhere; font: 13px ui-monospace, monospace; }}
+</style></head><body><h1>GDP Plot Gallery</h1><p>Runtime: {html.escape(str(rundir))}</p><div class="grid">{body}</div></body></html>
+"""
+    path.write_text(text, encoding="utf-8")
+
+
+def open_gallery(path: Path) -> None:
+    if sys.platform == "darwin":
+        subprocess.run(["open", str(path)], check=True)
+        return
+    opener = shutil.which("xdg-open")
+    if opener:
+        subprocess.run([opener, str(path)], check=True)
+        return
+    print(f"Gallery written to: {path}")
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Show existing GDP PNG plots in a browser gallery.")
+    parser.add_argument("--mode", choices=("gain", "bandpass"), default=None, help="Show this mode only; default: both modes.")
+    parser.add_argument("--flagver", nargs="+", type=int, default=None, help="Show only these GDP flag versions; default: all versions and unflagged plots.")
+    parser.add_argument("--stats", action="store_true", help="Show colormap, statistics, and KS plots only.")
+    parser.add_argument("--self-corr", dest="self_corr", action="store_true", help="Show self-correlation antenna and colormap plots only.")
+    parser.add_argument("--cross-corr", dest="cross_corr", action="store_true", help="Show cross-correlation antenna and grid plots only.")
+    parser.add_argument("--setup-file", default=None, help="Setup JSON file to use. Relative names are resolved under the runtime directory.")
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+    rundir = runtime_dir(args.setup_file)
+    plot_dir = rundir / "plots" / "png"
+    modes = [args.mode] if args.mode else ["gain", "bandpass"]
+    plot_types = selected_plot_types(args)
+    paths = list(plot_dir.glob("gdp-plot-*.png")) if plot_dir.exists() else []
+    plots = select_plots(paths, modes, plot_types, args.flagver)
+
+    version_labels = [f"fV{version}" for version in args.flagver] if args.flagver else ["all"]
+    for mode in modes:
+        for version_label in version_labels:
+            for plot_type in plot_types:
+                available = [path for path in plots if file_matches_plot_type(path, mode, plot_type)]
+                if args.flagver:
+                    version = int(version_label[2:])
+                    available = [path for path in available if file_flag_version(path) == version]
+                if not available:
+                    print(f"NOT AVAILABLE: mode={mode} flagver={version_label} plot={plot_type}")
+
+    gallery = plot_dir / "gdp-show.html"
+    plot_dir.mkdir(parents=True, exist_ok=True)
+    write_gallery(gallery, plots, rundir)
+    print(f"GDP plots selected: {len(plots)}")
+    for plot in plots:
+        print(plot)
+    print(f"Opening gallery: {gallery}")
+    open_gallery(gallery)
+
+
+if __name__ == "__main__":
+    main()

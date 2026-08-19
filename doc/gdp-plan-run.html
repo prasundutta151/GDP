@@ -22,6 +22,7 @@
         <li><a href="gdp-stats.html">gdp-stats</a>: compute antenna-wise gain and bandpass products.</li>
         <li><a href="gdp-flag.html">gdp-flag</a>: create versioned GDP flag sidecar files.</li>
         <li><a href="gdp-plot.html">gdp-plot</a>: plot GDP NPZ products and create missing products with gdp-stats.</li>
+        <li><a href="gdp-show.html">gdp-show</a>: browse existing GDP plots without recalculating products.</li>
         <li><a href="gdp-plan-run.html">gdp-plan-run</a>: run GDP command intents from a plan file.</li>
       </ul>
     </section>
@@ -52,7 +53,8 @@
       <pre><code>script/gdp-plan-run pipelines/sample_stats.plan  [run every intent in the plan]
 script/gdp-plan-run pipelines/sample_stats.plan --dry-run  [print commands without executing them]
 script/gdp-plan-run pipelines/sample_stats.plan --setup-file project-a-setup.json  [run the plan with a named setup file]
-script/gdp-plan-run pipelines/sample_stats.plan --only gdp-stats  [run only intents whose command is gdp-stats]</code></pre>
+script/gdp-plan-run pipelines/sample_stats.plan --only gdp-stats  [run only intents whose command is gdp-stats]
+script/gdp-plan-run pipelines/gain_bandpass_clean_plots.plan --post 2  [start at post 2]</code></pre>
     </section>
 
     <section>
@@ -63,6 +65,7 @@ script/gdp-plan-run pipelines/sample_stats.plan --only gdp-stats  [run only inte
         <tr><td><code>--setup-file NAME</code></td><td>Setup JSON file to use for plan variables and for <code>gdp-stats</code>, <code>gdp-flag</code>, and <code>gdp-plot</code> intents. Relative names are resolved under the active runtime directory.</td></tr>
         <tr><td><code>--dry-run</code></td><td>Print commands without running them.</td></tr>
         <tr><td><code>--only VALUE</code></td><td>Run only the matching intent index, command name, or intent <code>name</code>.</td></tr>
+        <tr><td><code>--post N</code></td><td>Skip earlier intents and start at the first intent assigned <code>post: N</code>. GDP exits with the available post values if <code>N</code> is not present.</td></tr>
         <tr><td><code>--relative-path</code></td><td>Print the runtime directory near startup, show runtime file references relative to that directory, and pass <code>--relative-path</code> to GDP child commands in the plan.</td></tr>
       </table>
     </section>
@@ -78,6 +81,7 @@ variables:
 -----
 mode: gain
 scan: 18
+post: 1
 -----
 
 iter: 4
@@ -102,6 +106,7 @@ end</code></pre>
       <p>A global default is forwarded only to intents whose command declares the matching CLI option. For example, a global <code>range: 15</code> is passed to <code>gdp-plot</code> but omitted from <code>gdp-flag</code> and <code>gdp-stats</code>. Values written inside an intent are always forwarded, so command-local typos continue to raise the command's normal error.</p>
       <p><code>use: false</code> disables an intent without deleting it from the plan. Omitted <code>use</code> is treated as <code>true</code>. When an intent is disabled, <code>gdp-plan-run</code> prints the intent label followed by <code>SKIP use=false</code> and moves to the next intent.</p>
       <p><code>iter: N</code> repeats an intent <code>N</code> times. It can be written immediately before an intent block or inside the intent block. If omitted, GDP uses <code>iter: 1</code>. Repeated dry-run/output labels include <code>iter=i/N</code>. The spelling <code>Iiter</code> is also accepted.</p>
+      <p>Set <code>post: N</code> inside a hyphen-delimited defaults block to mark all following intents until the next <code>post</code> value. Run <code>gdp-plan-run PLAN --post N</code> to skip all earlier intents and start with the first intent at that marker. The <code>post</code> key is plan metadata and is never sent to a GDP child command.</p>
       <p>The <code>end</code> line closes the current intent block. Use it after every intent so the plan is easy to read and so later key/value lines cannot accidentally become part of the previous command. If <code>end</code> is not written, GDP still closes the current intent when it sees the next <code>intent:</code> block, a <code>variables:</code> block, a separator line <code>---</code>, or the end of the plan file. This means a missing <code>end</code> is accepted in simple plans, but any extra lines before the next block are treated as more arguments for the still-open intent.</p>
       <p>Options that accept multiple command-line tokens can be written as shell-style values in the plan. This includes antenna lists, plot channel windows, manual flag selections, and <code>gdp-flag --fmode</code> trailing values. Quote bracketed ranges when they should remain one token.</p>
       <pre><code>intent: gdp-flag
