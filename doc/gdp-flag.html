@@ -126,5 +126,7 @@ script/gdp-flag --setup-file project-a-setup.json --mode bandpass --scan 18 --fm
       <p>After each completed flagging cycle, <code>gdp-flag</code> writes the accumulated <code>flag-intent</code> provenance and a per-antenna summary table to the terminal and task log. The active flagging summary uses compact columns: <code>fmod-per</code> for the percentage flagged by the current <code>--fmode</code>, <code>pts</code> as final flagged points over total points, and <code>fin_per</code> for the final accumulated flagged percentage. With <code>--apply-flag</code>, GDP copies the CASA table first, writes the selected version into the copied table’s <code>FLAG</code> column, and stores the flag provenance in table keywords and README/comment lines when the CASA table interface supports them. If a required flag version is requested but not present, <code>gdp-flag</code> writes an <code>ERROR:</code> line to the terminal and the task log, then exits without a Python traceback.</p>
     </section>
   </main>
+  <script src="common-content.js?v=1"></script>
+  <script src="plot-viewer.js?v=2"></script>
 </body>
 </html>

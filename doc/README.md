@@ -18,6 +18,8 @@ flag-product generation.
 - `gdp-plot.html`: plotting command for GDP NPZ products.
 - `gdp-show.html`: browser gallery for existing GDP plots.
 - `gdp-plan-run.html`: plan-file runner for repeatable GDP workflows.
+- `pipelines/gain_clean_plots.plan`: standalone gain products and plot workflow.
+- `pipelines/bandpass_clean_plots.plan`: standalone bandpass workflow that masks channels outside 800-3000.
 - `gdp-product-gains.html`: gains NPZ product format.
 - `gdp-product-flags.html`: versioned `.flg` flag sidecar format.
 - `gdp-product-stats.html`: stats NPZ product format.

@@ -1,0 +1,67 @@
+# Generate all gain products and plots for scan 13.
+#
+# Preview:
+#   script/gdp-plan-run pipelines/gain_clean_plots.plan --dry-run
+# Run:
+#   script/gdp-plan-run pipelines/gain_clean_plots.plan
+
+----------------
+mode: gain
+scan: 13
+post: 1
+----------------
+
+# Antennas 4 and 5 have 0% CASA table flags in the saved gain scan 13 product.
+intent: gdp-stats
+  name: gain scan 13 NPZ products
+  smode: gains,stats,ks,self-corr
+end
+
+# General plot modes use the standard antenna 0-29 range.
+intent: gdp-plot
+  name: gain scan 13 general plots
+  pmode: all,reim,self-corr-colormap
+  antenna: "[0-29]"
+  yscale: log
+  scale: log
+  limit: "[1:20]"
+end
+
+# Restrict antenna-specific plot windows to the verified clean antennas.
+intent: gdp-plot
+  name: gain scan 13 selected antenna plots
+  pmode: antenna,self-corr-antenna
+  antenna: 4 5
+  yscale: log
+  scale: log
+  limit: "[1:20]"
+end
+
+# Calculate cross-correlation products only after the self-correlation plots.
+# The complete 0-29 set supplies the full input matrix for cross-corr-grid.
+intent: gdp-stats
+  name: gain scan 13 cross-correlation products
+  smode: cross-corr
+  antennas: "[0-29]"
+  parallel: true
+end
+
+intent: gdp-plot
+  name: gain scan 13 cross-correlation grid
+  pmode: cross-corr-grid
+  antenna: "[0-29]"
+  scale: log
+  limit: "[1:20]"
+end
+
+# Pair, Stokes, and component options belong only to the cross-corr antenna plot.
+intent: gdp-plot
+  name: gain scan 13 selected cross-correlation antenna plot
+  pmode: cross-corr-antenna
+  ant-pair: 4 5
+  stokes-pair: 01
+  cmplx-pair: im&im
+  yscale: log
+  scale: log
+  limit: "[1:20]"
+end

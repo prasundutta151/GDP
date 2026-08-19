@@ -215,6 +215,39 @@ def parse_antenna_list(text: object, option_name: str = "--antenna") -> Optional
     return sorted(set(antennas))
 
 
+def antenna_axis_labels(antennas: Sequence[int], selection: object) -> List[str]:
+    """Label range selections sparsely while retaining every explicit antenna."""
+    ant_values = [int(antenna) for antenna in antennas]
+    if selection is None or normalize_list_text(selection).strip() == "":
+        return [str(antenna) if index % 2 == 0 else "" for index, antenna in enumerate(ant_values)]
+
+    range_starts: Dict[int, int] = {}
+    range_ends: set[int] = set()
+    discrete: set[int] = set()
+    for token in antenna_tokens(selection):
+        value = token.strip()
+        inner = value[1:-1].strip() if (value.startswith("(") and value.endswith(")")) or (value.startswith("[") and value.endswith("]")) else value
+        is_range = ("-" in inner and not inner.startswith("-")) or (value.startswith("[") and value.endswith("]") and "," in inner)
+        values = parse_antenna_token(token, "--antenna")
+        if is_range:
+            start = int(values[0])
+            range_ends.add(int(values[-1]))
+            for antenna in values:
+                range_starts.setdefault(int(antenna), start)
+        else:
+            discrete.update(int(antenna) for antenna in values)
+
+    labels: List[str] = []
+    for antenna in ant_values:
+        if antenna in discrete:
+            labels.append(str(antenna))
+        elif antenna in range_starts and ((antenna - range_starts[antenna]) % 2 == 0 or antenna in range_ends):
+            labels.append(str(antenna))
+        else:
+            labels.append("")
+    return labels
+
+
 def parse_float_range(text: Optional[str]) -> Optional[Tuple[float, float]]:
     if text is None or str(text).strip() == "":
         return None
@@ -1473,6 +1506,7 @@ def plot_gain_colormap(
     mode: str,
     pchans: Optional[Tuple[int, int]] = None,
     plot_range: Optional[float] = None,
+    antenna_selection: object = None,
 ) -> None:
     z = load_npz(npz_path)
     required = {"scan", "antenna", "stokes", "channel", "real", "imag"}
@@ -1664,10 +1698,7 @@ def plot_gain_colormap(
             ax.set_xlim(0, len(ant_all))
             ax.set_ylim(float(y_edges[0]), float(y_edges[-1])) if y_edges is not None else ax.set_ylim(0, len(x_values))
             ax.set_xticks(np.arange(len(ant_all)) + 0.5)
-            if antennas is None:
-                antenna_labels = [str(a) if i % 2 == 0 or i == len(ant_all) - 1 else "" for i, a in enumerate(ant_all)]
-            else:
-                antenna_labels = [str(a) for a in ant_all]
+            antenna_labels = antenna_axis_labels(ant_all, antenna_selection)
             ax.set_xticklabels(antenna_labels, fontsize=6)
             nticks = min(6, len(x_values))
             tick_idx = np.unique(np.linspace(0, len(x_values) - 1, nticks, dtype=int))
@@ -2870,6 +2901,7 @@ def plot_self_corr_colormap(
     threshold: float,
     yscale: str,
     limit: Optional[Tuple[Optional[float], Optional[float]]],
+    antenna_selection: object = None,
 ) -> None:
     z = load_npz(npz_path)
     required = {"antenna", "stokes", "component", "tau", "s2"}
@@ -2965,7 +2997,6 @@ def plot_self_corr_colormap(
     if mode == "bandpass" and np.isfinite(channel_width_khz) and channel_width_khz > 0:
         scale, _unit = frequency_delta_unit(channel_width_khz, y_ticks if y_ticks.size else tau)
         y_tick_positions = y_ticks * channel_width_khz / scale
-    selected_antenna_text = ", ".join(str(int(ant)) for ant in ant_all)
     for ri, stokes in enumerate(stokes_all):
         for ci, comp in enumerate(("real", "imag")):
             ax = axes[ri, ci]
@@ -2985,7 +3016,7 @@ def plot_self_corr_colormap(
                 if np.isfinite(thr):
                     ax.hlines(thr, ai, ai + 1, colors="black", linewidth=2, linestyle="-")
             ax.set_xticks(np.arange(len(ant_all)) + 0.5)
-            antenna_labels = [str(a) if antennas is not None or i % 2 == 0 else "" for i, a in enumerate(ant_all)]
+            antenna_labels = antenna_axis_labels(ant_all, antenna_selection)
             ax.set_xticklabels(antenna_labels, fontsize=8)
             ax.set_xlim(0, len(ant_all))
             ax.set_ylim(y_edges_plot[0], y_edges_plot[-1])
@@ -2997,8 +3028,6 @@ def plot_self_corr_colormap(
                 ax.set_yticklabels(tick_labels, fontsize=6)
             component_label = "Real-1" if comp == "real" else "Imag"
             title = f"{stokes_display_label(z, int(stokes))}, {component_label}"
-            if antennas is not None:
-                title += f" | Antennas: {selected_antenna_text}"
             ax.set_title(title, fontsize=9)
             if ci == 0:
                 ax.set_ylabel(y_label, fontsize=8)
@@ -3880,7 +3909,7 @@ def main() -> None:
                 report_numeric_polarization_labels(npz_header(load_npz(npz)), mode)
                 emit(f"START plot {task} mode={mode} scan={label}")
                 if task == "gain_colormap":
-                    plot_gain_colormap(npz, out, ants, mode, pchans, args.plot_range)
+                    plot_gain_colormap(npz, out, ants, mode, pchans, args.plot_range, antenna_text)
                 elif task == "gain_hist":
                     plot_gain_histogram(npz, out, ants, mode, args.hist_bins, hist_range, pchans)
                 elif task == "reim":
@@ -3892,7 +3921,7 @@ def main() -> None:
                 elif task == "ks":
                     plot_antenna_gain_ks_grid(npz, out, ants)
                 elif task == "self_corr_colormap":
-                    plot_self_corr_colormap(npz, out, ants, args.s2_thr, args.yscale, self_corr_limit)
+                    plot_self_corr_colormap(npz, out, ants, args.s2_thr, args.yscale, self_corr_limit, antenna_text)
                 elif task == "self_corr_antenna":
                     plot_self_corr_antenna_products(npz, out, ants, args.s2_thr, pchans, self_corr_limit)
                 elif task == "cross_corr_antenna":

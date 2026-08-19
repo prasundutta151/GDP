@@ -49,7 +49,8 @@
         <tr><td>5</td><td>Create downstream stats, KS, self-correlation, and optional cross-correlation products.</td><td><code>script/gdp-stats --smode stats,ks,self-corr,cross-corr --use-flags</code></td></tr>
         <tr><td>6</td><td>Make diagnostic plots.</td><td><code>script/gdp-plot -pmode ...</code></td></tr>
         <tr><td>7</td><td>Run a pipeline plan when repeated operations are needed.</td><td><code>script/gdp-plan-run</code></td></tr>
-        <tr><td>8</td><td>Version and release the software.</td><td><code>script/gdp-util --version --git-push</code></td></tr>
+        <tr><td>8</td><td>Browse the completed PNG plots without recalculation.</td><td><code>script/gdp-show</code></td></tr>
+        <tr><td>9</td><td>Version and release the software.</td><td><code>script/gdp-util --version --git-push</code></td></tr>
       </table>
     </section>
 
@@ -178,7 +179,7 @@ casa --nogui --nologger --nologfile --log2term -c script/gdp-stats --mode gain -
 
     <section>
       <h2>6. Make Plots</h2>
-      <p>Once products exist, plotting can run from the normal shell. Use <code>--recompute</code> only when the shell can also run <code>gdp-stats</code> with CASA access. The plot title uses R/L or X/Y when that receptor information is present in the CASA table; otherwise it reports <code>Stokes 0</code> and <code>Stokes 1</code>.</p>
+      <p>Once products exist, plotting can run from the normal shell. If a requested NPZ is missing, <code>gdp-plot</code> invokes <code>gdp-stats</code>, so that command must run in a CASA-enabled environment. Plot labels use R/L or X/Y when that receptor information is present in the CASA table; otherwise they report <code>Stokes 0</code> and <code>Stokes 1</code>.</p>
       <pre><code>script/gdp-plot --mode gain --scan 13 -pmode colormap,hist
 script/gdp-plot --mode gain --scan 13 -pmode reim --antenna 0 1
 script/gdp-plot --mode gain --scan 13 -pmode antenna --antenna 0
@@ -207,11 +208,13 @@ DONE  plot stats elapsed_sec=...</code></pre>
 
     <section>
       <h2>7. Run A Plan</h2>
-      <p>Use plan files for repeatable processing. Plan intents can call GDP scripts such as <code>gdp-stats</code>, <code>gdp-plot</code>, and <code>gdp-flag</code>. Start with a dry run, then run the plan after checking commands.</p>
-      <pre><code>script/gdp-plan-run pipelines/sample_stats.plan --dry-run
-script/gdp-plan-run pipelines/sample_stats.plan
-script/gdp-plan-run pipelines/gain_bandpass_clean_plots.plan --post 2</code></pre>
-      <p>Use <code>post: N</code> in a hyphen-delimited defaults block to mark a restart point for the intents that follow. The <code>--post N</code> option skips earlier intents and begins at the first matching marker, which is useful for restarting a long plan after its earlier stages have completed.</p>
+      <p>Use plan files for repeatable processing. Plan intents can call GDP scripts such as <code>gdp-stats</code>, <code>gdp-plot</code>, and <code>gdp-flag</code>. Start with a dry run, inspect the command order and selected antennas, then run the plan.</p>
+      <pre><code>script/gdp-plan-run pipelines/gain_clean_plots.plan --dry-run
+script/gdp-plan-run pipelines/gain_clean_plots.plan
+script/gdp-plan-run pipelines/bandpass_clean_plots.plan --dry-run
+script/gdp-plan-run pipelines/bandpass_clean_plots.plan</code></pre>
+      <p><code>gain_clean_plots.plan</code> writes gain, statistics, KS, and self-correlation products; plots through self-correlation; calculates all antenna-pair cross-correlations in parallel; then writes the cross-correlation grid and selected pair curve. <code>bandpass_clean_plots.plan</code> first writes gains, flags channels outside 800-3000, then uses that newest flag version for downstream products and plots. Both plans use antennas 0-29 for matrix products while retaining dedicated antenna pairs for the per-pair curve.</p>
+      <p>Use <code>post: N</code> in a hyphen-delimited defaults block to mark a restart point for the intents that follow. The <code>--post N</code> option skips earlier intents and begins at the first matching marker, which is useful for restarting a long plan after its earlier stages have completed. Use <code>--only NAME</code> to execute a single named intent when investigating one stage.</p>
       <p>Expected runtime output pattern:</p>
       <pre><code>[1] gdp-stats
 $ /Users/prasun/Documents/GDP/script/gdp-stats --mode gain --smode gains --scan 17
@@ -267,6 +270,7 @@ Version archive: .../gdp-...tgz</code></pre>
       </table>
     </section>
   </main>
+  <script src="common-content.js?v=1"></script>
   <script src="plot-viewer.js?v=2"></script>
 </body>
 </html>

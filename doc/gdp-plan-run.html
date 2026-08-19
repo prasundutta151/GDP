@@ -54,6 +54,8 @@
 script/gdp-plan-run pipelines/sample_stats.plan --dry-run  [print commands without executing them]
 script/gdp-plan-run pipelines/sample_stats.plan --setup-file project-a-setup.json  [run the plan with a named setup file]
 script/gdp-plan-run pipelines/sample_stats.plan --only gdp-stats  [run only intents whose command is gdp-stats]
+script/gdp-plan-run pipelines/gain_clean_plots.plan --dry-run  [preview the standalone gain workflow]
+script/gdp-plan-run pipelines/bandpass_clean_plots.plan --dry-run  [preview the standalone masked-bandpass workflow]
 script/gdp-plan-run pipelines/gain_bandpass_clean_plots.plan --post 2  [start at post 2]</code></pre>
     </section>
 
@@ -173,6 +175,7 @@ end</code></pre>
       </table>
     </section>
   </main>
+  <script src="common-content.js?v=1"></script>
   <script src="plot-viewer.js?v=2"></script>
 </body>
 </html>

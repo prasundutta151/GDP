@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GDP Documentation</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>GDP Documentation</h1>
+    <p>GDP (Gain Diagnostic Product) is a command-line toolkit for gain and bandpass diagnostics, data products, plotting, diagnosis, and flag products.</p>
+  </header>
+  <main>
+    <section class="doc-tree" aria-labelledby="documentation-tree">
+      <h2 id="documentation-tree">Documentation Tree</h2>
+      <ul>
+        <li><a href="README.html">Main documentation</a></li>
+        <li><a href="gdp-setup.html">gdp-setup</a>: initialize and remember runtime, gain-table, and bandpass-table locations.</li>
+        <li><a href="gdp-util.html">gdp-util</a>: read metadata from CASA gain, bandpass, or MeasurementSet tables.</li>
+        <li><a href="gdp-stats.html">gdp-stats</a>: compute antenna-wise gain and bandpass products.</li>
+        <li><a href="gdp-flag.html">gdp-flag</a>: create versioned GDP flag sidecar files.</li>
+        <li><a href="gdp-plot.html">gdp-plot</a>: plot GDP NPZ products and create missing products with gdp-stats.</li>
+        <li><a href="gdp-show.html">gdp-show</a>: browse existing GDP plots without recalculating products.</li>
+        <li><a href="gdp-plan-run.html">gdp-plan-run</a>: run GDP command intents from a plan file.</li>
+        <li><a href="gdp-step-by-step.html">Step-by-step guide</a>: run GDP from setup through products, flags, plots, plans, and release steps.</li>
+      </ul>
+    </section>
+    <section class="product-formats" aria-labelledby="product-formats">
+      <h2 id="product-formats">Product Formats</h2>
+      <ul>
+        <li><a href="gdp-product-gains.html">gains NPZ</a></li>
+        <li><a href="gdp-product-flags.html">flag FLG</a></li>
+        <li><a href="gdp-product-stats.html">stats NPZ</a></li>
+        <li><a href="gdp-product-ks.html">KS NPZ</a></li>
+        <li><a href="gdp-product-self-corr.html">self-corr NPZ</a></li>
+        <li><a href="gdp-product-cross-corr.html">cross-corr NPZ</a></li>
+      </ul>
+    </section>
+    <section>
+      <h2>Runtime Layout</h2>
+      <p>The default repository runtime directory is <code>rundir/</code>. A user may choose a different runtime directory with <code>gdp-setup</code>. <code>script/gdp-setup --clean</code> removes generated outputs under <code>data-product/</code>, <code>plots/</code>, <code>logs/</code>, and <code>gaintable/</code>, then recreates the standard runtime folders. It asks for confirmation by default; use <code>--clean --dry-run</code> to preview the delete list or <code>--clean no-stop</code> for scripted cleanup without the prompt. Setup JSON files in the runtime root and <code>.gdp-config.json</code> are kept.</p>
+      <p>Add <code>--relative-path</code> to GDP commands when terminal/log output should first state the runtime directory and then refer to generated runtime files relative to that directory. This is a display-only option: actual filenames, write locations, and machine-readable JSON output are unchanged.</p>
+      <table>
+        <tr><th>Subfolder</th><th>Purpose</th></tr>
+        <tr><td><code>data-product/gains/npz</code></td><td>Raw selected gain/bandpass sample products.</td></tr>
+        <tr><td><code>data-product/gains/csv</code></td><td>Reserved for optional gains CSV products.</td></tr>
+        <tr><td><code>data-product/stats/npz</code></td><td>Statistics products in NPZ format.</td></tr>
+        <tr><td><code>data-product/stats/csv</code></td><td>Optional statistics CSV products.</td></tr>
+        <tr><td><code>data-product/ks/npz</code></td><td>KS diagnostic products.</td></tr>
+        <tr><td><code>data-product/ks/csv</code></td><td>Reserved for optional KS CSV products.</td></tr>
+        <tr><td><code>data-product/self-corr/npz</code></td><td>Self structure-function products.</td></tr>
+        <tr><td><code>data-product/cross-corr/npz</code></td><td>Cross structure-function tcorr products in NPZ format.</td></tr>
+        <tr><td><code>data-product/cross-corr/csv</code></td><td>Optional cross structure-function CSV products.</td></tr>
+        <tr><td><code>data-product/flag/npz</code></td><td>Antenna-based flag products in NPZ format.</td></tr>
+        <tr><td><code>data-product/flag/csv</code></td><td>Optional flag CSV summaries.</td></tr>
+        <tr><td><code>logs</code></td><td>Task logs written by GDP commands.</td></tr>
+        <tr><td><code>gaintable</code></td><td>Copied CASA gain or bandpass tables written by <code>gdp-flag --apply-flag</code>.</td></tr>
+        <tr><td><code>plots/png</code></td><td>Default PNG diagnostic plots.</td></tr>
+        <tr><td><code>plots/eps</code></td><td>Optional EPS diagnostic plots.</td></tr>
+        <tr><td><code>plots/pdf</code></td><td>Optional PDF diagnostic plots.</td></tr>
+      </table>
+    </section>
+
+    <section>
+      <h2>Quick Start</h2>
+      <pre><code>script/gdp-setup --gain-table /path/to/gain/table.g --bandpass-table /path/to/bandpass/table.b --rundir /path/to/rundir  [save separate gain and bandpass defaults plus runtime directory]
+script/gdp-setup --setup-file project-a-setup.json --gain-table /path/to/table.g --rundir /path/to/rundir  [write a named setup file under the runtime directory]
+script/gdp-setup --show  [print the saved GDP setup]
+script/gdp-setup --clean --dry-run  [preview generated runtime outputs that would be removed]
+script/gdp-setup --clean  [ask for confirmation, then remove generated runtime outputs]
+script/gdp-setup --clean no-stop  [remove generated runtime outputs without prompting]
+script/gdp-util --input-table /path/to/table.g --header  [inspect table metadata]
+script/gdp-util --mode gain --header  [inspect the saved gain table]
+script/gdp-util --mode bandpass --header  [inspect the saved bandpass table]
+script/gdp-util --mode gain --scans --antenna  [inspect scans and antennas]
+script/gdp-util --mode gain --timeinfo  [inspect gain-table time count, spacing, and start/end times]
+script/gdp-util --mode bandpass --chaninfo  [inspect bandpass channel width, bandwidth, channel count, and frequency range]
+script/gdp-stats --smode stats,ks  [compute stats and KS products from the saved input]
+script/gdp-stats --smode all  [run gains, stats, and KS]
+script/gdp-stats --smode self-corr  [run self-correlation separately]
+script/gdp-stats --mode gain --scan 17 --smode gains,cross-corr --stokes 01 --complex reim  [write gains, then selected cross-corr NPZ products]
+script/gdp-stats --mode gain --scan 17 --smode cross-corr --estimate --parallel  [estimate cross-corr runtime/disk from the saved gains NPZ]
+script/gdp-plot --mode gain --scan 17 -pmode cross-corr-antenna --ant-pair 0 1 --stokes-pair 01 --cmplx-pair reim  [plot one selected cross-corr curve]
+script/gdp-plot --mode bandpass --scan 18 -pmode cross-corr-grid --use-flags --clip  [plot cross-corr nu_corr antenna-pair grids with the automatic 32 Delta-nu upper scale]
+script/gdp-stats --antennas [0-9] --smode stats  [compute stats for antennas 0 through 9]
+script/gdp-stats --antennas 2,3,4,31 --smode stats  [compute stats for explicit antenna IDs]
+script/gdp-stats --antennas "[1-5]" 6 "[9-12]" 15 16 19 --smode stats  [compute stats for mixed antenna ranges and explicit IDs]
+script/gdp-stats --smode stats --csv  [compute stats and optional CSV from the saved input]
+script/gdp-stats --smode stats --combine-scans  [write one combined allscans stats product]
+script/gdp-stats --mode gain --scan 17 --smode gains  [create the gains NPZ for plotting]
+script/gdp-stats --mode gain --scan 17 --smode gain --adjust-mean  [create a mean-adjusted gains NPZ]
+script/gdp-plot --mode gain --scan 17 -pmode colormap --range 20  [plot gain Real-1/Imag colormaps with fixed percent saturation]
+script/gdp-stats --mode gain --scan 17 --smode gains --flagver 1  [write gains NPZ and matching fV1 flag sidecar]
+script/gdp-flag --mode gain --scan 17 --fmode man-antenna --man-antenna 3,4 --use-flags  [create the next flag version by carrying the highest old version and adding antennas 3 and 4]
+script/gdp-flag --mode gain --scan 17 --fmode man-antenna --man-antenna "1:0, 3:1, [11-14]:1, 23"  [flag selected Stokes for some antennas and all Stokes for antenna 23]
+script/gdp-flag --mode bandpass --scan 18 --fmode man-chan --man-chan "[900-1200]" --new-flags  [write only new manual channel flags]
+script/gdp-flag --mode bandpass --scan 18 --fmode man-chan --man-chan "[900-1200]:1, 1300:0"  [flag selected Stokes for selected bandpass channels]
+script/gdp-flag --mode gain --scan 17 --fmode all-std-thrsld  [flag RE/IM outliers using alpha=1]
+script/gdp-flag --mode gain --scan 17 --fmode all-std-thrsld 1.5  [flag RE/IM outliers using alpha=1.5]
+script/gdp-flag --mode gain --scan 17 --fmode ante-std-thrsld  [flag RE/IM outliers using per-antenna statistics]
+script/gdp-flag --mode gain --scan 17 --fmode ante-std-thrsld --alpha 1.5  [per-antenna thresholding with alpha=1.5]
+script/gdp-flag --mode gain --scan 17 --fmode ante-mean-thrsld  [flag antenna/Stokes means outside the one-expected-antenna Gaussian cutoff]
+script/gdp-flag --mode gain --scan 17 --fmode ante-mean-thrsld 1.5  [use threshold=1.5 times the Gaussian antenna-mean cutoff]
+script/gdp-flag --mode gain --scan 17 --fmode ante-thrsld  [fully flag antennas with at least 70 percent existing flags]
+script/gdp-flag --mode gain --scan 17 --fmode ante-thrsld 40  [fully flag antennas with at least 40 percent existing flags]
+script/gdp-flag --mode gain --scan 17 --fmode ks-thrsld  [flag antenna/Stokes groups whose KS exceeds 1 times the Gaussian reference]
+script/gdp-flag --mode gain --scan 17 --fmode ks-thrsld 1.5  [flag antenna/Stokes groups whose KS exceeds 1.5 times the Gaussian reference]
+script/gdp-flag --mode gain --scan 17 --fmode gpr  [flag non-smooth gain time samples with default multi-scale GPR settings]
+script/gdp-flag --mode bandpass --scan 18 --fmode gpr --thrsld 5 --kernel matern32 --scale 16,128  [flag non-smooth bandpass channel samples]
+script/gdp-flag --mode bandpass --scan 18 --fmode all-std-thrsld --alpha 2  [threshold the full bandpass product using alpha=2]
+script/gdp-flag --mode gain --scan 17 --fmode remove-version "[1-3]"  [remove flag versions fV1 through fV3]
+script/gdp-flag --mode gain --scan 17 --fmode remove-version "[1:]"  [remove all matching flag versions starting at fV1]
+script/gdp-flag --mode gain --scan 17 --fmode summary  [show the per-antenna summary for the highest matching flag version]
+script/gdp-flag --mode gain --scan 17 --fmode summary 3  [show the per-antenna summary for flag version fV3]
+script/gdp-flag --mode gain --scan 17 --apply-flag  [copy the saved gain table to rundir/gaintable and apply the highest matching flag version]
+script/gdp-flag --mode gain --scan 17 --apply-flag 3 --output-table /path/to/output/table_fV3.g  [apply fV3 to a chosen output CASA table path]
+script/gdp-stats --mode gain --scan 17 --smode stats,ks --use-flags --flagver 1  [compute flagged products using fV1 .flg flags; default names include _fV1]
+script/gdp-plot --mode gain --scan 17 -pmode colormap --use-flags --flagver 1  [plot using fV1 flags; default name includes _fV1]
+script/gdp-plot --mode gain --scan 13 -pmode colormap --npz-path /path/to/gdp-gains-gain-scan13.npz  [plot directly from a selected gain scan-13 NPZ file]
+script/gdp-plot --mode bandpass --scan 18 -pmode colormap -pchans "[800-1200]" --range 20  [plot a channel window from a wider bandpass scan-18 gains NPZ with fixed percent saturation]
+script/gdp-plot --mode gain -pmode hist  [plot AntStat-style gain histograms from gains NPZ]
+script/gdp-plot --mode gain --scan 17 -pmode antenna --antenna "[0-29]"  [plot antennas 0 through 29 with Stokes side by side]
+script/gdp-plot --mode gain -pmode stats  [plot stats from the gains NPZ, creating the gains NPZ first if needed]
+script/gdp-plot --mode gain -pmode all  [plot colormap, hist, stats, and KS only]
+script/gdp-show --mode gain  [open all existing gain plots in a browser gallery]
+script/gdp-show --mode bandpass --flagver 5 --self-corr  [open available fV5 bandpass self-correlation plots]
+script/gdp-plan-run pipelines/sample_stats.plan --dry-run  [preview a pipeline plan without running it]</code></pre>
+    </section>
+
+    <section class="step-guide" aria-labelledby="step-by-step-guide">
+      <h2>Step-by-Step Guide</h2>
+      <p>The main workflow guide is kept as a separate page so it can be updated as GDP development expands. It includes what to run, expected terminal output patterns, generated products, and links to representative plots.</p>
+      <p><a href="gdp-step-by-step.html">Open the GDP step-by-step guide</a></p>
+    </section>
+
+    <section class="sample-plots" aria-labelledby="sample-plots">
+      <h2 id="sample-plots">Sample Plots</h2>
+      <p>These samples were generated with the current plotting code from the saved gain product for scan 13. Polarization labels fall back to <code>Stokes 0</code> and <code>Stokes 1</code> when the source CASA table has no R/L or X/Y receptor metadata.</p>
+      <table>
+        <tr><th>Plot Type</th><th>Sample</th><th>Command</th><th>Description</th></tr>
+        <tr><td>Gain colormap</td><td><a href="sample_plots/gdp-plot-colormap-gain-scan13.png">gdp-plot-colormap-gain-scan13.png</a></td><td><code>script/gdp-plot --mode gain --scan 13 -pmode colormap</code></td><td>Real-1 and Imag gain-percent colormaps for all available antennas.</td></tr>
+        <tr><td>Gain histogram</td><td><a href="sample_plots/gdp-plot-hist-gain-scan13.png">gdp-plot-hist-gain-scan13.png</a></td><td><code>script/gdp-plot --mode gain --scan 13 -pmode hist</code></td><td>Real-1 and Imag gain distributions for all available antennas.</td></tr>
+        <tr><td>Gain antenna</td><td><a href="sample_plots/gdp-plot-antenna-gain-scan13-ant0.png">gdp-plot-antenna-gain-scan13-ant0.png</a></td><td><code>script/gdp-plot --mode gain --scan 13 -pmode antenna --antenna 0</code></td><td>Per-antenna gain time series with Stokes labels and a top elapsed-time axis.</td></tr>
+        <tr><td>Gain Real-Imag plane</td><td><a href="sample_plots/gdp-plot-reim-gain-scan13-ants0_1.png">gdp-plot-reim-gain-scan13-ants0_1.png</a></td><td><code>script/gdp-plot --mode gain --scan 13 -pmode reim --antenna 0 1</code></td><td>Pooled Real-1 versus Imag sample and density panels for the selected antennas.</td></tr>
+        <tr><td>Gain statistics grid</td><td><a href="sample_plots/gdp-plot-stats-gain-scan13.png">gdp-plot-stats-gain-scan13.png</a></td><td><code>script/gdp-plot --mode gain --scan 13 -pmode stats</code></td><td>Mean, standard deviation, skewness, and kurtosis for all available antennas.</td></tr>
+        <tr><td>Gain KS grid</td><td><a href="sample_plots/gdp-plot-ks-gain-scan13.png">gdp-plot-ks-gain-scan13.png</a></td><td><code>script/gdp-plot --mode gain --scan 13 -pmode ks</code></td><td>Fitted-normal KS D-statistics for all available antennas.</td></tr>
+        <tr><td>Self-corr colormap</td><td><a href="sample_plots/gdp-plot-self-corr-colormap-gain-scan13.png">gdp-plot-self-corr-colormap-gain-scan13.png</a></td><td><code>script/gdp-plot --mode gain --scan 13 -pmode self-corr-colormap --yscale log --limit '[1:20]'</code></td><td>Normalized S2 for all available antennas with saved correlation-time markers; gain mode uses <code>Delta t [sample]</code> on the right axis.</td></tr>
+        <tr><td>Self-corr antenna</td><td><a href="sample_plots/gdp-plot-self-corr-antenna-gain-scan13-ant0.png">gdp-plot-self-corr-antenna-gain-scan13-ant0.png</a></td><td><code>script/gdp-plot --mode gain --scan 13 -pmode self-corr-antenna --antenna 0 --limit '[1:20]'</code></td><td>One antenna's normalized S2 curves with correlation time in seconds and sample units.</td></tr>
+        <tr><td>Cross-corr antenna</td><td><a href="sample_plots/gdp-plot-cross-corr-antenna-gain-scan13-ant9_13-stokes01-compimim.png">gdp-plot-cross-corr-antenna-gain-scan13-ant9_13-stokes01-compimim.png</a></td><td><code>script/gdp-plot --mode gain --scan 13 -pmode cross-corr-antenna --ant-pair 9 13 --stokes-pair 01 --cmplx-pair 'im&amp;im' --limit '[1:20]' --scale log</code></td><td>One saved antenna/Stokes/component cross-structure-function curve.</td></tr>
+        <tr><td>Cross-corr grid, same component</td><td><a href="sample_plots/gdp-plot-cross-corr-grid-gain-scan13-cmp-self.png">gdp-plot-cross-corr-grid-gain-scan13-cmp-self.png</a></td><td><code>script/gdp-plot --mode gain --scan 13 -pmode cross-corr-grid --clip</code></td><td>Four Stokes grids: upper triangles are Real-Real and lower triangles are Imag-Imag correlation times.</td></tr>
+        <tr><td>Cross-corr grid, mixed component</td><td><a href="sample_plots/gdp-plot-cross-corr-grid-gain-scan13-cmp-cross.png">gdp-plot-cross-corr-grid-gain-scan13-cmp-cross.png</a></td><td><code>script/gdp-plot --mode gain --scan 13 -pmode cross-corr-grid --clip</code></td><td>Four Stokes grids: upper triangles are Real-Imag and lower triangles are Imag-Real correlation times.</td></tr>
+      </table>
+    </section>
+  </main>
+  <script src="common-content.js?v=1"></script>
+  <script src="plot-viewer.js?v=2"></script>
+</body>
+</html>

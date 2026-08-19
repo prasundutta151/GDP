@@ -1,0 +1,84 @@
+# Generate bandpass products and plots for scan 18 using channels 800-3000.
+#
+# Preview:
+#   script/gdp-plan-run pipelines/bandpass_clean_plots.plan --dry-run
+# Run:
+#   script/gdp-plan-run pipelines/bandpass_clean_plots.plan
+
+----------------
+mode: bandpass
+scan: 18
+post: 1
+----------------
+
+# First save the full bandpass product. The next intent creates a new highest
+# flag version that keeps only channels 800-3000 (scan 18 ends at channel 7300).
+intent: gdp-stats
+  name: bandpass scan 18 gains NPZ
+  smode: gains
+end
+
+intent: gdp-flag
+  name: bandpass scan 18 keep channels 800-3000
+  fmode: man-chan
+  man-chan: "[0-799]" "[3001-7300]"
+end
+
+intent: gdp-stats
+  name: bandpass scan 18 stats and self-correlation using channel mask
+  smode: stats,ks,self-corr
+  use-flags: true
+end
+
+intent: gdp-plot
+  name: bandpass scan 18 general plots
+  pmode: all,reim,self-corr-colormap
+  antenna: "[0-29]"
+  use-flags: true
+  pchans: "[800-3000]"
+  yscale: log
+  scale: log
+  limit: "[1:20]"
+end
+
+intent: gdp-plot
+  name: bandpass scan 18 selected antenna plots
+  antenna: 12 18
+  pmode: antenna,self-corr-antenna
+  use-flags: true
+  pchans: "[800-3000]"
+  yscale: log
+  scale: log
+  limit: "[1:20]"
+end
+
+intent: gdp-stats
+  name: bandpass scan 18 cross-correlation products using channel mask
+  smode: cross-corr
+  antennas: "[0-29]"
+  parallel: true
+  use-flags: true
+end
+
+intent: gdp-plot
+  name: bandpass scan 18 cross-correlation grid
+  pmode: cross-corr-grid
+  antenna: "[0-29]"
+  use-flags: true
+  pchans: "[800-3000]"
+  scale: log
+  limit: "[1:20]"
+end
+
+intent: gdp-plot
+  name: bandpass scan 18 selected cross-correlation antenna plot
+  pmode: cross-corr-antenna
+  ant-pair: 12 18
+  stokes-pair: 01
+  cmplx-pair: im&im
+  use-flags: true
+  pchans: "[800-3000]"
+  yscale: log
+  scale: log
+  limit: "[1:20]"
+end
