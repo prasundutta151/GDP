@@ -488,6 +488,73 @@ def spectral_window_info(input_table: Path) -> Dict[str, np.ndarray]:
             pass
 
 
+def polarization_metadata(input_table: Path, npol: int, antennas: Sequence[int]) -> Dict[str, Any]:
+    """Resolve a uniform receptor order from the source MS FEED table when available."""
+    numeric_labels = [str(index) for index in range(max(0, int(npol)))]
+    if npol <= 0:
+        return {"polarization_labels": numeric_labels, "polarization_label_source": "numeric-index"}
+    casatable = casatable_factory()
+    table = casatable()
+    try:
+        table.open(str(input_table))
+        keywords = table.getkeywords()
+    except Exception:
+        return {"polarization_labels": numeric_labels, "polarization_label_source": "numeric-index"}
+    finally:
+        try:
+            table.close()
+        except Exception:
+            pass
+    ms_value = next((keywords.get(key) for key in ("MSName", "MS_NAME", "MS") if keywords.get(key)), None)
+    if not isinstance(ms_value, str) or not ms_value.strip():
+        return {"polarization_labels": numeric_labels, "polarization_label_source": "numeric-index"}
+    ms_text = ms_value.strip()
+    if ms_text.startswith("Table: "):
+        ms_text = ms_text[len("Table: ") :].strip()
+    ms_path = Path(ms_text).expanduser()
+    if not ms_path.is_absolute():
+        ms_path = (input_table.parent / ms_path).resolve()
+    feed_path = ms_path / "FEED"
+    if not feed_path.exists():
+        return {"polarization_labels": numeric_labels, "polarization_label_source": "numeric-index"}
+    feed = casatable()
+    try:
+        feed.open(str(feed_path))
+        columns = set(feed.colnames())
+        if "POLARIZATION_TYPE" not in columns:
+            return {"polarization_labels": numeric_labels, "polarization_label_source": "numeric-index"}
+        wanted = {int(antenna) for antenna in antennas}
+        feed_antennas = np.asarray(feed.getcol("ANTENNA_ID"), dtype=int) if "ANTENNA_ID" in columns else np.full(feed.nrows(), -1, dtype=int)
+        orders = set()
+        for row in range(feed.nrows()):
+            if wanted and int(feed_antennas[row]) not in wanted:
+                continue
+            values = [str(value).strip().upper() for value in np.asarray(feed.getcell("POLARIZATION_TYPE", row)).ravel().tolist()]
+            if len(values) < npol or any(value not in {"R", "L", "X", "Y"} for value in values[:npol]):
+                continue
+            orders.add(tuple(values[:npol]))
+        if len(orders) == 1:
+            labels = list(next(iter(orders)))
+            return {"polarization_labels": labels, "polarization_label_source": f"MS FEED: {feed_path}"}
+    except Exception:
+        pass
+    finally:
+        try:
+            feed.close()
+        except Exception:
+            pass
+    return {"polarization_labels": numeric_labels, "polarization_label_source": "numeric-index"}
+
+
+def uses_numeric_polarization_labels(header: Dict[str, Any]) -> bool:
+    """Return whether a product could not resolve named polarization receptors."""
+    labels = header.get("polarization_labels", [])
+    try:
+        return not labels or any(str(label).strip().upper() not in {"R", "L", "X", "Y"} for label in labels)
+    except TypeError:
+        return True
+
+
 class TaskLogger:
     def __init__(self, path: Path):
         self.path = path
@@ -818,6 +885,7 @@ def compute_stats(
                         flagged_count[s_idx, a_idx, p_idx, c_idx] = flagged
         if stokes_count is None or stats is None:
             raise RuntimeError("No matching scans/rows found.")
+        pol_meta = polarization_metadata(input_table, stokes_count, selected_antennas)
         return {
             "header": {
                 "format": "GDP_STATS_NPZ",
@@ -835,6 +903,7 @@ def compute_stats(
                 "bchan": bchan,
                 "echan": echan,
                 "flag_chans": flag_chans,
+                **pol_meta,
                 "axes": {"stats": ["scan", "antenna", "stokes", "component", "metric"]},
             },
             "scan_numbers": np.asarray(selected_scans, dtype=int),
@@ -965,6 +1034,8 @@ def compute_gains(
                     imag_arr[stokes_arr == int(stokes)] = imag_arr[stokes_arr == int(stokes)] - imag_mean
             rows["real"] = real_arr.tolist()
             rows["imag"] = imag_arr.tolist()
+        stokes_count = max((int(value) for value in rows["stokes"]), default=-1) + 1
+        pol_meta = polarization_metadata(input_table, stokes_count, selected_antennas)
         return {
             "header": {
                 "format": "GDP_GAINS_NPZ",
@@ -982,6 +1053,7 @@ def compute_gains(
                 "bchan": bchan,
                 "echan": echan,
                 "flag_chans": flag_chans,
+                **pol_meta,
                 "columns": list(rows.keys()),
             },
             **{
@@ -1079,6 +1151,7 @@ def compute_ks(
                             ks[s_idx, a_idx, p_idx, c_idx, 3] = float(np.std(finite, ddof=1)) if finite.size > 1 else np.nan
         if stokes_count is None or ks is None or sample_count is None:
             raise RuntimeError("No matching scans/rows found.")
+        pol_meta = polarization_metadata(input_table, stokes_count, selected_antennas)
         return {
             "header": {
                 "format": "GDP_KS_NPZ",
@@ -1094,6 +1167,7 @@ def compute_ks(
                 "bchan": bchan,
                 "echan": echan,
                 "flag_chans": flag_chans,
+                **pol_meta,
                 "axes": {"ks": ["scan", "antenna", "stokes", "component", "metric"]},
             },
             "scan_numbers": np.asarray(selected_scans, dtype=int),
@@ -1364,6 +1438,13 @@ def read_series(
                         real = nanmean_no_warning((data[pol].real - 1.0) * 100.0, axis=0)
                         imag = nanmean_no_warning(data[pol].imag * 100.0, axis=0)
                     out[int(scan)][int(antenna)][pol] = {"real": (axis, real), "imag": (axis, imag)}
+        pol_meta = polarization_metadata(input_table, stokes_count, selected_antennas)
+        selected_time_mask = np.isin(all_scan, np.asarray(selected_scans, dtype=int))
+        selected_times = np.unique(times[selected_time_mask])
+        selected_times = np.sort(selected_times[np.isfinite(selected_times)])
+        time_differences = np.diff(selected_times)
+        time_differences = time_differences[np.isfinite(time_differences) & (time_differences > 0)]
+        integration_time_sec = float(np.nanmedian(time_differences)) if time_differences.size else np.nan
         meta = {
             "input_table": str(input_table),
             "mode": mode,
@@ -1377,6 +1458,8 @@ def read_series(
             "use_flags": bool(use_flags),
             "flag_source": "flg" if flag_lookup is not None and use_flags else "casa-table" if use_flags else "none",
             "antenna_flags": sorted(forced_flag_antennas),
+            "integration_time_sec": integration_time_sec,
+            **pol_meta,
         }
         return out, meta
     finally:
@@ -1747,6 +1830,8 @@ def cross_corr_result_from_gains(
         "source_gains_npz": str(gains_npz),
         "source_gains_format": gains.get("header", {}).get("format"),
         "input_table": gains.get("header", {}).get("input_table"),
+        "polarization_labels": gains.get("header", {}).get("polarization_labels", []),
+        "polarization_label_source": gains.get("header", {}).get("polarization_label_source", "numeric-index"),
         "mode": mode,
         "scan": int(option["scan"]),
         "antenna1": int(option["ant1"]),
@@ -1879,6 +1964,8 @@ def write_cross_corr_summary_npz(
         "product_file": [],
     }
     table_name = ""
+    polarization_labels: List[str] = []
+    polarization_label_source = "numeric-index"
     for path in product_paths:
         if not path.exists():
             continue
@@ -1889,6 +1976,9 @@ def write_cross_corr_summary_npz(
         except Exception:
             continue
         table_name = table_name or str(header.get("input_table", ""))
+        if not polarization_labels:
+            polarization_labels = [str(value) for value in header.get("polarization_labels", [])]
+            polarization_label_source = str(header.get("polarization_label_source", polarization_label_source))
         rows["scan"].append(int(scalar_from_npz(z, "scan", header.get("scan", -1))))
         rows["antenna1"].append(int(scalar_from_npz(z, "antenna1", header.get("antenna1", -1))))
         rows["antenna2"].append(int(scalar_from_npz(z, "antenna2", header.get("antenna2", -1))))
@@ -1921,6 +2011,8 @@ def write_cross_corr_summary_npz(
         "product": "cross_corr_summary",
         "source_gains_npz": str(gains_npz),
         "input_table": table_name,
+        "polarization_labels": polarization_labels,
+        "polarization_label_source": polarization_label_source,
         "mode": mode,
         "scan_label": scan_label,
         "use_flags": bool(args.use_flags),
@@ -2265,6 +2357,16 @@ def run_batch(
     flag_header: Dict[str, Any] = {}
     applied_flag_version: Optional[int] = None
     applied_flag_path: Optional[Path] = None
+    def report_numeric_polarization_labels(product: Dict[str, Any]) -> None:
+        header = product.get("header", {})
+        if (
+            not getattr(logger, "_numeric_polarization_notice_written", False)
+            and isinstance(header, dict)
+            and uses_numeric_polarization_labels(header)
+        ):
+            logger.write(f"No stokes name resolution exists in the {mode} table; using 0/1 instead.")
+            logger._numeric_polarization_notice_written = True
+
     needs_sidecar_flags = bool(args.use_flags and (args.stats or args.ks or args.self_corr or args.cross_corr))
     if needs_sidecar_flags:
         if args.flagver is None and not flag_file_versions(gains_out) and args.gains:
@@ -2283,6 +2385,7 @@ def run_batch(
     if args.gains:
         t0 = logger.start(f"gains {scan_label}")
         gains = compute_gains(input_table, mode, scans, antennas, antenna_flags, args.use_flags, args.adjust_mean, None, None, args.flag_chans, None)
+        report_numeric_polarization_labels(gains)
         out = gains_out
         write_npz(out, gains)
         logger.write(f"Wrote gains NPZ: {out}")
@@ -2301,6 +2404,7 @@ def run_batch(
     if args.stats:
         t0 = logger.start(f"stats {scan_label}")
         stats_result = compute_stats(input_table, mode, scans, antennas, antenna_flags, args.use_flags, args.adjust_mean, None, None, args.flag_chans, flag_lookup)
+        report_numeric_polarization_labels(stats_result)
         if flag_header:
             stats_result["header"]["flag_file_version"] = flag_header.get("flag_version")
         out = Path(args.output_npz).expanduser().resolve() if args.output_npz else path_with_flag_version(build_default_output(input_table, output_label, mode, "stats", "npz"), applied_flag_version)
@@ -2315,6 +2419,7 @@ def run_batch(
     if args.ks:
         t0 = logger.start(f"ks {scan_label}")
         ks = compute_ks(input_table, mode, scans, antennas, antenna_flags, args.use_flags, None, None, args.flag_chans, flag_lookup)
+        report_numeric_polarization_labels(ks)
         if flag_header:
             ks["header"]["flag_file_version"] = flag_header.get("flag_version")
         out = Path(args.output_ks_npz).expanduser().resolve() if args.output_ks_npz else path_with_flag_version(build_default_output(input_table, output_label, mode, "ks", "npz"), applied_flag_version)
@@ -2340,6 +2445,7 @@ def run_batch(
             args.corr_threshold,
             flag_lookup,
         )
+        report_numeric_polarization_labels(self_corr)
         if flag_header:
             self_corr["header"]["flag_file_version"] = flag_header.get("flag_version")
         out = Path(args.output_self_corr_npz).expanduser().resolve() if args.output_self_corr_npz else path_with_flag_version(build_default_output(input_table, output_label, mode, "self_corr", "npz"), applied_flag_version)
@@ -2350,6 +2456,8 @@ def run_batch(
     if args.cross_corr:
         t0 = logger.start(f"cross-corr {scan_label}")
         cross_gains_npz = gains_out if args.gains else resolve_cross_corr_gains_npz(gains_out, mode, scan_label)
+        cross_gains = load_npz_dict(cross_gains_npz)
+        report_numeric_polarization_labels(cross_gains)
         run_cross_corr_from_npz(
             args,
             cross_gains_npz,

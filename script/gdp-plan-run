@@ -43,6 +43,7 @@ MULTI_VALUE_OPTIONS = {
 RELATIVE_PATH_COMMANDS = {"gdp-stats", "gdp-plot", "gdp-flag", "gdp-setup", "gdp-util"}
 ITER_KEYS = {"iter", "iiter", "Iiter"}
 INTENT_METADATA_KEYS = {"name", "description", "use", *ITER_KEYS}
+CLI_OPTION_CACHE: Dict[Path, set[str]] = {}
 
 
 def project_root() -> Path:
@@ -205,7 +206,7 @@ def parse_plan(path: Path) -> Tuple[Dict[str, Any], List[Dict[str, Any]], Dict[s
             args = dict(defaults)
             args.update(pending_intent_args)
             pending_intent_args = {}
-            current = {"command": str(command), "args": args, "lineno": lineno}
+            current = {"command": str(command), "args": args, "default_keys": set(defaults), "lineno": lineno}
             section = "intent"
             continue
 
@@ -216,7 +217,7 @@ def parse_plan(path: Path) -> Tuple[Dict[str, Any], List[Dict[str, Any]], Dict[s
             args = dict(defaults)
             args.update(pending_intent_args)
             pending_intent_args = {}
-            current = {"command": line[:-1].strip(), "args": args, "lineno": lineno}
+            current = {"command": line[:-1].strip(), "args": args, "default_keys": set(defaults), "lineno": lineno}
             section = "intent"
             continue
 
@@ -227,6 +228,7 @@ def parse_plan(path: Path) -> Tuple[Dict[str, Any], List[Dict[str, Any]], Dict[s
             defaults[key] = value
         elif section == "intent" and current is not None:
             current["args"][key] = value
+            current["default_keys"].discard(key)
         elif section is None and key in ITER_KEYS:
             pending_intent_args["iter"] = value
         elif section is None and key in {"setup-file", "setup_file"}:
@@ -293,6 +295,43 @@ def command_path(command: str) -> Path:
     return path
 
 
+def option_key(option: str) -> str:
+    return option.lstrip("-").replace("-", "_")
+
+
+def command_cli_options(exe: Path) -> set[str]:
+    """Return long-option keys declared by a GDP script, cached by path."""
+    resolved = exe.resolve()
+    cached = CLI_OPTION_CACHE.get(resolved)
+    if cached is not None:
+        return cached
+    try:
+        source = resolved.read_text(encoding="utf-8")
+    except OSError:
+        # Preserve historical behavior for commands not backed by a readable script.
+        return set()
+    options = {
+        option_key(match.group(1))
+        for match in re.finditer(r"['\"](--[A-Za-z][A-Za-z0-9-]*)['\"]", source)
+    }
+    CLI_OPTION_CACHE[resolved] = options
+    return options
+
+
+def filter_global_defaults(intent: Dict[str, Any], args: Dict[str, Any], exe: Path) -> Dict[str, Any]:
+    """Keep global defaults only when the target command declares that option."""
+    options = command_cli_options(exe)
+    if not options:
+        return dict(args)
+    filtered = dict(args)
+    for key in intent.get("default_keys", set()):
+        if key in INTENT_METADATA_KEYS:
+            continue
+        if option_key(str(key)) not in options:
+            filtered.pop(key, None)
+    return filtered
+
+
 def args_to_cli(args: Dict[str, Any], variables: Dict[str, Any]) -> List[str]:
     cli: List[str] = []
     for key, raw_value in args.items():
@@ -307,6 +346,11 @@ def args_to_cli(args: Dict[str, Any], variables: Dict[str, Any]) -> List[str]:
             cli.append(flag)
         elif value is False or value is None:
             continue
+        elif key == "pmode":
+            # Accept both comma- and whitespace-separated plot modes in plans.
+            modes = [part.strip() for token in value_to_tokens(value) for part in token.split(",") if part.strip()]
+            if modes:
+                cli.extend([flag, ",".join(modes)])
         elif key in MULTI_VALUE_OPTIONS:
             tokens = value_to_tokens(value)
             if tokens:
@@ -395,7 +439,8 @@ def run_plan(
             emit("SKIP use=false", relative_paths, rundir)
             continue
         exe = command_path(command)
-        intent_args = normalize_intent_args(command, intent["args"])
+        intent_args = filter_global_defaults(intent, intent["args"], exe)
+        intent_args = normalize_intent_args(command, intent_args)
         if selected_setup_file and command in {"gdp-stats", "gdp-plot", "gdp-flag"} and "setup-file" not in intent_args and "setup_file" not in intent_args:
             intent_args["setup-file"] = selected_setup_file
         if relative_paths and command in RELATIVE_PATH_COMMANDS and "relative-path" not in intent_args and "relative_path" not in intent_args:
