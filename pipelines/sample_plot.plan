@@ -1,0 +1,131 @@
+# GDP plan for May07 gain and bandpass calibration tables.
+#
+# Run preview:
+#   script/gdp-plan-run pipelines/sample_plot.plan --dry-run
+#
+# All intents are currently disabled. Change only the required use:false lines
+# to use:true after checking the options.
+
+---
+mode: gain
+scan: 19
+---
+
+---------
+use: true
+---------
+intent: gdp-stats
+  use: false
+  smode: all, self-corr
+end
+
+intent: gdp-stats
+  use: false
+  smode: cross-corr
+  parallel: true
+end
+
+intent: gdp-plot
+ use: false
+ pmode: colormap, stats, ks
+ use-flags: true
+ antenna: "[0-29"]
+end
+
+------
+use: false
+------
+intent: gdp-plot
+ pmode: antenna
+ antenna: 5
+ use-flags: true
+end
+
+intent: gdp-plot
+ pmode: self-corr-colormap
+ use-flags: true
+ antenna: "[0-29"]
+ range: 20
+ limit: "[5:]"
+ scale: lin
+end
+
+-----
+use: false
+-----
+intent: gdp-plot
+ pmode: self-corr-antenna
+ antenna: 5
+ use-flags: true
+ range: 20
+ limit: "[5:]"
+ scale: log
+end
+
+intent: gdp-plot
+ pmode: cross-corr-antenna
+ ant-pair: 4,9
+ stokes-pair: 01
+ cmplx-pair: im
+ use-flags: true
+ limit: "[5:]"
+ scale: log
+end
+
+
+---
+mode: bandpass
+scan: 18
+---
+
+---------
+use: true
+---------
+intent: gdp-stats
+  smode: all, self-corr
+end
+
+intent: gdp-stats
+  smode: cross-corr
+  parallel: true
+end
+
+intent: gdp-plot
+ pmode: colormap, stats, ks
+ use-flags: true
+ antenna: "[0-29"]
+end
+
+intent: gdp-plot
+ pmode: antenna 5
+ use-flags: true
+end
+
+intent: gdp-plot
+ pmode: self-corr-colormap
+ use-flags: true
+ antenna: "[0-29"]
+ range: 20
+ limit: "[5:]"
+ scale: lin
+end
+
+
+intent: gdp-plot
+ pmode: self-corr-antenna 5
+ use-flags: true
+ range: 20
+ limit: "[5:]"
+ scale: log
+end
+
+intent: gdp-plot
+ pmode: cross-corr-antenna
+ ant-pair: 9,13
+ stokes-pair: 01
+ cmplx-pair: im
+ use-flags: true
+ limit: "[5:]"
+ scale: log
+end
+

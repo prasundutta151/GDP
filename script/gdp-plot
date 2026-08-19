@@ -53,8 +53,6 @@ PRODUCTS = {
     "ks": ("ks", "ks_npz_dir", "ks"),
     "self_corr_colormap": ("self_corr", "self_corr_npz_dir", "self-corr"),
     "self_corr_antenna": ("self_corr", "self_corr_npz_dir", "self-corr"),
-    "self_corr_all_ante": ("self_corr", "self_corr_npz_dir", "self-corr"),
-    "cross_corr_colormap": ("cross_corr", "cross_corr_npz_dir", "cross-corr"),
     "cross_corr_antenna": ("cross_corr", "cross_corr_npz_dir", "cross-corr"),
     "cross_corr_grid": ("cross_corr", "cross_corr_npz_dir", "cross-corr"),
 }
@@ -80,12 +78,6 @@ PMODE_ALIASES = {
     "self_corr_colormap": "self_corr_colormap",
     "self-corr-antenna": "self_corr_antenna",
     "self_corr_antenna": "self_corr_antenna",
-    "self-corr-all-ante": "self_corr_all_ante",
-    "self_corr_all_ante": "self_corr_all_ante",
-    "self-corr-all-antenna": "self_corr_all_ante",
-    "self_corr_all_antenna": "self_corr_all_ante",
-    "cross-corr-colormap": "cross_corr_colormap",
-    "cross_corr_colormap": "cross_corr_colormap",
     "cross-corr-ante": "cross_corr_antenna",
     "cross_corr_ante": "cross_corr_antenna",
     "cross-corr-antenna": "cross_corr_antenna",
@@ -754,8 +746,6 @@ def ensure_npz(product: str, mode: str, args: argparse.Namespace, scans: Optiona
         "ks": "ks",
         "self_corr_colormap": "self-corr",
         "self_corr_antenna": "self-corr",
-        "self_corr_all_ante": "self-corr",
-        "cross_corr_colormap": "cross-corr",
         "cross_corr_antenna": "cross-corr",
     }[product]
     output_flag = {
@@ -767,8 +757,6 @@ def ensure_npz(product: str, mode: str, args: argparse.Namespace, scans: Optiona
         "ks": "--output-ks-npz",
         "self_corr_colormap": "--output-self-corr-npz",
         "self_corr_antenna": "--output-self-corr-npz",
-        "self_corr_all_ante": "--output-self-corr-npz",
-        "cross_corr_colormap": "--output-cross-corr-npz",
         "cross_corr_antenna": "--output-cross-corr-npz",
     }[product]
 
@@ -911,8 +899,6 @@ def ensure_npzs(product: str, mode: str, args: argparse.Namespace, scans: Option
         "ks": "ks",
         "self_corr_colormap": "self-corr",
         "self_corr_antenna": "self-corr",
-        "self_corr_all_ante": "self-corr",
-        "cross_corr_colormap": "cross-corr",
         "cross_corr_antenna": "cross-corr",
     }[product]
     cmd = [str(script_dir() / "gdp-stats"), "--mode", mode, "--smode", smode]
@@ -3365,47 +3351,6 @@ def plot_self_corr_all_antenna(
     emit(f"Wrote plot: {out}")
 
 
-def plot_cross_corr_colormap(npz_path: Path, out: Path, antennas: Optional[List[int]]) -> None:
-    z = load_npz(npz_path)
-    required = {"ant1", "ant2", "stokes", "components", "tcorr"}
-    missing = required - set(z)
-    if missing:
-        raise ValueError(f"{npz_path} missing arrays: {sorted(missing)}")
-    ant_values = np.unique(np.concatenate([z["ant1"].astype(int), z["ant2"].astype(int)]))
-    ant_all = filter_antennas(ant_values, antennas)
-    combos = sorted({(str(s), str(c)) for s, c in zip(z["stokes"].astype(str), z["components"].astype(str))})
-    if ant_all.size == 0 or not combos:
-        raise ValueError("No cross-correlation values available.")
-    ncols = 2
-    nrows = int(np.ceil(len(combos) / ncols))
-    fig, axes = plt.subplots(nrows, ncols, figsize=(5.4 * ncols, max(4.4, 4.2 * nrows)), squeeze=False)
-    ant_index = {int(a): i for i, a in enumerate(ant_all)}
-    for pi, (stokes, comp) in enumerate(combos):
-        ax = axes.ravel()[pi]
-        mat = np.full((len(ant_all), len(ant_all)), np.nan, dtype=float)
-        selector = (z["stokes"].astype(str) == stokes) & (z["components"].astype(str) == comp)
-        for a1, a2, val in zip(z["ant1"][selector].astype(int), z["ant2"][selector].astype(int), z["tcorr"][selector].astype(float)):
-            if a1 not in ant_index or a2 not in ant_index or not np.isfinite(val):
-                continue
-            i, j = ant_index[a1], ant_index[a2]
-            mat[i, j] = val
-            mat[j, i] = val
-        im = ax.imshow(mat, origin="lower", interpolation="nearest", cmap="viridis")
-        ax.set_xticks(np.arange(len(ant_all)))
-        ax.set_xticklabels([str(a) for a in ant_all], rotation=90)
-        ax.set_yticks(np.arange(len(ant_all)))
-        ax.set_yticklabels([str(a) for a in ant_all])
-        try:
-            stokes_text = polarization_pair_label(z, int(stokes[0]), int(stokes[1])) if len(stokes) == 2 else stokes_display_label(z, int(stokes))
-        except (TypeError, ValueError):
-            stokes_text = str(stokes)
-        apply_style(ax, f"cross tcorr | {stokes_text}, {comp}", "Antenna", "Antenna")
-        fig.colorbar(im, ax=ax, label="tcorr")
-    for ax in axes.ravel()[len(combos):]:
-        ax.axis("off")
-    save_figure(fig, out)
-
-
 def cross_corr_value_box_text(z: Dict[str, np.ndarray], mode: str) -> str:
     header = npz_header(z)
     corr_lag = float(np.asarray(z["corr_lag"], dtype=float)[0]) if "corr_lag" in z else np.nan
@@ -3771,8 +3716,6 @@ def selected_tasks(args: argparse.Namespace) -> List[str]:
         (args.ks, "ks"),
         (args.self_corr_colormap, "self_corr_colormap"),
         (args.self_corr_antenna, "self_corr_antenna"),
-        (args.self_corr_all_ante, "self_corr_all_ante"),
-        (args.cross_corr_colormap, "cross_corr_colormap"),
         (args.cross_corr_antenna, "cross_corr_antenna"),
         (args.cross_corr_grid, "cross_corr_grid"),
     ]:
@@ -3799,8 +3742,8 @@ def parse_args() -> argparse.Namespace:
         help=(
             "Plot mode(s), comma or space separated: all, colormap, hist, "
             "reim, antenna, stats, ks, self-corr-colormap, "
-            "self-corr-antenna, self-corr-all-ante, cross-corr-colormap, "
-            "cross-corr-antenna, cross-corr-grid. all expands to "
+            "self-corr-antenna, cross-corr-antenna, "
+            "cross-corr-grid. all expands to "
             "colormap, hist, stats, and ks. Legacy names gain-colormap and "
             "gain-hist are accepted as aliases."
         ),
@@ -3826,7 +3769,6 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--yscale", choices=["log", "lin"], default="log", help="Y-axis scale for -pmode self-corr-colormap in gain and bandpass mode. Default: log.")
     p.add_argument("--scale", choices=["log", "lin"], default="log", help="X-axis scale for -pmode cross-corr-antenna. Default: log.")
     p.add_argument("--limit", default=None, help="Lag range '[lower:upper]' for self-corr and cross-corr antenna plots. Gain mode uses sample differences; bandpass mode uses channel differences. Quote brackets in the shell.")
-    p.add_argument("--gpr-kernel", choices=["rbf", "matern32", "exp"], default="rbf", help="Kernel for self-corr-all-ante GPR fit. Default: rbf.")
     p.add_argument("--ant-pair", nargs="+", default=None, help="Antenna pair for -pmode cross-corr-antenna. Examples: --ant-pair 0,1 or --ant-pair 0 1.")
     p.add_argument("--stokes-pair", nargs="+", default=None, help="Stokes pair for -pmode cross-corr-antenna. Examples: --stokes-pair 01 or --stokes-pair 0 1.")
     p.add_argument("--cmplx-pair", nargs="+", default=None, help="Component pair for -pmode cross-corr-antenna. Examples: --cmplx-pair re, --cmplx-pair im, --cmplx-pair reim.")
@@ -3835,8 +3777,6 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--ks", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--self-corr-colormap", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--self-corr-antenna", action="store_true", help=argparse.SUPPRESS)
-    p.add_argument("--self-corr-all-ante", action="store_true", help=argparse.SUPPRESS)
-    p.add_argument("--cross-corr-colormap", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--cross-corr-antenna", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--cross-corr-grid", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--all", action="store_true", help=argparse.SUPPRESS)
@@ -3912,7 +3852,7 @@ def main() -> None:
                 plot_label_base = f"{label}{flag_version_suffix(plot_flagver)}"
                 plot_label = label_with_plot_channels(
                     plot_label_base,
-                    pchans if task in {"gain_colormap", "gain_hist", "reim", "antenna", "stats", "self_corr_antenna", "self_corr_all_ante"} else None,
+                    pchans if task in {"gain_colormap", "gain_hist", "reim", "antenna", "stats", "self_corr_antenna"} else None,
                 )
                 if task == "cross_corr_antenna":
                     ant_pair = parse_int_pair_option(args.ant_pair, "--ant-pair")
@@ -3938,10 +3878,6 @@ def main() -> None:
                     plot_self_corr_colormap(npz, out, ants, args.s2_thr, args.yscale, self_corr_limit)
                 elif task == "self_corr_antenna":
                     plot_self_corr_antenna_products(npz, out, ants, args.s2_thr, pchans, self_corr_limit)
-                elif task == "self_corr_all_ante":
-                    plot_self_corr_all_antenna(npz, out, ants, args.s2_thr, args.gpr_kernel)
-                elif task == "cross_corr_colormap":
-                    plot_cross_corr_colormap(npz, out, ants)
                 elif task == "cross_corr_antenna":
                     plot_cross_corr_antenna(npz, out, args.s2_thr, self_corr_limit, args.scale)
                 emit(f"DONE  plot {task} elapsed_sec={time.perf_counter() - t0:.3f}")

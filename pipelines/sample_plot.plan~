@@ -1,0 +1,106 @@
+# GDP plan for May07 gain and bandpass calibration tables.
+#
+# Run preview:
+#   script/gdp-plan-run pipelines/example.plan --dry-run
+#
+# All intents are currently disabled. Change only the required use:false lines
+# to use:true after checking the options.
+
+---
+mode: gain
+scan: 19
+range: 15.
+---
+
+---------
+use: false
+---------
+intent: gdp-flag
+  iter: 3
+  fmode: ante-mean-thrsld 1.
+  out-fver: 2
+end
+
+intent: gdp-plot
+ pmode: colormap
+ use-flags: true
+ flagver: 2
+ antenna: "[0-29"]
+end
+
+intent: gdp-flag
+ iter: 2
+ fmode: all-std-thrsld 1.
+ out-fver: 3
+end
+
+intent: gdp-plot
+ pmode: colormap
+ use-flags: true
+ flagver: 3
+ antenna: "[0-29"]
+end
+
+intent: gdp-flag
+ iter: 2
+ fmode: ante-std-thrsld 1.
+ out-fver: 4
+end
+
+intent: gdp-plot
+ pmode: colormap
+ use-flags: true
+ flagver: 4
+ antenna: "[0-29"]
+end
+
+intent: gdp-flag
+ fmode: ante-thrsld 
+ out-fver: 5
+end
+
+intent: gdp-plot
+ pmode: colormap
+ use-flags: true
+ flagver: 5
+ antenna: "[0-29"]
+end
+
+intent: gdp-flag
+ fmode: ks-thrsld  1.
+ out-fver: 6
+end
+
+intent: gdp-plot
+ pmode: colormap
+ use-flags: true
+ flagver: 6
+ antenna: "[0-29"]
+end
+
+# Run these once you are sure that the flags are good
+----------
+use: false
+----------
+intent: gdp-stats
+  smode: stats,ks,self-corr
+  use-flags: true
+end
+
+intent: gdp-plot
+ pmode: stats,ks,self-corr-colormap
+ use-flags: true
+ antenna: "[0-29"]
+ adjust-mean: true
+end
+
+
+# Now check and run cross corr
+# First try a --dry-run and --estimate --parallel [NCPU]
+---------
+use:true
+---------
+intent: gdp-stats
+ smode: cross-corr
+ use-flags: true
+end

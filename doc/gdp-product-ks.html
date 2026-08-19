@@ -107,9 +107,9 @@ print("finite samples shape:", sample_count.shape)</code></pre>
         <tr><td>Bandpass KS grid</td><td><a href="sample_plots/gdp-plot-ks-bandpass-scan18_fV5.png">gdp-plot-ks-bandpass-scan18_fV5.png</a></td><td><code>script/gdp-plot --mode bandpass --scan 18 -pmode ks --antenna "[0-29]" --use-flags --flagver 5</code></td><td>Per-antenna fitted-normal KS D-statistic plot for bandpass scan 18.</td></tr>
         <tr><td>Bandpass self-corr colormap</td><td><a href="sample_plots/gdp-plot-self-corr-colormap-bandpass-scan18_fV5.png">gdp-plot-self-corr-colormap-bandpass-scan18_fV5.png</a></td><td><code>script/gdp-plot --mode bandpass --scan 18 -pmode self-corr-colormap --antenna "[0-29]" --use-flags --flagver 5</code></td><td>Bandpass structure-function colormap for scan 18 with fixed S2 range and saved nu_corr markers.</td></tr>
         <tr><td>Bandpass self-corr antenna</td><td><a href="sample_plots/gdp-plot-self-corr-antenna-bandpass-scan18_fV5-pchan_800_3001-ant0.png">gdp-plot-self-corr-antenna-bandpass-scan18_fV5-pchan_800_3001-ant0.png</a></td><td><code>script/gdp-plot --mode bandpass --scan 18 -pmode self-corr-antenna --antenna "[0-29]" --use-flags --flagver 5 -pchans "[800-3001]"</code></td><td>One bandpass structure-function curve plot is written per selected antenna; antenna 0 is linked as the representative sample with nu_corr annotations.</td></tr>
-        <tr><td>Bandpass self-corr all antenna</td><td><a href="sample_plots/gdp-plot-self-corr-all-ante-bandpass-scan18_fV5-pchan_800_3001.png">gdp-plot-self-corr-all-ante-bandpass-scan18_fV5-pchan_800_3001.png</a></td><td><code>script/gdp-plot --mode bandpass --scan 18 -pmode self-corr-all-ante --use-flags --flagver 5 -pchans "[800-3001]" --gpr-kernel rbf</code></td><td>All usable antenna self-correlation curves, median S2 with black error bars, blue GPR fit, and nu_corr in MHz and channel units.</td></tr>
       </table>
     </section>
   </main>
+  <script src="plot-viewer.js?v=2"></script>
 </body>
 </html>

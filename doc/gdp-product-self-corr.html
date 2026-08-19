@@ -62,7 +62,7 @@
         <tr><td><code>corr_*</code></td><td>One row per scan/antenna/Stokes/component with the fitted threshold crossing. Arrays include <code>corr_scan</code>, <code>corr_antenna</code>, <code>corr_stokes</code>, <code>corr_component</code>, <code>corr_lag</code>, <code>corr_lag_err</code>, <code>corr_tcorr_sec</code>/<code>corr_tcorr_sec_err</code> for gain mode, and <code>corr_dnucorr_hz</code>/<code>corr_dnucorr_hz_err</code> plus <code>corr_dnucorr_mhz</code>/<code>corr_dnucorr_mhz_err</code> for bandpass mode.</td></tr>
       </table>
       <p>The normalized S2 curve is smoothed in log-lag space before the threshold crossing is estimated. Jackknife errors are saved in <code>err</code>, and crossing uncertainties are estimated by perturbing finite S2 bins by their jackknife errors. Plot labels enforce a display minimum uncertainty of two channel widths for <code>nu_corr</code> and two integration times for <code>tau_corr</code>; the saved arrays keep the fitted estimates.</p>
-      <p>For bandpass plots, <code>corr_lag</code> is the channel separation at the threshold crossing. <code>gdp-plot -pmode self-corr-all-ante</code> also displays that crossing in channel units with both the value and uncertainty rounded upward to integer channel counts.</p>
+      <p>For bandpass plots, <code>corr_lag</code> is the channel separation at the threshold crossing.</p>
       <p>If all samples for an antenna/stokes/component are flagged or non-finite, GDP keeps the expected lag-bin rows with <code>s2</code> and <code>err</code> set to NaN and <code>count</code> set to zero. Plotting code renders those bins as blank or white cells.</p>
     </section>
 
@@ -110,9 +110,9 @@ print("antenna 0 real S2:", s2[mask])</code></pre>
         <tr><td>Bandpass KS grid</td><td><a href="sample_plots/gdp-plot-ks-bandpass-scan18_fV5.png">gdp-plot-ks-bandpass-scan18_fV5.png</a></td><td><code>script/gdp-plot --mode bandpass --scan 18 -pmode ks --antenna "[0-29]" --use-flags --flagver 5</code></td><td>Per-antenna fitted-normal KS D-statistic plot for bandpass scan 18.</td></tr>
         <tr><td>Bandpass self-corr colormap</td><td><a href="sample_plots/gdp-plot-self-corr-colormap-bandpass-scan18_fV5.png">gdp-plot-self-corr-colormap-bandpass-scan18_fV5.png</a></td><td><code>script/gdp-plot --mode bandpass --scan 18 -pmode self-corr-colormap --antenna "[0-29]" --use-flags --flagver 5</code></td><td>Bandpass structure-function colormap for scan 18 with fixed S2 range and saved nu_corr markers.</td></tr>
         <tr><td>Bandpass self-corr antenna</td><td><a href="sample_plots/gdp-plot-self-corr-antenna-bandpass-scan18_fV5-pchan_800_3001-ant0.png">gdp-plot-self-corr-antenna-bandpass-scan18_fV5-pchan_800_3001-ant0.png</a></td><td><code>script/gdp-plot --mode bandpass --scan 18 -pmode self-corr-antenna --antenna "[0-29]" --use-flags --flagver 5 -pchans "[800-3001]"</code></td><td>One bandpass structure-function curve plot is written per selected antenna; antenna 0 is linked as the representative sample with nu_corr annotations.</td></tr>
-        <tr><td>Bandpass self-corr all antenna</td><td><a href="sample_plots/gdp-plot-self-corr-all-ante-bandpass-scan18_fV5-pchan_800_3001.png">gdp-plot-self-corr-all-ante-bandpass-scan18_fV5-pchan_800_3001.png</a></td><td><code>script/gdp-plot --mode bandpass --scan 18 -pmode self-corr-all-ante --use-flags --flagver 5 -pchans "[800-3001]" --gpr-kernel rbf</code></td><td>All usable antenna self-correlation curves, median S2 with black error bars, blue GPR fit, and nu_corr in MHz and channel units.</td></tr>
       </table>
     </section>
   </main>
+  <script src="plot-viewer.js?v=2"></script>
 </body>
 </html>

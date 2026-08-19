@@ -88,7 +88,7 @@ intent: gdp-stats
 end
 
 intent: gdp-plot
- pmode: stats,ks,self-corr-colormap,self-corr-all-antenna
+ pmode: stats,ks,self-corr-colormap
  use-flags: true
  antenna: "[0-29"]
  adjust-mean: true
