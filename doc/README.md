@@ -1,6 +1,6 @@
 # GDP Documentation
 
-GDP version: `0.1.5`
+GDP version: `0.1.16`
 
 GDP (Gain Diagnostic Product) is being developed as a command-line toolkit for
 gain and bandpass diagnostics, statistics products, plotting, diagnosis, and
