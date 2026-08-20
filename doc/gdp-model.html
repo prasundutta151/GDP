@@ -5,11 +5,12 @@
   <header><h1>gdp-model</h1><p>Fit gain and bandpass models into the <code>model</code> column of a saved GDP gains NPZ.</p></header>
   <main>
     <section><h2>Workflow</h2><pre><code>script/gdp-stats --mode gain --scan 17 --smode gains
-script/gdp-model --mode gain --scan 17 --mmode gdp matern32
+script/gdp-model --mode gain --scan 17 --mmode gpr matern32
 script/gdp-stats --mode gain --scan 17 --smode stats --datacolumn model
 script/gdp-plot --mode gain --scan 17 --pmode colormap --datacolumn model</code></pre>
       <p>The command preserves <code>casa_real</code>/<code>casa_imag</code> and adds <code>model_real</code>/<code>model_imag</code>. Existing <code>real</code>/<code>imag</code> arrays remain CASA-compatible aliases.</p></section>
-    <section><h2>Model Modes</h2><p><code>--mmode polynomial [1-16]</code>, <code>harmonic [1-16]</code>, <code>poly-harmonic [1-16]</code>, <code>gauss-hermite [3-16]</code>, or default <code>gdp [rbf|matern32|exp]</code>. GDP mode combines short and long local kernel smooths; default kernel is <code>matern32</code>.</p>
+    <section><h2>Model Modes</h2><p><code>--mmode polynomial [1-16]</code>, <code>harmonic [1-16]</code>, <code>poly-harmonic [1-16]</code>, <code>gauss-hermite [3-16]</code>, or default <code>gpr [rbf|matern32|exp]</code>. GPR mode combines short and long local kernel smooths; default kernel is <code>matern32</code>.</p>
+      <p>When <code>gdp-plot --datacolumn model</code> is used, the model metadata chooses the filename suffix: <code>_poly</code>, <code>_harm</code>, <code>_harmpoly</code>, <code>_gsherm</code>, <code>_gpr_rbf</code>, <code>_gpr_mat</code>, or <code>_gpr_exp</code>. CASA-column plots use <code>_casa</code>.</p>
       <p><code>--scan</code>, <code>--antenna</code>, <code>--stokes</code>, and <code>--complex</code> select series. <code>--use-flags --flagversion VERSION</code> excludes sidecar-flagged samples. <code>--output-gains-npz</code> writes a copy; <code>--dry-run</code>, <code>--estimate</code>, <code>--parallel</code>, and <code>--output-csv</code> are supported.</p></section>
   </main>
   <script src="common-content.js?v=1"></script>

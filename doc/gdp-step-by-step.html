@@ -119,13 +119,14 @@ DONE  gains scan17 elapsed_sec=...</code></pre>
     <section>
       <h2>4. Model The Gains Or Bandpass (Optional)</h2>
       <p><code>gdp-model</code> reads the saved gains NPZ and writes fitted samples to its <code>model</code> data column. The original <code>casa</code> samples remain unchanged. Model only the series that need it, then choose <code>--datacolumn model</code> in downstream <code>gdp-stats</code> or <code>gdp-plot</code> calls.</p>
-      <pre><code>script/gdp-model --mode gain --scan 17 --mmode gdp matern32
+      <pre><code>script/gdp-model --mode gain --scan 17 --mmode gpr matern32
 script/gdp-model --mode bandpass --scan 18 --mmode polynomial 3
 script/gdp-model --mode gain --scan 17 --antenna 0 1 --stokes 0 --complex re --mmode harmonic 4
 script/gdp-model --mode gain --scan 17 --use-flags --flagver 2 --mmode gauss-hermite 5</code></pre>
-      <p>Available modes are <code>polynomial</code>, <code>harmonic</code>, <code>poly-harmonic</code>, <code>gauss-hermite</code>, and the default local-kernel <code>gdp</code> mode. Use <code>--output-gains-npz PATH</code> to write a separate modelled gains product instead of updating the standard saved gains NPZ. Use <code>--dry-run</code> or <code>--estimate</code> before a large selection.</p>
+      <p>Available modes are <code>polynomial</code>, <code>harmonic</code>, <code>poly-harmonic</code>, <code>gauss-hermite</code>, and the default local-kernel <code>gpr</code> mode. Use <code>--output-gains-npz PATH</code> to write a separate modelled gains product instead of updating the standard saved gains NPZ. Use <code>--dry-run</code> or <code>--estimate</code> before a large selection.</p>
       <pre><code>script/gdp-stats --mode gain --scan 17 --smode stats --datacolumn model
 script/gdp-plot --mode gain --scan 17 -pmode colormap --datacolumn model</code></pre>
+      <p>Plots always include the selected data source in their filenames. For example, the last command writes <code>gdp-plot-colormap-gain-scan17_gpr_mat.png</code>; an equivalent CASA-column plot ends in <code>_casa.png</code>. Model suffixes are <code>_poly</code>, <code>_harm</code>, <code>_harmpoly</code>, <code>_gsherm</code>, <code>_gpr_rbf</code>, <code>_gpr_mat</code>, and <code>_gpr_exp</code>.</p>
       <p>See <a href="gdp-model.html">gdp-model</a> and <a href="gdp-product-gains.html">Gains NPZ</a> for model-column details.</p>
     </section>
 

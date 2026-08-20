@@ -700,14 +700,14 @@ def default_plot_dir(fmt: str) -> Path:
     return runtime_dir() / "plots" / fmt
 
 
-def output_path(plot_dir: Path, task: str, mode: str, scan_label: str, fmt: str) -> Path:
+def output_path(plot_dir: Path, task: str, mode: str, scan_label: str, fmt: str, data_tag: str) -> Path:
     task_name = PLOT_TASK_NAMES.get(task, task.replace("_", "-"))
-    return plot_dir / f"gdp-plot-{task_name}-{mode}-{scan_label}.{fmt}"
+    return plot_dir / f"gdp-plot-{task_name}-{mode}-{scan_label}_{data_tag}.{fmt}"
 
 
-def stats_output_path(plot_dir: Path, mode: str, scan_label: str, fmt: str, adjust_mean: bool) -> Path:
+def stats_output_path(plot_dir: Path, mode: str, scan_label: str, fmt: str, adjust_mean: bool, data_tag: str) -> Path:
     suffix = "-adjust-mean" if adjust_mean else ""
-    return plot_dir / f"gdp-plot-stats-{mode}-{scan_label}{suffix}.{fmt}"
+    return plot_dir / f"gdp-plot-stats-{mode}-{scan_label}_{data_tag}{suffix}.{fmt}"
 
 
 def product_message_name(product: str) -> str:
@@ -717,6 +717,39 @@ def product_message_name(product: str) -> str:
 
 def gains_product_path_for_label(mode: str, scan_label: str, args: argparse.Namespace) -> Path:
     return default_product_path("gain_colormap", mode, scan_label)
+
+
+def model_filename_tag(header: Dict[str, Any]) -> str:
+    """Return a stable plot suffix from the model metadata saved by gdp-model."""
+    model = header.get("model", {})
+    if not isinstance(model, dict):
+        raise SystemExit("ERROR: model metadata is absent from the gains NPZ; rerun gdp-model before plotting model data.")
+    mode = str(model.get("mode", "")).strip().lower().replace("_", "-")
+    tags = {
+        "polynomial": "poly",
+        "harmonic": "harm",
+        "poly-harmonic": "harmpoly",
+        "gauss-hermite": "gsherm",
+    }
+    if mode in tags:
+        return tags[mode]
+    if mode in {"gpr", "gdp"}:  # Accept metadata written before the gpr rename.
+        kernel = str(model.get("kernel", "matern32")).strip().lower()
+        kernel_tags = {"rbf": "gpr_rbf", "matern32": "gpr_mat", "exp": "gpr_exp"}
+        if kernel in kernel_tags:
+            return kernel_tags[kernel]
+    raise SystemExit("ERROR: unsupported model metadata in gains NPZ; expected polynomial, harmonic, poly-harmonic, gauss-hermite, or gpr.")
+
+
+def plot_data_tag(npz_path: Path, mode: str, scan_label: str, args: argparse.Namespace) -> str:
+    if args.datacolumn == "casa":
+        return "casa"
+    header = npz_header(load_npz(npz_path))
+    if not isinstance(header.get("model"), dict):
+        gains_path = gains_product_path_for_label(mode, scan_label, args)
+        if gains_path.exists():
+            header = npz_header(load_npz(gains_path))
+    return model_filename_tag(header)
 
 
 def product_file_flag_version(product: str, mode: str, scan_label: str, args: argparse.Namespace) -> Optional[int]:
@@ -3894,7 +3927,8 @@ def main() -> None:
                 label = f"scan{int(scans[0])}"
                 plot_flagver = product_file_flag_version(task, mode, label, args)
                 plot_label = f"{label}{flag_version_suffix(plot_flagver)}"
-                out = output_path(plot_dir, task, mode, plot_label, args.format)
+                data_tag = plot_data_tag(gains_product_path_for_label(mode, label, args), mode, label, args)
+                out = output_path(plot_dir, task, mode, plot_label, args.format, data_tag)
                 emit(f"START plot {task} mode={mode} scan={label}")
                 records = cross_corr_grid_records(mode, label, plot_flagver)
                 if records:
@@ -3921,7 +3955,8 @@ def main() -> None:
                     stokes_pair = parse_int_pair_option(args.stokes_pair, "--stokes-pair")
                     component_pair = parse_component_pair_option(args.cmplx_pair, "--cmplx-pair")
                     plot_label = f"{plot_label}-{cross_corr_plot_tag(ant_pair, stokes_pair, component_pair)}"
-                out = stats_output_path(plot_dir, mode, plot_label, args.format, args.adjust_mean) if task == "stats" else output_path(plot_dir, task, mode, plot_label, args.format)
+                data_tag = plot_data_tag(npz, mode, label, args)
+                out = stats_output_path(plot_dir, mode, plot_label, args.format, args.adjust_mean, data_tag) if task == "stats" else output_path(plot_dir, task, mode, plot_label, args.format, data_tag)
                 report_numeric_polarization_labels(npz_header(load_npz(npz)), mode)
                 emit(f"START plot {task} mode={mode} scan={label}")
                 if task == "gain_colormap":

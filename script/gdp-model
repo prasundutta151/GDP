@@ -26,11 +26,11 @@ GSTATS = SourceFileLoader("gdp_stats_model", str(project_root() / "script" / "gd
 
 
 def parse_mmode(values: Optional[Sequence[str]]) -> Tuple[str, int, str]:
-    tokens = [str(value).strip().lower() for value in values or ["gdp"] if str(value).strip()]
-    name = tokens[0].replace("_", "-") if tokens else "gdp"
+    tokens = [str(value).strip().lower() for value in values or ["gpr"] if str(value).strip()]
+    name = tokens[0].replace("_", "-") if tokens else "gpr"
     aliases = {"poly": "polynomial", "polyharmonic": "poly-harmonic", "gausshermite": "gauss-hermite"}
     name = aliases.get(name, name)
-    valid = {"polynomial", "harmonic", "poly-harmonic", "gauss-hermite", "gdp"}
+    valid = {"polynomial", "harmonic", "poly-harmonic", "gauss-hermite", "gpr"}
     if name not in valid:
         raise SystemExit(f"ERROR: unknown --mmode '{name}'. Valid modes: {', '.join(sorted(valid))}.")
     order = 3 if name == "gauss-hermite" else 1
@@ -44,7 +44,7 @@ def parse_mmode(values: Optional[Sequence[str]]) -> Tuple[str, int, str]:
         minimum = 3 if name == "gauss-hermite" else 1
         raise SystemExit(f"ERROR: --mmode {name} order must be in [{minimum}, 16].")
     if kernel not in {"rbf", "matern32", "exp"}:
-        raise SystemExit("ERROR: GDP kernel must be rbf, matern32, or exp.")
+        raise SystemExit("ERROR: GPR kernel must be rbf, matern32, or exp.")
     return name, order, kernel
 
 
@@ -91,7 +91,7 @@ def fit_values(axis: np.ndarray, values: np.ndarray, mode: str, order: int, kern
     finite = np.isfinite(x) & np.isfinite(y)
     if np.count_nonzero(finite) < 2:
         return np.full(y.shape, np.nan, dtype=float)
-    if mode == "gdp":
+    if mode == "gpr":
         ordered = np.argsort(x)
         prediction = np.full(y.shape, np.nan, dtype=float)
         prediction[ordered] = kernel_smooth(y[ordered], kernel)
@@ -146,7 +146,7 @@ def main() -> None:
     parser.add_argument("--antenna", "--antennas", nargs="+", default=None)
     parser.add_argument("--use-flags", action="store_true")
     parser.add_argument("--flagversion", "--flagver", default=None)
-    parser.add_argument("--mmode", nargs="+", default=["gdp"], help="polynomial/harmonic/poly-harmonic [ORDER], gauss-hermite [3-16], or gdp [rbf|matern32|exp].")
+    parser.add_argument("--mmode", nargs="+", default=["gpr"], help="polynomial/harmonic/poly-harmonic [ORDER], gauss-hermite [3-16], or gpr [rbf|matern32|exp].")
     parser.add_argument("--output-gains-npz", default=None)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--estimate", action="store_true")

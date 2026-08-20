@@ -102,7 +102,7 @@
     "gdp-model.html": [
       ["--mode, --mod", "Choose gain or bandpass input. Default: gain."],
       ["--scan, --antenna, --stokes, --complex", "Restrict the antenna, polarization, and real/imaginary series to model."],
-      ["--mmode", "Choose polynomial, harmonic, poly-harmonic, Gauss-Hermite, or GDP local-kernel fitting."],
+      ["--mmode", "Choose polynomial, harmonic, poly-harmonic, Gauss-Hermite, or GPR local-kernel fitting."],
       ["--use-flags, --flagversion", "Exclude samples from the selected/highest flag sidecar while fitting."],
       ["--output-gains-npz", "Write a modelled copy instead of updating the matching saved gains NPZ."],
       ["--dry-run, --estimate, --parallel, --output-csv", "Preview, estimate, parallelize, or export model samples."]
