@@ -1,0 +1,246 @@
+#!/usr/bin/env python3
+"""Fit gain or bandpass models into the model data column of a GDP gains NPZ."""
+
+from __future__ import annotations
+
+import argparse
+import csv
+import math
+import os
+import shutil
+import time
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
+from importlib.machinery import SourceFileLoader
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Sequence, Tuple
+
+import numpy as np
+
+
+def project_root() -> Path:
+    return Path(__file__).resolve().parents[1]
+
+
+GSTATS = SourceFileLoader("gdp_stats_model", str(project_root() / "script" / "gdp-stats")).load_module()
+
+
+def parse_mmode(values: Optional[Sequence[str]]) -> Tuple[str, int, str]:
+    tokens = [str(value).strip().lower() for value in values or ["gdp"] if str(value).strip()]
+    name = tokens[0].replace("_", "-") if tokens else "gdp"
+    aliases = {"poly": "polynomial", "polyharmonic": "poly-harmonic", "gausshermite": "gauss-hermite"}
+    name = aliases.get(name, name)
+    valid = {"polynomial", "harmonic", "poly-harmonic", "gauss-hermite", "gdp"}
+    if name not in valid:
+        raise SystemExit(f"ERROR: unknown --mmode '{name}'. Valid modes: {', '.join(sorted(valid))}.")
+    order = 3 if name == "gauss-hermite" else 1
+    kernel = "matern32"
+    for token in tokens[1:]:
+        if token.isdigit():
+            order = int(token)
+        else:
+            kernel = token
+    if not 1 <= order <= 16 or name == "gauss-hermite" and order < 3:
+        minimum = 3 if name == "gauss-hermite" else 1
+        raise SystemExit(f"ERROR: --mmode {name} order must be in [{minimum}, 16].")
+    if kernel not in {"rbf", "matern32", "exp"}:
+        raise SystemExit("ERROR: GDP kernel must be rbf, matern32, or exp.")
+    return name, order, kernel
+
+
+def normalized_axis(x: np.ndarray) -> np.ndarray:
+    values = np.asarray(x, dtype=float)
+    finite = values[np.isfinite(values)]
+    if finite.size < 2 or float(np.max(finite)) == float(np.min(finite)):
+        return np.zeros(values.shape, dtype=float)
+    return 2.0 * (values - float(np.min(finite))) / (float(np.max(finite)) - float(np.min(finite))) - 1.0
+
+
+def kernel_smooth(values: np.ndarray, kernel: str) -> np.ndarray:
+    y = np.asarray(values, dtype=float)
+    n = y.size
+    if n < 3:
+        return y.copy()
+    scales = [max(2, n // 64), max(4, n // 16)]
+    out = np.zeros(n, dtype=float)
+    weight_sum = np.zeros(n, dtype=float)
+    finite = np.isfinite(y).astype(float)
+    source = np.nan_to_num(y, nan=0.0)
+    for scale in scales:
+        radius = max(2, int(math.ceil(4 * scale)))
+        distance = np.arange(-radius, radius + 1, dtype=float) / float(scale)
+        if kernel == "rbf":
+            weights = np.exp(-0.5 * distance**2)
+        elif kernel == "exp":
+            weights = np.exp(-np.abs(distance))
+        else:
+            root3 = math.sqrt(3.0)
+            weights = (1.0 + root3 * np.abs(distance)) * np.exp(-root3 * np.abs(distance))
+        numerator = np.convolve(source, weights, mode="same")
+        denominator = np.convolve(finite, weights, mode="same")
+        smooth = np.divide(numerator, denominator, out=np.full(n, np.nan), where=denominator > 0)
+        ok = np.isfinite(smooth)
+        out[ok] += smooth[ok]
+        weight_sum[ok] += 1.0
+    return np.divide(out, weight_sum, out=np.full(n, np.nan), where=weight_sum > 0)
+
+
+def fit_values(axis: np.ndarray, values: np.ndarray, mode: str, order: int, kernel: str) -> np.ndarray:
+    x = normalized_axis(axis)
+    y = np.asarray(values, dtype=float)
+    finite = np.isfinite(x) & np.isfinite(y)
+    if np.count_nonzero(finite) < 2:
+        return np.full(y.shape, np.nan, dtype=float)
+    if mode == "gdp":
+        ordered = np.argsort(x)
+        prediction = np.full(y.shape, np.nan, dtype=float)
+        prediction[ordered] = kernel_smooth(y[ordered], kernel)
+        return prediction
+    x_fit, y_fit = x[finite], y[finite]
+    try:
+        if mode == "polynomial":
+            coefficients = np.polynomial.polynomial.polyfit(x_fit, y_fit, min(order, x_fit.size - 1))
+            return np.polynomial.polynomial.polyval(x, coefficients)
+        if mode == "gauss-hermite":
+            coefficients = np.polynomial.hermite.hermfit(x_fit, y_fit, min(order, x_fit.size - 1))
+            return np.polynomial.hermite.hermval(x, coefficients)
+        columns = [np.ones(x_fit.size)]
+        prediction_columns = [np.ones(x.size)]
+        for harmonic in range(1, order + 1):
+            columns.extend([np.sin(math.pi * harmonic * x_fit), np.cos(math.pi * harmonic * x_fit)])
+            prediction_columns.extend([np.sin(math.pi * harmonic * x), np.cos(math.pi * harmonic * x)])
+            if mode == "poly-harmonic":
+                for degree in range(1, order + 1):
+                    columns.extend([x_fit**degree * np.sin(math.pi * harmonic * x_fit), x_fit**degree * np.cos(math.pi * harmonic * x_fit)])
+                    prediction_columns.extend([x**degree * np.sin(math.pi * harmonic * x), x**degree * np.cos(math.pi * harmonic * x)])
+        coefficients, *_ = np.linalg.lstsq(np.column_stack(columns), y_fit, rcond=None)
+        return np.column_stack(prediction_columns) @ coefficients
+    except (np.linalg.LinAlgError, ValueError):
+        return np.full(y.shape, np.nan, dtype=float)
+
+
+def parse_selection(value: Optional[Sequence[str]], available: np.ndarray, option: str, components: bool = False) -> List[Any]:
+    if value is None or any(str(item).lower() == "all" for item in value):
+        return [str(item) if components else int(item) for item in available]
+    tokens = [part for value_item in value for part in str(value_item).replace(",", " ").split()]
+    if components:
+        aliases = {"re": "real", "real": "real", "im": "imag", "imag": "imag"}
+        chosen = [aliases[token.lower()] for token in tokens if token.lower() in aliases]
+    else:
+        chosen = [int(token) for token in tokens]
+    missing = sorted(set(chosen) - set(available.tolist()))
+    if missing:
+        raise SystemExit(f"ERROR: {option} selection not present in gains NPZ: {missing}")
+    return sorted(set(chosen))
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Fit GDP gain/bandpass models into the saved gains NPZ model column.")
+    parser.add_argument("--input-table", default=None, help="Input CASA gain/bandpass table path.")
+    parser.add_argument("--gain-table", default=None)
+    parser.add_argument("--bandpass-table", default=None)
+    parser.add_argument("--setup-file", default=None)
+    parser.add_argument("--relative-path", action="store_true")
+    parser.add_argument("--mode", "--mod", choices=["gain", "bandpass"], default="gain")
+    parser.add_argument("--scan", default=None, help="Scan list or all. Default: all.")
+    parser.add_argument("--antenna", "--antennas", nargs="+", default=None)
+    parser.add_argument("--use-flags", action="store_true")
+    parser.add_argument("--flagversion", "--flagver", default=None)
+    parser.add_argument("--mmode", nargs="+", default=["gdp"], help="polynomial/harmonic/poly-harmonic [ORDER], gauss-hermite [3-16], or gdp [rbf|matern32|exp].")
+    parser.add_argument("--output-gains-npz", default=None)
+    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--estimate", action="store_true")
+    parser.add_argument("--estimate-count", type=int, default=3)
+    parser.add_argument("--parallel", nargs="?", const=True, default=None, metavar="NCPU")
+    parser.add_argument("--stokes", nargs="+", default=None)
+    parser.add_argument("--complex", nargs="+", default=None)
+    parser.add_argument("--output-csv", default=None)
+    args = parser.parse_args()
+    GSTATS.activate_config(args.setup_file)
+    GSTATS.RELATIVE_PATHS = bool(args.relative_path)
+    mode = args.mode
+    input_table = GSTATS.resolve_input(args.input_table or (args.bandpass_table if mode == "bandpass" else args.gain_table), mode)
+    scans = None if args.scan is None or str(args.scan).lower() == "all" else GSTATS.parse_int_list(args.scan)
+    GSTATS.validate_requested_scans(input_table, mode, scans)
+    batches = GSTATS.scan_batches(input_table, scans, False)
+    if args.output_gains_npz and len(batches) != 1:
+        raise SystemExit("ERROR: --output-gains-npz requires exactly one scan. Pass --scan N.")
+    mmode, order, kernel = parse_mmode(args.mmode)
+    for batch_scans, label in batches:
+        default_path = GSTATS.build_default_output(input_table, label, mode, "gains", "npz")
+        source = Path(args.output_gains_npz).expanduser().resolve() if args.output_gains_npz else default_path
+        if args.output_gains_npz and not source.exists() and default_path.exists() and not args.dry_run and not args.estimate:
+            source.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(default_path, source)
+        if not source.exists():
+            raise SystemExit(f"ERROR: gains NPZ not found: {GSTATS.display_path(source)}. Run gdp-stats --smode gains first.")
+        gains = GSTATS.load_npz_dict(source)
+        gains = GSTATS.select_gains_datacolumn(gains, "casa")
+        ant_values = parse_selection(args.antenna, np.unique(gains["antenna"]), "--antenna")
+        stokes_values = parse_selection(args.stokes, np.unique(gains["stokes"]), "--stokes")
+        components = parse_selection(args.complex, np.asarray(["real", "imag"], dtype=object), "--complex", components=True)
+        jobs = [(ant, stokes, component) for ant in ant_values for stokes in stokes_values for component in components]
+        if args.estimate:
+            sample = jobs[: max(1, min(args.estimate_count, len(jobs)))]
+            start = time.perf_counter()
+            for ant, stokes, component in sample:
+                mask = (gains["antenna"] == ant) & (gains["stokes"] == stokes)
+                axis = gains["channel"] if mode == "bandpass" else gains["time"]
+                fit_values(axis[mask], gains[component][mask], mmode, order, kernel)
+            mean_sec = (time.perf_counter() - start) / len(sample)
+            workers = int(args.parallel) if isinstance(args.parallel, str) and args.parallel.isdigit() else (max(1, (os.cpu_count() or 1) - 2) if args.parallel else 1)
+            print(f"model estimate: samples={len(sample)}/{len(jobs)} mean_job_sec={mean_sec:.3f} workers={workers} estimated_cpu_sec={mean_sec * len(jobs):.3f} estimated_wall_sec={mean_sec * len(jobs) / workers:.3f}")
+            continue
+        if args.dry_run:
+            print(f"DRY RUN gdp-model mode={mode} scan={label} mmode={mmode} order={order} jobs={len(jobs)} output={source}")
+            continue
+        model_real = np.full(np.asarray(gains["real"]).shape, np.nan, dtype=float)
+        model_imag = np.full(np.asarray(gains["imag"]).shape, np.nan, dtype=float)
+        axis_all = np.asarray(gains["channel"] if mode == "bandpass" else gains["time"], dtype=float)
+        flags = np.asarray(gains.get("flagged", np.zeros(model_real.shape, dtype=bool)), dtype=bool)
+        if args.use_flags:
+            version, flag_path = GSTATS.resolve_flag_file(source, args.flagversion)
+            lookup, _ = GSTATS.load_flag_lookup(flag_path)
+            flags = np.asarray(
+                [
+                    bool(lookup.get((int(row), int(pol), int(chan)), False))
+                    for row, pol, chan in zip(gains["row"], gains["stokes"], gains["channel"])
+                ],
+                dtype=bool,
+            )
+        def run_job(job: Tuple[int, int, str]) -> Tuple[np.ndarray, str, np.ndarray]:
+            ant, stokes, component = job
+            mask = (np.asarray(gains["antenna"]) == ant) & (np.asarray(gains["stokes"]) == stokes)
+            values = np.asarray(gains[component], dtype=float)[mask].copy()
+            if args.use_flags:
+                values[np.asarray(flags)[mask]] = np.nan
+            return np.where(mask)[0], component, fit_values(axis_all[mask], values, mmode, order, kernel)
+        workers = int(args.parallel) if isinstance(args.parallel, str) and args.parallel.isdigit() else (max(1, (os.cpu_count() or 1) - 2) if args.parallel else 1)
+        executor = ThreadPoolExecutor(max_workers=workers) if workers > 1 else None
+        results = executor.map(run_job, jobs) if executor else map(run_job, jobs)
+        try:
+            for indices, component, prediction in results:
+                (model_real if component == "real" else model_imag)[indices] = prediction
+        finally:
+            if executor:
+                executor.shutdown()
+        payload = GSTATS.load_npz_dict(source)
+        payload["model_real"] = model_real
+        payload["model_imag"] = model_imag
+        header = dict(payload["header"])
+        header["gdp_data_columns"] = sorted(set(header.get("gdp_data_columns", ["casa"])) | {"model"})
+        header["model"] = {"created_utc": datetime.now(timezone.utc).isoformat(), "mode": mmode, "order": order, "kernel": kernel, "use_flags": bool(args.use_flags)}
+        payload["header"] = header
+        GSTATS.write_npz(source, payload)
+        print(f"Wrote model data column: {GSTATS.display_path(source)}")
+        if args.output_csv:
+            csv_path = Path(args.output_csv).expanduser().resolve()
+            with csv_path.open("w", newline="", encoding="utf-8") as handle:
+                writer = csv.writer(handle)
+                writer.writerow(["scan", "antenna", "stokes", "channel", "time", "model_real", "model_imag"])
+                for values in zip(payload["scan"], payload["antenna"], payload["stokes"], payload["channel"], payload["time"], model_real, model_imag):
+                    writer.writerow(values)
+
+
+if __name__ == "__main__":
+    main()

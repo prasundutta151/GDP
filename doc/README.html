@@ -57,7 +57,7 @@
         <tr><td><code>data-product/flag/npz</code></td><td>Antenna-based flag products in NPZ format.</td></tr>
         <tr><td><code>data-product/flag/csv</code></td><td>Optional flag CSV summaries.</td></tr>
         <tr><td><code>logs</code></td><td>Task logs written by GDP commands.</td></tr>
-        <tr><td><code>gaintable</code></td><td>Copied CASA gain or bandpass tables written by <code>gdp-flag --apply-flag</code>.</td></tr>
+        <tr><td><code>gaintable</code></td><td>Optional location for copied CASA gain or bandpass tables written by <code>gdp-apply</code>.</td></tr>
         <tr><td><code>plots/png</code></td><td>Default PNG diagnostic plots.</td></tr>
         <tr><td><code>plots/eps</code></td><td>Optional EPS diagnostic plots.</td></tr>
         <tr><td><code>plots/pdf</code></td><td>Optional PDF diagnostic plots.</td></tr>
@@ -115,8 +115,7 @@ script/gdp-flag --mode gain --scan 17 --fmode remove-version "[1-3]"  [remove fl
 script/gdp-flag --mode gain --scan 17 --fmode remove-version "[1:]"  [remove all matching flag versions starting at fV1]
 script/gdp-flag --mode gain --scan 17 --fmode summary  [show the per-antenna summary for the highest matching flag version]
 script/gdp-flag --mode gain --scan 17 --fmode summary 3  [show the per-antenna summary for flag version fV3]
-script/gdp-flag --mode gain --scan 17 --apply-flag  [copy the saved gain table to rundir/gaintable and apply the highest matching flag version]
-script/gdp-flag --mode gain --scan 17 --apply-flag 3 --output-table /path/to/output/table_fV3.g  [apply fV3 to a chosen output CASA table path]
+script/gdp-apply --mode gain --scan 17 --datacolumn model --use-flags --output-casa-table /path/to/output.g  [write model samples and flags into a copied CASA table]
 script/gdp-stats --mode gain --scan 17 --smode stats,ks --use-flags --flagver 1  [compute flagged products using fV1 .flg flags; default names include _fV1]
 script/gdp-plot --mode gain --scan 17 -pmode colormap --use-flags --flagver 1  [plot using fV1 flags; default name includes _fV1]
 script/gdp-plot --mode gain --scan 13 -pmode colormap --npz-path /path/to/gdp-gains-gain-scan13.npz  [plot directly from a selected gain scan-13 NPZ file]

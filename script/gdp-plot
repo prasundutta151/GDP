@@ -32,6 +32,7 @@ ACTIVE_CONFIG: Optional[Dict[str, Any]] = None
 ACTIVE_FLAGVER: Optional[int] = None
 APPLY_FLAG_FILES: bool = False
 RELATIVE_PATHS = False
+SELECTED_DATACOLUMN = "casa"
 DEFAULT_PLOT_DPI = 320
 CLI_PARSER: Optional[argparse.ArgumentParser] = None
 
@@ -794,6 +795,7 @@ def ensure_npz(product: str, mode: str, args: argparse.Namespace, scans: Optiona
     }[product]
 
     cmd = [str(script_dir() / "gdp-stats"), "--mode", mode, "--combine-scans", "--smode", smode, output_flag, str(path)]
+    cmd.extend(["--datacolumn", args.datacolumn])
     if args.setup_file:
         cmd.extend(["--setup-file", args.setup_file])
     if args.relative_path:
@@ -863,6 +865,7 @@ def ensure_npzs(product: str, mode: str, args: argparse.Namespace, scans: Option
             "--complex",
             component_pair_cli_value(component_pair),
         ]
+        cmd.extend(["--datacolumn", args.datacolumn])
         if args.setup_file:
             cmd.extend(["--setup-file", args.setup_file])
         if args.relative_path:
@@ -935,6 +938,7 @@ def ensure_npzs(product: str, mode: str, args: argparse.Namespace, scans: Option
         "cross_corr_antenna": "cross-corr",
     }[product]
     cmd = [str(script_dir() / "gdp-stats"), "--mode", mode, "--smode", smode]
+    cmd.extend(["--datacolumn", args.datacolumn])
     if args.setup_file:
         cmd.extend(["--setup-file", args.setup_file])
     if args.relative_path:
@@ -989,8 +993,18 @@ def ensure_npzs(product: str, mode: str, args: argparse.Namespace, scans: Option
 def load_npz(path: Path) -> Dict[str, np.ndarray]:
     with np.load(path, allow_pickle=True) as data:
         loaded = {key: data[key] for key in data.files}
-    if APPLY_FLAG_FILES and path.suffix != ".flg" and {"real", "imag", "row", "stokes", "channel"}.issubset(loaded):
-        return apply_flag_file_to_gains(loaded, path, ACTIVE_FLAGVER)
+    if {"scan", "antenna", "stokes", "real", "imag"}.issubset(loaded):
+        if SELECTED_DATACOLUMN == "model":
+            missing = {"model_real", "model_imag"} - set(loaded)
+            if missing:
+                raise SystemExit(
+                    "ERROR: requested --datacolumn model is absent from the gains NPZ. "
+                    "Run gdp-model first to create the model data column."
+                )
+            loaded["real"] = np.asarray(loaded["model_real"], dtype=float)
+            loaded["imag"] = np.asarray(loaded["model_imag"], dtype=float)
+        if APPLY_FLAG_FILES and path.suffix != ".flg" and {"row", "channel"}.issubset(loaded):
+            return apply_flag_file_to_gains(loaded, path, ACTIVE_FLAGVER)
     return loaded
 
 
@@ -3783,6 +3797,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--setup-file", default=None, help="Setup JSON file to use. Relative names are resolved under the active runtime directory.")
     p.add_argument("--relative-path", action="store_true", help="Print runtime-relative file references after reporting the runtime directory; file writes are unchanged.")
     p.add_argument("--npz-path", default=None, help="Use this NPZ file directly for the selected plot mode instead of discovering or creating the default GDP product.")
+    p.add_argument("--datacolumn", choices=["casa", "model"], default="casa", help="GDP gains data column to plot. Default: casa. model requires a prior gdp-model run.")
     p.add_argument("--scan", default=None, help="Comma-separated scans. Must match or create the corresponding GDP products.")
     p.add_argument("--combine-scans", action="store_true", help="Plot one combined allscans-style product. Default: false, make one plot per scan.")
     p.add_argument("--antenna", nargs="+", default=None, help="Antenna list, inclusive range, or mixed selection. Examples: --antenna [0-9] for antennas 0 through 9; --antenna 2,3,4,31 or --antenna 2 3 4 31 for explicit antenna IDs; --antenna \"[1-5]\" 6 \"[9-12]\" 15 16 19 for mixed ranges and single antennas. The same list is passed to gdp-stats if missing products must be created.")
@@ -3820,10 +3835,11 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
-    global ACTIVE_FLAGVER, APPLY_FLAG_FILES, RELATIVE_PATHS
+    global ACTIVE_FLAGVER, APPLY_FLAG_FILES, RELATIVE_PATHS, SELECTED_DATACOLUMN
     args = parse_args()
     activate_config(args.setup_file)
     RELATIVE_PATHS = bool(args.relative_path)
+    SELECTED_DATACOLUMN = str(args.datacolumn)
     args.flagver = parse_flag_version(args.flagver)
     ACTIVE_FLAGVER = args.flagver
     APPLY_FLAG_FILES = bool(args.use_flags)

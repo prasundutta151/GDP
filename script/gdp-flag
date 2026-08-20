@@ -1469,7 +1469,12 @@ def run_batch(
     logger.write(f"gdp-flag batch={scan_label}")
     gains_out = build_gains_output(input_table, scan_label, mode, args)
     t0 = logger.start(f"read-gains {scan_label}")
-    gains = GSTATS.compute_gains(input_table, mode, scans, selected_antennas, None, False, False, args.bchan, args.echan, None, None)
+    if args.datacolumn == "model":
+        if not gains_out.exists():
+            logged_error(logger, f"ERROR: gains NPZ not found for --datacolumn model: {gains_out}. Run gdp-stats --smode gains and gdp-model first.")
+        gains = GSTATS.select_gains_datacolumn(GSTATS.load_npz_dict(gains_out), "model")
+    else:
+        gains = GSTATS.compute_gains(input_table, mode, scans, selected_antennas, None, False, False, args.bchan, args.echan, None, None)
     if args.write_gains_npz or not gains_out.exists():
         GSTATS.write_npz(gains_out, gains)
         logger.write(f"Wrote gains NPZ for flag dimensions: {gains_out}")
@@ -1729,10 +1734,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--bchan", type=int, default=None, help="Start channel, inclusive. Bandpass mode only.")
     p.add_argument("--echan", type=int, default=None, help="End channel, exclusive. Bandpass mode only.")
     p.add_argument("--use-flags", nargs="?", const="highest", default=None, metavar="VERSION", help="Carry an existing GDP .flg version into the output. Omit VERSION to use the highest available version. By default, gdp-flag carries the highest previous version when one exists.")
+    p.add_argument("--datacolumn", choices=["casa", "model"], default="casa", help="GDP gains data column used by automatic fmode calculations. Default: casa. model requires a prior gdp-model run.")
     p.add_argument("--new-flags", action="store_true", help="Write only the new fmode flags; do not carry previous GDP flag versions.")
     p.add_argument("--out-fver", dest="out_fver", default=None, help="Output flag version. Default: next version beside the matching gains NPZ.")
-    p.add_argument("--apply-flag", nargs="?", const="highest", default=None, metavar="VERSION", help="Apply an existing GDP .flg version back into a copied CASA table. Omit VERSION to use the highest available matching version.")
-    p.add_argument("--output-table", default=None, help="Output CASA table path for --apply-flag. Default: rundir/gaintable/<original>_fV<VERSION>.")
     p.add_argument("--fmode", default="casa-flags", help="Flag mode: casa-flags, man-antenna, man-chan, all-std-thrsld, ante-std-thrsld, ante-mean-thrsld, remove-version, summary, ante-thrsld, ks-thrsld, gpr, auto-ante, auto-chan.")
     p.add_argument("--alpha", dest="threshold_alpha_opt", default=None, help="Threshold value for --fmode all-std-thrsld, ante-std-thrsld, or ante-mean-thrsld. If omitted, the default is 1. A trailing value after the fmode is also accepted.")
     p.add_argument("--percent", dest="threshold_percent_opt", default=None, help="Flagged-data percentage threshold for --fmode ante-thrsld. If omitted, percent=70. A trailing value after the fmode is also accepted.")
@@ -1756,9 +1760,6 @@ def main() -> None:
     GSTATS.RELATIVE_PATHS = bool(args.relative_path)
     args.fmode_resolved = parse_fmode(args.fmode)
     mode = infer_mode(args)
-    applying_flags = args.apply_flag is not None
-    if applying_flags and args.fmode != "casa-flags":
-        raise SystemExit("--apply-flag is a standalone action; do not combine it with a non-default --fmode.")
     if args.fmode_resolved == "man_chan" and mode != "bandpass":
         raise SystemExit("ERROR: --fmode man-chan works only with --mode bandpass.")
     explicit_input = args.input_table_opt
@@ -1826,12 +1827,8 @@ def main() -> None:
     batches = non_casa_batches(scans, args.combine_scans) if args.fmode_resolved == "remove_version" else GSTATS.scan_batches(input_table, scans, args.combine_scans)
     if len(batches) > 1 and (args.output_gains_npz or args.out_fver):
         raise SystemExit("Explicit --output-gains-npz or --out-fver cannot be used when writing multiple per-scan flag products.")
-    if applying_flags and len(batches) > 1 and args.output_table:
-        raise SystemExit("Explicit --output-table cannot be used when --apply-flag would write multiple per-scan tables.")
     for batch_scans, batch_label in batches:
-        if applying_flags:
-            run_apply_batch(args, input_table, mode, batch_scans, selected_antennas, batch_label, logger)
-        elif args.fmode_resolved == "remove_version":
+        if args.fmode_resolved == "remove_version":
             run_remove_batch(args, input_table, mode, batch_scans, batch_label, logger)
         elif args.fmode_resolved == "summary":
             run_summary_batch(args, input_table, mode, batch_scans, selected_antennas, batch_label, logger)

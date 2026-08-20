@@ -14,6 +14,7 @@ flag-product generation.
 - `gdp-setup.html`: setup command for runtime, gain-table, and bandpass-table configuration.
 - `gdp-util.html`: utility command for reading metadata from CASA tables.
 - `gdp-stats.html`: statistics command and GDP data-product formats.
+- `gdp-model.html`: model gain/bandpass samples into the saved gains NPZ.
 - `gdp-flag.html`: flag sidecar creation and versioning command.
 - `gdp-plot.html`: plotting command for GDP NPZ products.
 - `gdp-show.html`: browser gallery for existing GDP plots.
@@ -39,6 +40,8 @@ flag-product generation.
   antenna-wise statistics, KS products, and self-correlation products, with
   optional CSV output. By default it writes one product per scan; use
   `--combine-scans` for one combined `allscans` product.
+- `script/gdp-model`: fits selected antenna/Stokes real and imaginary gain or
+  bandpass series and writes the result into the gains NPZ `model` column.
 - `script/gdp-flag`: creates versioned `.flg` flag sidecar files from CASA
   table flags, manual antenna flags, or manual bandpass channel flags.
 - `script/gdp-plot`: plots GDP NPZ products and runs `gdp-stats` first when a
@@ -167,17 +170,16 @@ script/gdp-flag --mode gain --scan 17 --fmode remove-version "[1-3]"
 script/gdp-flag --mode gain --scan 17 --fmode remove-version "[1:]"
 script/gdp-flag --mode gain --scan 17 --fmode summary
 script/gdp-flag --mode gain --scan 17 --fmode summary 3
-script/gdp-flag --mode gain --scan 17 --apply-flag
-script/gdp-flag --mode gain --scan 17 --apply-flag 3 --output-table /path/to/output/table_fV3.g
+script/gdp-apply --mode gain --scan 17 --datacolumn model --use-flags --output-casa-table /path/to/output.g
 ```
 
 Manual flag commands carry the highest previous flag version by default. Use
 `--new-flags` to write only the newly requested flags. `man-chan` is valid only
 for bandpass mode; requested flag versions that do not exist are reported as
 terminal `ERROR:` messages and the command exits without a Python traceback.
-`--apply-flag` copies the input CASA table and writes a selected GDP flag
-version into the copied table's `FLAG` column, using `rundir/gaintable/` by
-default if `--output-table` is not supplied.
+`gdp-apply` copies the input CASA table, writes selected GDP `casa` or `model`
+samples, and optionally writes a selected GDP flag version into its `FLAG`
+column. `--output-casa-table` is required.
 Manual antenna/channel values can include `:STOKES`, for example `1:0`,
 `[11-14]:1`, or `23` for all Stokes.
 `all-std-thrsld` computes per-Stokes Real-1 and Imag standard deviations from

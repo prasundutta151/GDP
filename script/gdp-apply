@@ -1,0 +1,160 @@
+#!/usr/bin/env python3
+"""Copy a CASA calibration table, apply GDP samples, and optionally apply GDP flags."""
+
+from __future__ import annotations
+
+import argparse
+import os
+import shutil
+from importlib.machinery import SourceFileLoader
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+
+import numpy as np
+
+
+def project_root() -> Path:
+    return Path(__file__).resolve().parents[1]
+
+
+GSTATS = SourceFileLoader("gdp_stats_apply", str(project_root() / "script" / "gdp-stats")).load_module()
+GFLAG = SourceFileLoader("gdp_flag_apply", str(project_root() / "script" / "gdp-flag")).load_module()
+
+
+def parse_chans(values: Optional[List[str]]) -> Tuple[Optional[int], Optional[int]]:
+    if not values:
+        return None, None
+    text = " ".join(values).strip().strip("[]()")
+    parts = [part for part in text.replace(":", " ").replace(",", " ").replace("-", " ").split() if part]
+    if len(parts) != 2 or not all(part.isdigit() for part in parts):
+        raise SystemExit("ERROR: --chans must be two channel values, for example --chans 800 3000 or --chans '[800:3000]'.")
+    start, end = (int(part) for part in parts)
+    if end < start:
+        raise SystemExit("ERROR: --chans end must be greater than or equal to start.")
+    return start, end
+
+
+def gains_path(input_table: Path, mode: str, label: str) -> Path:
+    return GSTATS.build_default_output(input_table, label, mode, "gains", "npz")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Copy a CASA gain/bandpass table and apply GDP CASA/model samples and flags.")
+    parser.add_argument("--gain-table", default=None)
+    parser.add_argument("--bandpass-table", default=None)
+    parser.add_argument("--setup-file", default=None)
+    parser.add_argument("--relative-path", action="store_true")
+    parser.add_argument("--mode", choices=["gain", "bandpass"], default="gain")
+    parser.add_argument("--scan", default=None, help="Comma-separated scan list. Default: all.")
+    parser.add_argument("--datacolumn", choices=["casa", "model"], default="casa")
+    parser.add_argument("--antenna", "--antennas", nargs="+", default=None)
+    parser.add_argument("--chans", nargs="+", default=None, help="Inclusive channel range. Default: all channels.")
+    parser.add_argument("--use-flags", action="store_true", help="Apply a GDP sidecar flag version when it exists.")
+    parser.add_argument("--flagver", default=None, help="Flag version; default is highest matching version.")
+    parser.add_argument("--output-casa-table", required=True, help="Required destination CASA table path.")
+    parser.add_argument("--force", action="store_true", help="Overwrite an existing --output-casa-table without confirmation.")
+    args = parser.parse_args()
+    GSTATS.activate_config(args.setup_file)
+    GSTATS.RELATIVE_PATHS = bool(args.relative_path)
+    input_table = GSTATS.resolve_input(args.bandpass_table if args.mode == "bandpass" else args.gain_table, args.mode)
+    if not input_table.exists():
+        raise SystemExit(f"ERROR: input CASA table not found: {input_table}")
+    scans = GSTATS.parse_int_list(args.scan)
+    GSTATS.validate_requested_scans(input_table, args.mode, scans)
+    antennas = GSTATS.parse_antenna_list(args.antenna, "--antenna")
+    bchan, echan = parse_chans(args.chans)
+    if args.mode == "gain" and args.chans:
+        raise SystemExit("ERROR: --chans is valid only with --mode bandpass.")
+    output = Path(args.output_casa_table).expanduser().resolve()
+    if output.exists():
+        if not args.force:
+            try:
+                answer = input(f"Output CASA table already exists: {output}\nOverwrite it? [y/N]: ").strip().lower()
+            except EOFError:
+                answer = ""
+            if answer not in {"y", "yes"}:
+                raise SystemExit("Output CASA table was not overwritten.")
+        if output.is_dir():
+            shutil.rmtree(output)
+        else:
+            output.unlink()
+    if args.relative_path:
+        print(f"Runtime directory: {GSTATS.runtime_dir()}")
+    print(f"gdp-apply input={GSTATS.display_path(input_table)} mode={args.mode} datacolumn={args.datacolumn}")
+    prepared = []
+    for _batch_scans, label in GSTATS.scan_batches(input_table, scans, False):
+        path = gains_path(input_table, args.mode, label)
+        if not path.exists():
+            raise SystemExit(f"ERROR: gains NPZ not found: {GSTATS.display_path(path)}. Run gdp-stats --smode gains first.")
+        raw_gains = GSTATS.load_npz_dict(path)
+        apply_data = True
+        try:
+            gains = GSTATS.select_gains_datacolumn(raw_gains, args.datacolumn)
+        except SystemExit as exc:
+            if args.datacolumn != "model":
+                raise
+            print(f"ERROR: {str(exc).removeprefix('ERROR: ')} Using original CASA gains for scan {label}.")
+            gains = GSTATS.select_gains_datacolumn(raw_gains, "casa")
+            apply_data = False
+        flag_lookup: Dict[Tuple[int, int, int], bool] = {}
+        flag_header: Dict[str, Any] = {}
+        if args.use_flags:
+            try:
+                version, flag_path = GSTATS.resolve_flag_file(path, args.flagver)
+                flag_lookup, flag_header = GSTATS.load_flag_lookup(flag_path)
+                print(f"Using flag file fV{version}: {GSTATS.display_path(flag_path)}")
+            except SystemExit as exc:
+                print(f"ERROR: {str(exc).removeprefix('ERROR: ')}; no flags will be applied for scan {label}.")
+        prepared.append((label, path, gains, apply_data, flag_lookup, flag_header))
+    if not any(apply_data or bool(flag_lookup) for _, _, _, apply_data, flag_lookup, _ in prepared):
+        print("ERROR: no model samples or flag version are available; no CASA table was created.")
+        return
+    GFLAG.copy_table_tree(input_table, output)
+    casatable = GSTATS.casatable_factory()
+    tb = casatable()
+    updated_samples = 0
+    applied_flags = 0
+    try:
+        GFLAG.open_casa_table(tb, output, writable=True)
+        columns = list(tb.colnames())
+        casa_column = GSTATS.choose_data_column(columns, args.mode)
+        for label, path, gains, apply_data, flag_lookup, flag_header in prepared:
+            sample_mask = np.ones(np.asarray(gains["row"]).shape, dtype=bool)
+            if antennas is not None:
+                sample_mask &= np.isin(np.asarray(gains["antenna"], dtype=int), np.asarray(antennas, dtype=int))
+            if bchan is not None:
+                sample_mask &= (np.asarray(gains["channel"], dtype=int) >= bchan) & (np.asarray(gains["channel"], dtype=int) <= echan)
+            rows = np.asarray(gains["row"], dtype=int)
+            pols = np.asarray(gains["stokes"], dtype=int)
+            chans = np.asarray(gains["channel"], dtype=int)
+            real = np.asarray(gains["real"], dtype=float)
+            imag = np.asarray(gains["imag"], dtype=float)
+            for row_id in np.unique(rows[sample_mask]):
+                mask = sample_mask & (rows == int(row_id))
+                data_raw = np.asarray(tb.getcol(casa_column, startrow=int(row_id), nrow=1))
+                data_full = data_raw[:, None, :] if data_raw.ndim == 2 else data_raw.copy()
+                raw_flag = np.asarray(tb.getcol("FLAG", startrow=int(row_id), nrow=1)) if flag_lookup else None
+                flag_full = GSTATS.normalize_flag(raw_flag, data_full.shape) if raw_flag is not None else None
+                for index in np.where(mask)[0]:
+                    pol, chan = int(pols[index]), int(chans[index])
+                    if apply_data:
+                        data_full[pol, chan, 0] = complex(float(real[index]), float(imag[index]))
+                        updated_samples += 1
+                    if flag_full is not None:
+                        flag_full[pol, chan, 0] = bool(flag_lookup.get((int(row_id), pol, chan), False))
+                        applied_flags += 1
+                if apply_data:
+                    stored_data = data_full[:, 0, :] if data_raw.ndim == 2 else data_full
+                    tb.putcol(casa_column, np.asarray(stored_data, dtype=data_raw.dtype), startrow=int(row_id), nrow=1)
+                if flag_full is not None and raw_flag is not None:
+                    stored_flag = GFLAG.restore_flag_storage_shape(flag_full, raw_flag, data_full.shape, 0, None)
+                    tb.putcol("FLAG", np.asarray(stored_flag, dtype=bool), startrow=int(row_id), nrow=1)
+            if flag_header:
+                GFLAG.write_flag_intent_metadata(tb, int(flag_header.get("flag_version", 0)), Path(str(flag_header.get("source", path))), flag_header)
+    finally:
+        tb.close()
+    print(f"Wrote CASA table: {GSTATS.display_path(output)} data_samples={updated_samples} flag_samples={applied_flags}")
+
+
+if __name__ == "__main__":
+    main()

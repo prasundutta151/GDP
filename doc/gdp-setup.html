@@ -75,7 +75,7 @@ script/gdp-setup --clean no-stop  [remove GDP runtime outputs without prompting]
         <tr><td><code>--dry-run</code></td><td>Show the directories and configuration that would be written. With <code>--clean</code>, preview the files and directories that would be removed without deleting them.</td></tr>
         <tr><td><code>--allow-missing-table</code></td><td>Allow gain or bandpass table paths to be recorded before they exist.</td></tr>
       </table>
-      <p>The runtime directory includes <code>data-product/</code>, <code>logs/</code>, <code>plots/</code>, and <code>gaintable/</code>. <code>gdp-flag --apply-flag</code> writes copied CASA gain or bandpass tables under <code>gaintable/</code> unless <code>--output-table</code> is supplied. The clean command removes generated products, plots, logs, and copied gain tables, but keeps setup JSON files in the runtime root and the active <code>.gdp-config.json</code>.</p>
+      <p>The runtime directory includes <code>data-product/</code>, <code>logs/</code>, <code>plots/</code>, and <code>gaintable/</code>. <code>gdp-apply</code> writes copied CASA gain or bandpass tables to the required <code>--output-casa-table</code> path. The clean command removes generated products, plots, logs, and copied gain tables, but keeps setup JSON files in the runtime root and the active <code>.gdp-config.json</code>.</p>
     </section>
 
     <section>

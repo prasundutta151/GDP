@@ -26,6 +26,7 @@ COMPONENTS = np.array(["real", "imag"], dtype=object)
 METRICS = np.array(["mean", "std", "skew", "kurtosis", "median", "mad", "min", "max"], dtype=object)
 KS_METRICS = np.array(["d_statistic", "n_sample", "mean", "std"], dtype=object)
 CORR_COMPONENTS = ("real", "imag")
+GDP_DATA_COLUMNS = ("casa", "model")
 SMODE_ALL_TASKS = ["gains", "stats", "ks"]
 SMODE_ALIASES = {
     "gain": "gains",
@@ -585,6 +586,52 @@ def choose_data_column(columns: Sequence[str], mode: str) -> str:
     raise RuntimeError(f"No supported gain/bandpass data column found. Columns: {list(columns)}")
 
 
+def normalize_gdp_datacolumn(value: Optional[str]) -> str:
+    column = str(value or "casa").strip().lower()
+    if column not in GDP_DATA_COLUMNS:
+        raise SystemExit(f"ERROR: --datacolumn must be one of: {', '.join(GDP_DATA_COLUMNS)}.")
+    return column
+
+
+def select_gains_datacolumn(gains: Dict[str, Any], datacolumn: str) -> Dict[str, Any]:
+    """Expose a named GDP data column through the legacy real/imag view."""
+    column = normalize_gdp_datacolumn(datacolumn)
+    real_key, imag_key = f"{column}_real", f"{column}_imag"
+    if column == "casa" and real_key not in gains and {"real", "imag"}.issubset(gains):
+        # Products written before named data columns use real/imag as CASA.
+        real_key, imag_key = "real", "imag"
+    missing = {real_key, imag_key} - set(gains)
+    if missing:
+        available = gains.get("header", {}).get("gdp_data_columns", ["casa"])
+        raise SystemExit(
+            f"ERROR: requested GDP data column '{column}' is not available in the gains NPZ. "
+            f"Available data columns: {', '.join(str(item) for item in available)}. "
+            "Run gdp-model first to create the model column."
+        )
+    selected = dict(gains)
+    selected["real"] = np.asarray(gains[real_key], dtype=float)
+    selected["imag"] = np.asarray(gains[imag_key], dtype=float)
+    selected_header = dict(gains.get("header", {}))
+    selected_header["data_column"] = column
+    selected["header"] = selected_header
+    return selected
+
+
+def add_casa_datacolumn(gains: Dict[str, Any]) -> Dict[str, Any]:
+    """Add the stable named CASA arrays while preserving legacy readers."""
+    result = dict(gains)
+    result["casa_real"] = np.asarray(gains["real"], dtype=float)
+    result["casa_imag"] = np.asarray(gains["imag"], dtype=float)
+    header = dict(gains.get("header", {}))
+    casa_table_column = header.get("data_column", "")
+    header["data_column"] = "casa"
+    header["casa_table_data_column"] = casa_table_column
+    header["gdp_data_columns"] = ["casa"]
+    header["columns"] = list(dict.fromkeys([*header.get("columns", []), "casa_real", "casa_imag"]))
+    result["header"] = header
+    return result
+
+
 def normalize_flag(
     flag: np.ndarray,
     data_shape: Sequence[int],
@@ -1036,7 +1083,7 @@ def compute_gains(
             rows["imag"] = imag_arr.tolist()
         stokes_count = max((int(value) for value in rows["stokes"]), default=-1) + 1
         pol_meta = polarization_metadata(input_table, stokes_count, selected_antennas)
-        return {
+        return add_casa_datacolumn({
             "header": {
                 "format": "GDP_GAINS_NPZ",
                 "format_version": "0.2",
@@ -1067,7 +1114,7 @@ def compute_gains(
                 )
                 for k, v in rows.items()
             },
-        }
+        })
     finally:
         tb.close()
 
@@ -2219,6 +2266,45 @@ def write_stats_csv(path: Path, result: Dict[str, Any]) -> None:
                         writer.writerow([int(scan), int(ant), int(pol), str(comp), int(result["valid_count"][si, ai, pi, ci]), int(result["total_count"][si, ai, pi, ci]), int(result["flagged_count"][si, ai, pi, ci]), *[float(x) if np.isfinite(x) else "nan" for x in vals]])
 
 
+def compute_stats_from_gains(gains: Dict[str, Any], mode: str, use_flags: bool, adjust_mean: bool, datacolumn: str) -> Dict[str, Any]:
+    """Compute statistics from a selected named column in a gains product."""
+    data = select_gains_datacolumn(gains, datacolumn)
+    scans = sorted(int(x) for x in np.unique(data["scan"]))
+    antennas = sorted(int(x) for x in np.unique(data["antenna"]))
+    stokes = sorted(int(x) for x in np.unique(data["stokes"]))
+    shape = (len(scans), len(antennas), len(stokes), len(COMPONENTS), len(METRICS))
+    stats = np.full(shape, np.nan, dtype=float)
+    valid = np.zeros(shape[:-1], dtype=np.int64)
+    total = np.zeros(shape[:-1], dtype=np.int64)
+    flagged_count = np.zeros(shape[:-1], dtype=np.int64)
+    flags = np.asarray(data.get("flagged", np.zeros(np.asarray(data["real"]).shape, dtype=bool)), dtype=bool)
+    scan_array, ant_array, pol_array = (np.asarray(data[key], dtype=int) for key in ("scan", "antenna", "stokes"))
+    for si, scan in enumerate(scans):
+        for pi, pol in enumerate(stokes):
+            base = (scan_array == scan) & (pol_array == pol)
+            good = base & ~flags if use_flags else base
+            rmean = float(np.nanmean(np.asarray(data["real"])[good])) if np.any(good) else np.nan
+            imean = float(np.nanmean(np.asarray(data["imag"])[good])) if np.any(good) else np.nan
+            for ai, ant in enumerate(antennas):
+                mask = base & (ant_array == ant)
+                for ci, key in enumerate(("real", "imag")):
+                    values = np.asarray(data[key], dtype=float)[mask].copy()
+                    local_flags = flags[mask]
+                    if use_flags:
+                        values[local_flags] = np.nan
+                    if key == "real":
+                        values = values / rmean - 1.0 if adjust_mean and np.isfinite(rmean) and rmean != 0 else values - 1.0
+                    else:
+                        values = values - imean if adjust_mean and np.isfinite(imean) else values
+                    stats[si, ai, pi, ci] = metric_values(values, percent_scale=True)
+                    valid[si, ai, pi, ci] = int(np.count_nonzero(np.isfinite(values)))
+                    total[si, ai, pi, ci] = int(values.size)
+                    flagged_count[si, ai, pi, ci] = int(np.count_nonzero(local_flags)) if use_flags else 0
+    header = dict(data.get("header", {}))
+    header.update({"format": "GDP_STATS_NPZ", "format_version": "0.3", "created_utc": datetime.now(timezone.utc).isoformat(), "mode": mode, "data_column": datacolumn, "use_flags": bool(use_flags), "subtract_mean": bool(adjust_mean), "axes": {"stats": ["scan", "antenna", "stokes", "component", "metric"]}})
+    return {"header": header, "scan_numbers": np.asarray(scans, dtype=int), "antennas": np.asarray(antennas, dtype=int), "stokes": np.asarray(stokes, dtype=int), "components": COMPONENTS, "metrics": METRICS, "stats": stats, "valid_count": valid, "total_count": total, "flagged_count": flagged_count}
+
+
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Compute GDP gain/bandpass products.")
     p.add_argument("--input-table", dest="input_table_opt", default=None, help="Input CASA gain/bandpass table path.")
@@ -2232,6 +2318,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--antennas", nargs="+", default=None, help="Antenna list, inclusive range, or mixed selection. Examples: --antennas [0-9] for antennas 0 through 9; --antennas 2,3,4,31 or --antennas 2 3 4 31 for explicit antenna IDs; --antennas \"[1-5]\" 6 \"[9-12]\" 15 16 19 for mixed ranges and single antennas. Default: all antennas.")
     p.add_argument("--use-flags", action="store_true", help="Apply the matching GDP .flg sidecar to flagged stats, KS, self-corr, or cross-corr products. Default: false.")
     p.add_argument("--flagver", default=None, help="Flag sidecar version. With --smode gains, write NAME_fV<version>.flg; if omitted, write the next version. With --use-flags consumers, use this version; if omitted, use the highest available version and add _fV<version> to default output product names.")
+    p.add_argument("--datacolumn", choices=["casa", "model"], default="casa", help="GDP gains data column for stats/correlation products. Default: casa. model requires gdp-model output.")
     p.add_argument(
         "--smode",
         default=None,
@@ -2410,7 +2497,10 @@ def run_batch(
 
     if args.stats:
         t0 = logger.start(f"stats {scan_label}")
-        stats_result = compute_stats(input_table, mode, scans, antennas, antenna_flags, args.use_flags, args.adjust_mean, None, None, args.flag_chans, flag_lookup)
+        if args.datacolumn == "model":
+            stats_result = compute_stats_from_gains(load_npz_dict(gains_out), mode, args.use_flags, args.adjust_mean, "model")
+        else:
+            stats_result = compute_stats(input_table, mode, scans, antennas, antenna_flags, args.use_flags, args.adjust_mean, None, None, args.flag_chans, flag_lookup)
         report_numeric_polarization_labels(stats_result)
         if flag_header:
             stats_result["header"]["flag_file_version"] = flag_header.get("flag_version")
