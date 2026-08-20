@@ -9,7 +9,7 @@
 <body>
   <header>
     <h1>GDP Step-by-Step Guide</h1>
-    <p>A practical workflow for setting up GDP, generating data products, managing flag versions, making plots, running plans, checking outputs, and preparing a release.</p>
+    <p>A practical workflow for setting up GDP, generating products, modelling and flagging data, applying selected data to a CASA table, making plots, running plans, checking outputs, and preparing a release.</p>
   </header>
   <main>
     <section class="doc-tree" aria-labelledby="documentation-tree">
@@ -39,18 +39,20 @@
     </section>
     <section>
       <h2>Workflow Overview</h2>
-      <p>GDP is normally used in this order: set up the table and runtime paths, inspect the input table, create the raw gain or bandpass NPZ product, create or apply flag versions as needed, compute downstream stats/KS/self-correlation products with those flags, make plots, review the outputs, then optionally update the version and push a release.</p>
+      <p>GDP is normally used in this order: set up the table and runtime paths, inspect the input table, create the raw gain or bandpass NPZ product, optionally model it, create flag versions, compute downstream products, optionally write selected model/CASA samples and flags to a copied CASA table, make plots, review the outputs, then update the version and push a release when required.</p>
       <table>
         <tr><th>Step</th><th>Goal</th><th>Main Command</th></tr>
         <tr><td>1</td><td>Remember input and runtime paths.</td><td><code>script/gdp-setup</code></td></tr>
         <tr><td>2</td><td>Check table metadata before processing.</td><td><code>script/gdp-util --header</code></td></tr>
         <tr><td>3</td><td>Create the raw gain or bandpass NPZ product.</td><td><code>script/gdp-stats --smode gains</code></td></tr>
-        <tr><td>4</td><td>Create or manage flag versions.</td><td><code>script/gdp-flag --fmode ...</code></td></tr>
-        <tr><td>5</td><td>Create downstream stats, KS, self-correlation, and optional cross-correlation products.</td><td><code>script/gdp-stats --smode stats,ks,self-corr,cross-corr --use-flags</code></td></tr>
-        <tr><td>6</td><td>Make diagnostic plots.</td><td><code>script/gdp-plot -pmode ...</code></td></tr>
-        <tr><td>7</td><td>Run a pipeline plan when repeated operations are needed.</td><td><code>script/gdp-plan-run</code></td></tr>
-        <tr><td>8</td><td>Browse the completed PNG plots without recalculation.</td><td><code>script/gdp-show</code></td></tr>
-        <tr><td>9</td><td>Version and release the software.</td><td><code>script/gdp-util --version --git-push</code></td></tr>
+        <tr><td>4</td><td>Optionally model selected gain or bandpass series.</td><td><code>script/gdp-model --mmode ...</code></td></tr>
+        <tr><td>5</td><td>Create or manage flag versions.</td><td><code>script/gdp-flag --fmode ...</code></td></tr>
+        <tr><td>6</td><td>Create downstream stats, KS, self-correlation, and optional cross-correlation products.</td><td><code>script/gdp-stats --smode stats,ks,self-corr,cross-corr --use-flags</code></td></tr>
+        <tr><td>7</td><td>Optionally write selected samples and flags to a copied CASA table.</td><td><code>script/gdp-apply --output-casa-table PATH</code></td></tr>
+        <tr><td>8</td><td>Make diagnostic plots.</td><td><code>script/gdp-plot -pmode ...</code></td></tr>
+        <tr><td>9</td><td>Run a pipeline plan when repeated operations are needed.</td><td><code>script/gdp-plan-run</code></td></tr>
+        <tr><td>10</td><td>Browse the completed PNG plots without recalculation.</td><td><code>script/gdp-show</code></td></tr>
+        <tr><td>11</td><td>Version and release the software.</td><td><code>script/gdp-util --version --git-push</code></td></tr>
       </table>
     </section>
 
@@ -115,7 +117,20 @@ DONE  gains scan17 elapsed_sec=...</code></pre>
     </section>
 
     <section>
-      <h2>4. Create And Manage Flag Versions</h2>
+      <h2>4. Model The Gains Or Bandpass (Optional)</h2>
+      <p><code>gdp-model</code> reads the saved gains NPZ and writes fitted samples to its <code>model</code> data column. The original <code>casa</code> samples remain unchanged. Model only the series that need it, then choose <code>--datacolumn model</code> in downstream <code>gdp-stats</code> or <code>gdp-plot</code> calls.</p>
+      <pre><code>script/gdp-model --mode gain --scan 17 --mmode gdp matern32
+script/gdp-model --mode bandpass --scan 18 --mmode polynomial 3
+script/gdp-model --mode gain --scan 17 --antenna 0 1 --stokes 0 --complex re --mmode harmonic 4
+script/gdp-model --mode gain --scan 17 --use-flags --flagver 2 --mmode gauss-hermite 5</code></pre>
+      <p>Available modes are <code>polynomial</code>, <code>harmonic</code>, <code>poly-harmonic</code>, <code>gauss-hermite</code>, and the default local-kernel <code>gdp</code> mode. Use <code>--output-gains-npz PATH</code> to write a separate modelled gains product instead of updating the standard saved gains NPZ. Use <code>--dry-run</code> or <code>--estimate</code> before a large selection.</p>
+      <pre><code>script/gdp-stats --mode gain --scan 17 --smode stats --datacolumn model
+script/gdp-plot --mode gain --scan 17 -pmode colormap --datacolumn model</code></pre>
+      <p>See <a href="gdp-model.html">gdp-model</a> and <a href="gdp-product-gains.html">Gains NPZ</a> for model-column details.</p>
+    </section>
+
+    <section>
+      <h2>5. Create And Manage Flag Versions</h2>
       <p>Use <code>gdp-flag</code> when flags need to be created, extended, or removed without recalculating the science products. By default, a new manual flag version carries the highest previous flag version and adds the requested flags. Use <code>--new-flags</code> when only the newly requested flags should be written.</p>
       <pre><code>casa --nogui --nologger --nologfile --log2term -c script/gdp-flag --mode gain --scan 17 --fmode casa-flags
 casa --nogui --nologger --nologfile --log2term -c script/gdp-flag --mode gain --scan 17 --fmode man-antenna 9
@@ -135,7 +150,7 @@ script/gdp-flag --mode gain --scan 17 --fmode remove-version "[1-3]"
 script/gdp-flag --mode gain --scan 17 --fmode remove-version "[1:]"
 script/gdp-flag --mode gain --scan 17 --fmode summary
 script/gdp-flag --mode gain --scan 17 --fmode summary 3
-script/gdp-apply --mode gain --scan 17 --datacolumn model --use-flags --output-casa-table /path/to/output.g</code></pre>
+</code></pre>
       <p>Expected runtime output pattern:</p>
       <pre><code>Loaded previous flag file fV1: .../gdp-gains-gain-scan17_fV1.flg
 all-std-thrsld total_new_flags=.../... (...%)
@@ -159,7 +174,7 @@ ERROR: --fmode man-chan works only with --mode bandpass.</code></pre>
     </section>
 
     <section>
-      <h2>5. Generate Downstream Products</h2>
+      <h2>6. Generate Downstream Products</h2>
       <p>After flagging, compute stats, KS, and self-correlation products. Use <code>--use-flags</code> to apply the highest matching flag version, or add <code>--flagver N</code> to force a specific version. The self-correlation product should normally be generated for all antennas unless a focused antenna subset is required.</p>
       <pre><code>casa --nogui --nologger --nologfile --log2term -c script/gdp-stats --mode gain --scan 13 --smode gains,stats,ks,self-corr
 casa --nogui --nologger --nologfile --log2term -c script/gdp-stats --mode bandpass --scan 18 --smode gains,stats,ks,self-corr --use-flags</code></pre>
@@ -177,7 +192,17 @@ casa --nogui --nologger --nologfile --log2term -c script/gdp-stats --mode gain -
     </section>
 
     <section>
-      <h2>6. Make Plots</h2>
+      <h2>7. Apply GDP Data To A CASA Table (Optional)</h2>
+      <p><code>gdp-apply</code> never modifies the source CASA table. It copies that table to the required <code>--output-casa-table</code> destination, replaces the selected samples from the saved GDP gains NPZ, and applies a requested/highest GDP flag sidecar when <code>--use-flags</code> is supplied. Select <code>--datacolumn casa</code> for original saved values or <code>--datacolumn model</code> for fitted values.</p>
+      <pre><code>casa --nogui --nologger --nologfile --log2term -c script/gdp-apply --mode gain --scan 17 --datacolumn casa --output-casa-table /path/to/gain_casa.g
+casa --nogui --nologger --nologfile --log2term -c script/gdp-apply --mode gain --scan 17 --datacolumn model --use-flags --flagver 2 --output-casa-table /path/to/gain_model_fV2.g
+casa --nogui --nologger --nologfile --log2term -c script/gdp-apply --mode bandpass --scan 18 --datacolumn model --chans "[800-3000]" --use-flags --output-casa-table /path/to/bandpass_model_fV2.b</code></pre>
+      <p>If the output path already exists, GDP asks before replacing it. Use <code>--force</code> only when overwriting that destination is intended. A missing model column or requested flag version is reported as an error; GDP does not create a partial output CASA table in that case.</p>
+      <p>See <a href="gdp-apply.html">gdp-apply</a> for the complete application workflow.</p>
+    </section>
+
+    <section>
+      <h2>8. Make Plots</h2>
       <p>Once products exist, plotting can run from the normal shell. If a requested NPZ is missing, <code>gdp-plot</code> invokes <code>gdp-stats</code>, so that command must run in a CASA-enabled environment. Plot labels use R/L or X/Y when that receptor information is present in the CASA table; otherwise they report <code>Stokes 0</code> and <code>Stokes 1</code>.</p>
       <pre><code>script/gdp-plot --mode gain --scan 13 -pmode colormap,hist
 script/gdp-plot --mode gain --scan 13 -pmode reim --antenna 0 1
@@ -206,7 +231,7 @@ DONE  plot stats elapsed_sec=...</code></pre>
     </section>
 
     <section>
-      <h2>7. Run A Plan</h2>
+      <h2>9. Run A Plan</h2>
       <p>Use plan files for repeatable processing. Plan intents can call GDP scripts such as <code>gdp-stats</code>, <code>gdp-plot</code>, and <code>gdp-flag</code>. Start with a dry run, inspect the command order and selected antennas, then run the plan.</p>
       <pre><code>script/gdp-plan-run pipelines/gain_clean_plots.plan --dry-run
 script/gdp-plan-run pipelines/gain_clean_plots.plan
@@ -223,7 +248,7 @@ DONE plan elapsed_sec=...</code></pre>
     </section>
 
     <section>
-      <h2>8. Browse Existing Plots</h2>
+      <h2>10. Browse Existing Plots</h2>
       <p>Use <code>gdp-show</code> after plotting to open existing runtime PNG files in a browser gallery. It does not calculate products or rerun <code>gdp-plot</code>; unavailable requested plot types are reported while the available plots are still shown.</p>
       <pre><code>script/gdp-show
 script/gdp-show --mode gain --stats
@@ -232,7 +257,7 @@ script/gdp-show --cross-corr</code></pre>
     </section>
 
     <section>
-      <h2>9. Version And Release</h2>
+      <h2>11. Version And Release</h2>
       <p>Use <code>gdp-util</code> to bump the version and then push. When <code>--version</code> and <code>--git-push</code> are used together, the version update happens first.</p>
       <pre><code>script/gdp-util --version --git-push -m "Release update"
 script/gdp-util --version main --git-push -m "Major release"

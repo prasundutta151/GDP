@@ -51,6 +51,100 @@ a {
   border-radius: 6px;
   background: #f8fafc;
 }
+.gdp-introduction {
+  margin: 0 0 20px;
+  padding: 18px 20px;
+  border-left: 5px solid #005f73;
+  border-radius: 6px;
+  background: linear-gradient(110deg, #e8f4f4, #f8fbfb);
+}
+.gdp-introduction h2,
+.gdp-introduction p {
+  margin-top: 0;
+}
+.gdp-introduction p:last-child {
+  margin-bottom: 0;
+}
+.details-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin: 0 0 22px;
+  padding: 14px 18px;
+  border: 1px solid #e3c56c;
+  border-radius: 6px;
+  background: #fff8df;
+}
+.details-links h2 {
+  width: 100%;
+  margin: 0 0 2px;
+  color: #805b00;
+  border-color: #e3c56c;
+}
+.command-overview {
+  margin: 0 0 22px;
+  padding: 16px 18px;
+  border: 1px solid #7eb5b3;
+  border-radius: 6px;
+  background: #e5f4f1;
+}
+.command-overview h2,
+.command-output h2,
+.options-section h2 {
+  margin-top: 0;
+}
+.command-overview h2 {
+  color: #075b57;
+  border-color: #7eb5b3;
+}
+.command-overview p:last-child {
+  margin-bottom: 0;
+}
+.options-section {
+  padding: 16px 18px;
+  border: 1px solid #91c79a;
+  border-radius: 6px;
+  background: #effaf0;
+}
+.options-section h2 {
+  color: #21663a;
+  border-color: #91c79a;
+}
+.options-section th {
+  background: #dcefe0;
+}
+.options-section tr:nth-child(even) td {
+  background: #e5f5e8;
+}
+.command-output {
+  margin: 22px 0;
+  padding: 16px 18px;
+  border: 1px solid #a9a4d6;
+  border-radius: 6px;
+  background: #f1f0fb;
+}
+.command-output h2 {
+  color: #4d4784;
+  border-color: #a9a4d6;
+}
+.command-output p:last-child {
+  margin-bottom: 0;
+}
+.license {
+  margin-top: 36px;
+  padding: 16px 18px;
+  border-top: 3px solid #52616b;
+  background: #f3f5f6;
+  color: #39434a;
+}
+.license h2 {
+  margin-top: 0;
+  color: #39434a;
+  border-color: #b9c2c8;
+}
+.license p:last-child {
+  margin-bottom: 0;
+}
 .product-formats {
   margin-top: -12px;
 }
@@ -138,7 +232,11 @@ tr.pmode-option td {
   background: #dff3ff;
 }
 tr.smode-option td {
-  background: #e8f7d9;
+  background: #dff3ff;
+}
+.options-section tr.pmode-option td,
+.options-section tr.smode-option td {
+  background: #dff3ff;
 }
 .plot-viewer {
   position: fixed;

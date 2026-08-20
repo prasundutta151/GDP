@@ -123,31 +123,18 @@ script/gdp-stats --antennas "[1-5]" 6 "[9-12]" 15 16 19 --smode stats  [use mixe
     </section>
 
     <section>
-      <h2>Standard Product Names</h2>
+      <h2>Product Names and Formats</h2>
       <table>
-        <tr><th>Subtask</th><th>Default filename</th><th>Format page</th></tr>
-        <tr><td><code>--smode gains</code></td><td><code>gdp-gains-&lt;mode&gt;-&lt;scan&gt;.npz</code></td><td><a href="gdp-product-gains.html">gains NPZ</a></td></tr>
-        <tr><td><code>--smode gains</code></td><td><code>gdp-gains-&lt;mode&gt;-&lt;scan&gt;_fV&lt;version&gt;.flg</code></td><td><a href="gdp-product-flags.html">flag FLG</a></td></tr>
-        <tr><td><code>--smode stats</code></td><td><code>gdp-stats-&lt;mode&gt;-&lt;scan&gt;[_fV&lt;version&gt;].npz</code></td><td><a href="gdp-product-stats.html">stats NPZ</a></td></tr>
-        <tr><td><code>--smode ks</code></td><td><code>gdp-ks-&lt;mode&gt;-&lt;scan&gt;[_fV&lt;version&gt;].npz</code></td><td><a href="gdp-product-ks.html">KS NPZ</a></td></tr>
-        <tr><td><code>--smode self-corr</code></td><td><code>gdp-self-corr-&lt;mode&gt;-&lt;scan&gt;[_fV&lt;version&gt;].npz</code></td><td><a href="gdp-product-self-corr.html">self-corr NPZ</a></td></tr>
-        <tr><td><code>--smode cross-corr</code></td><td><code>gdp-cross-corr-&lt;mode&gt;-&lt;scan&gt;[_fV&lt;version&gt;]-ant&lt;a1&gt;_&lt;a2&gt;-stokes&lt;s1&gt;&lt;s2&gt;-comp&lt;c1&gt;&lt;c2&gt;.npz</code></td><td><a href="gdp-product-cross-corr.html">cross-corr NPZ</a></td></tr>
-        <tr><td><code>--smode cross-corr</code> full matrix</td><td><code>gdp-cross-corr-&lt;mode&gt;-&lt;scan&gt;[_fV&lt;version&gt;]-summary.npz</code></td><td><a href="gdp-product-cross-corr.html">cross-corr summary NPZ</a></td></tr>
-                <tr><td><code>gdp-plot -pmode hist</code></td><td><code>gdp-plot-hist-&lt;mode&gt;-&lt;scan&gt;[-pchan_&lt;start&gt;_&lt;end&gt;].png</code></td><td>plot from <a href="gdp-product-gains.html">gains NPZ</a></td></tr>
+        <tr><th>Product</th><th>Subtask</th><th>Default filename</th><th>Format page</th></tr>
+        <tr><td>Gains samples</td><td><code>--smode gains</code></td><td><code>gdp-gains-&lt;mode&gt;-&lt;scan&gt;.npz</code></td><td><a href="gdp-product-gains.html">Gains NPZ</a></td></tr>
+        <tr><td>CASA flags</td><td><code>--smode gains</code></td><td><code>gdp-gains-&lt;mode&gt;-&lt;scan&gt;_fV&lt;version&gt;.flg</code></td><td><a href="gdp-product-flags.html">Flag FLG</a></td></tr>
+        <tr><td>Antenna statistics</td><td><code>--smode stats</code></td><td><code>gdp-stats-&lt;mode&gt;-&lt;scan&gt;[_fV&lt;version&gt;].npz</code></td><td><a href="gdp-product-stats.html">Statistics NPZ</a></td></tr>
+        <tr><td>KS diagnostics</td><td><code>--smode ks</code></td><td><code>gdp-ks-&lt;mode&gt;-&lt;scan&gt;[_fV&lt;version&gt;].npz</code></td><td><a href="gdp-product-ks.html">KS NPZ</a></td></tr>
+        <tr><td>Self correlation</td><td><code>--smode self-corr</code></td><td><code>gdp-self-corr-&lt;mode&gt;-&lt;scan&gt;[_fV&lt;version&gt;].npz</code></td><td><a href="gdp-product-self-corr.html">Self-correlation NPZ</a></td></tr>
+        <tr><td>Cross correlation</td><td><code>--smode cross-corr</code></td><td><code>gdp-cross-corr-&lt;mode&gt;-&lt;scan&gt;[_fV&lt;version&gt;]-ant&lt;a1&gt;_&lt;a2&gt;-stokes&lt;s1&gt;&lt;s2&gt;-comp&lt;c1&gt;&lt;c2&gt;.npz</code></td><td><a href="gdp-product-cross-corr.html">Cross-correlation NPZ</a></td></tr>
+        <tr><td>Cross-correlation summary</td><td><code>--smode cross-corr</code> full matrix</td><td><code>gdp-cross-corr-&lt;mode&gt;-&lt;scan&gt;[_fV&lt;version&gt;]-summary.npz</code></td><td><a href="gdp-product-cross-corr.html">Cross-correlation NPZ</a></td></tr>
       </table>
       <p>The <code>&lt;scan&gt;</code> field is <code>scan1</code>, <code>scan2</code>, etc. by default. With <code>--combine-scans</code>, the field is <code>allscans</code> when no scan list is supplied, or <code>scan1-2</code>/<code>scan5</code> style when <code>--scan</code> is supplied. Default <code>gdp-stats</code> product names do not include channel selections or antenna selections. When <code>--use-flags</code> is applied to derived products, GDP appends <code>_fV&lt;version&gt;</code> before the extension, for example <code>gdp-stats-gain-scan17_fV1.npz</code>.</p>
-    </section>
-
-    <section>
-      <h2>Product Format Pages</h2>
-      <table>
-        <tr><th>Product</th><th>Format</th><th>Documentation</th></tr>
-        <tr><td>Gains samples</td><td>NPZ</td><td><a href="gdp-product-gains.html">gains NPZ format</a></td></tr>
-        <tr><td>Antenna statistics</td><td>NPZ</td><td><a href="gdp-product-stats.html">stats NPZ format</a></td></tr>
-        <tr><td>KS diagnostics</td><td>NPZ</td><td><a href="gdp-product-ks.html">KS NPZ format</a></td></tr>
-        <tr><td>Self correlation</td><td>NPZ</td><td><a href="gdp-product-self-corr.html">self-corr NPZ format</a></td></tr>
-        <tr><td>Cross correlation</td><td>NPZ</td><td><a href="gdp-product-cross-corr.html">cross-corr NPZ format</a></td></tr>
-      </table>
     </section>
 
     <section class="sample-plots" aria-labelledby="sample-plots">
